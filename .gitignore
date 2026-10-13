@@ -1,11 +1,14 @@
 # Dependencies
 node_modules/
+**/node_modules/
 .pnp
 .pnp.js
 
 # Production build artifacts
 dist/
+**/dist/
 build/
+**/build/
 
 # Logs
 npm-debug.log*

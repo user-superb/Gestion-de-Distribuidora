@@ -6,6 +6,27 @@ Coordinación y gestión logística de repartos para comercios de barrio: contro
 
 ---
 
+## Estructura del Repositorio
+
+El proyecto está organizado en una arquitectura desacoplada para alojar tanto la interfaz de usuario como los servicios de servidor:
+
+```text
+Gestion-de-Distribuidora/
+├── frontend/               # Aplicación web (React + TypeScript + Vite + Tailwind CSS)
+│   ├── src/
+│   │   ├── components/     # Componentes modulares (auth, common)
+│   │   ├── services/       # Servicios (authService tipado, listo para REST API)
+│   │   └── types/          # Modelos de datos TypeScript
+│   ├── package.json
+│   └── vite.config.ts
+├── backend/                # Servicios de API, base de datos y lógica de servidor
+│   └── README.md
+├── .gitignore
+└── README.md
+```
+
+---
+
 ## Módulo de Autenticación (Login)
 
 Implementado siguiendo estrictamente los lineamientos de UI/UX corporativo B2B (anti-AI look, split-screen asimétrico, diseño sobrio de back-office) y los criterios de aceptación de la Historia de Usuario:
@@ -31,16 +52,16 @@ Implementado siguiendo estrictamente los lineamientos de UI/UX corporativo B2B (
 
 ---
 
-## Ejecución del Proyecto
+## Cómo Ejecutar el Frontend
 
 ```bash
-# 1. Instalar dependencias
-npm install
+# 1. Ingresar al directorio del frontend
+cd frontend
 
-# 2. Iniciar servidor de desarrollo
+# 2. Iniciar el servidor de desarrollo
 npm run dev
 
 # 3. Compilar para producción (TypeScript + Vite)
 npm run build
 ```
-
+Acceder en el navegador a: `http://localhost:5173`
