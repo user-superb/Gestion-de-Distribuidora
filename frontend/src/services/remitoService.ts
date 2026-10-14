@@ -23,12 +23,17 @@ const INITIAL_REMITOS: Remito[] = [
 
 let mockRemitos: Remito[] = [...INITIAL_REMITOS];
 let mockVisitas: Visita[] = [];
+let cachedComercios: Comercio[] = [...MOCK_COMERCIOS];
+let cachedMarcas: Marca[] = [...MOCK_MARCAS];
+
+const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api';
 
 export const remitoService = {
-  getComercios: (): Comercio[] => MOCK_COMERCIOS,
-  getMarcas: (): Marca[] => MOCK_MARCAS,
-  getComercioById: (id: string): Comercio | undefined => MOCK_COMERCIOS.find((c) => c.id === id),
-  getMarcaById: (id: string): Marca | undefined => MOCK_MARCAS.find((m) => m.id === id),
+  // Síncronos (para tests y modo offline)
+  getComercios: (): Comercio[] => cachedComercios,
+  getMarcas: (): Marca[] => cachedMarcas,
+  getComercioById: (id: string): Comercio | undefined => cachedComercios.find((c) => c.id === id),
+  getMarcaById: (id: string): Marca | undefined => cachedMarcas.find((m) => m.id === id),
 
   getAllRemitos: (): Remito[] => [...mockRemitos],
   getRemitosPendientes: (): Remito[] => mockRemitos.filter((r) => r.estado === 'PENDIENTE'),
@@ -108,5 +113,128 @@ export const remitoService = {
   resetearDatosMock: (): void => {
     mockRemitos = [...INITIAL_REMITOS];
     mockVisitas = [];
+  },
+
+  // -------------------------------------------------------------
+  // MÉTODOS ASÍNCRONOS CONEXIÓN API REST (Con fallback automático)
+  // -------------------------------------------------------------
+  async checkBackend(): Promise<boolean> {
+    try {
+      const res = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(1500) });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
+  async getComerciosAsync(): Promise<Comercio[]> {
+    try {
+      const res = await fetch(`${API_BASE}/comercios`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        const data = await res.json();
+        cachedComercios = data;
+        return data;
+      }
+    } catch {
+      // Fallback
+    }
+    return remitoService.getComercios();
+  },
+
+  async getMarcasAsync(): Promise<Marca[]> {
+    try {
+      const res = await fetch(`${API_BASE}/marcas`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        const data = await res.json();
+        cachedMarcas = data;
+        return data;
+      }
+    } catch {
+      // Fallback
+    }
+    return remitoService.getMarcas();
+  },
+
+  async asignarComercioARemitoAsync(remitoId: string, nuevoComercioId: string): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/remitos/asignar-comercio`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ remitoId, nuevoComercioId }),
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) return;
+    } catch {
+      // Fallback
+    }
+    remitoService.asignarComercioARemito(remitoId, nuevoComercioId);
+  },
+
+  async getRemitosPendientesAsync(): Promise<Remito[]> {
+    try {
+      const res = await fetch(`${API_BASE}/remitos/pendientes`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) return await res.json();
+    } catch {
+      // Fallback
+    }
+    return remitoService.getRemitosPendientes();
+  },
+
+  async getVisitasAsync(): Promise<Visita[]> {
+    try {
+      const res = await fetch(`${API_BASE}/visitas`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) return await res.json();
+    } catch {
+      // Fallback
+    }
+    return remitoService.getVisitas();
+  },
+
+  async agruparEnVisitaAsync(
+    remitosIds: string[]
+  ): Promise<{ success: boolean; visita?: Visita; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/visitas/agrupar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ remitoIds: remitosIds }),
+        signal: AbortSignal.timeout(3000),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        return data;
+      }
+      if (data.error) {
+        return { success: false, error: data.error };
+      }
+    } catch {
+      // Fallback a lógica en memoria
+    }
+    return remitoService.agruparEnVisita(remitosIds);
+  },
+
+  async desagruparVisitaAsync(visitaId: string): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/visitas/${encodeURIComponent(visitaId)}`, {
+        method: 'DELETE',
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) return;
+    } catch {
+      // Fallback
+    }
+    remitoService.desagruparVisita(visitaId);
+  },
+
+  async resetearDatosAsync(): Promise<void> {
+    try {
+      await fetch(`${API_BASE}/demo/reset`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(3000),
+      });
+    } catch {
+      // Fallback
+    }
+    remitoService.resetearDatosMock();
   },
 };

@@ -12,22 +12,44 @@ import {
   RotateCcw,
   Layers,
   FileText,
+  Search,
+  X,
 } from 'lucide-react';
-import { Remito, Visita, Comercio } from '../../types/domain';
+import { Remito, Visita, Comercio, Marca } from '../../types/domain';
 import { remitoService } from '../../services/remitoService';
 
 export const AgrupadorRemitos: React.FC = () => {
   const [pendientes, setPendientes] = useState<Remito[]>([]);
   const [visitas, setVisitas] = useState<Visita[]>([]);
   const [comercios, setComercios] = useState<Comercio[]>([]);
+  const [marcas, setMarcas] = useState<Marca[]>([]);
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
+  const [busqueda, setBusqueda] = useState<string>('');
   const [ultimaVisitaId, setUltimaVisitaId] = useState<string | null>(null);
   const [mensaje, setMensaje] = useState<{ tipo: 'error' | 'exito'; texto: string } | null>(null);
+  const [backendConectado, setBackendConectado] = useState<boolean>(false);
 
-  const recargarDatos = () => {
-    setPendientes(remitoService.getRemitosPendientes());
-    setVisitas(remitoService.getVisitas());
-    setComercios(remitoService.getComercios());
+  const getComercio = (id: string) =>
+    comercios.find((c) => c.id === id) || remitoService.getComercioById(id);
+
+  const getMarca = (id: string) =>
+    marcas.find((m) => m.id === id) || remitoService.getMarcaById(id);
+
+  const recargarDatos = async () => {
+    const isOnline = await remitoService.checkBackend();
+    setBackendConectado(isOnline);
+
+    const [pend, vis, com, mar] = await Promise.all([
+      remitoService.getRemitosPendientesAsync(),
+      remitoService.getVisitasAsync(),
+      remitoService.getComerciosAsync(),
+      remitoService.getMarcasAsync(),
+    ]);
+
+    setPendientes(pend);
+    setVisitas(vis);
+    setComercios(com);
+    setMarcas(mar);
   };
 
   useEffect(() => {
@@ -41,9 +63,9 @@ export const AgrupadorRemitos: React.FC = () => {
     setMensaje(null);
   };
 
-  const handleCambiarComercio = (remitoId: string, nuevoComercioId: string) => {
-    remitoService.asignarComercioARemito(remitoId, nuevoComercioId);
-    recargarDatos();
+  const handleCambiarComercio = async (remitoId: string, nuevoComercioId: string) => {
+    await remitoService.asignarComercioARemitoAsync(remitoId, nuevoComercioId);
+    await recargarDatos();
     setMensaje(null);
   };
 
@@ -55,39 +77,58 @@ export const AgrupadorRemitos: React.FC = () => {
     setMensaje(null);
   };
 
-  const handleAgrupar = () => {
-    const result = remitoService.agruparEnVisita(Array.from(seleccionados));
+  const handleLimpiarSeleccion = () => {
+    setSeleccionados(new Set());
+    setMensaje(null);
+  };
+
+  const handleAgrupar = async () => {
+    const result = await remitoService.agruparEnVisitaAsync(Array.from(seleccionados));
 
     if (result.success && result.visita) {
-      const comercio = remitoService.getComercioById(result.visita.comercioId);
+      const comercio = getComercio(result.visita.comercioId);
       setUltimaVisitaId(result.visita.id);
       setMensaje({
         tipo: 'exito',
-        texto: `¡Agrupación exitosa! Se consolidaron ${seleccionados.size} remito(s) en la visita unificada para "${comercio?.razonSocial}" (ID: ${result.visita.comercioId}). Mirá el detalle en el panel derecho.`,
+        texto: `¡Agrupación exitosa! Se consolidaron ${seleccionados.size} remito(s) en la visita unificada para "${comercio?.razonSocial || result.visita.comercioId}" (ID: ${result.visita.comercioId}). Mirá el detalle en el panel derecho.`,
       });
-      recargarDatos();
+      await recargarDatos();
       setSeleccionados(new Set());
     } else {
       setMensaje({ tipo: 'error', texto: result.error || 'Error al agrupar remitos.' });
     }
   };
 
-  const handleDesagrupar = (visitaId: string) => {
-    remitoService.desagruparVisita(visitaId);
-    recargarDatos();
+  const handleDesagrupar = async (visitaId: string) => {
+    await remitoService.desagruparVisitaAsync(visitaId);
+    await recargarDatos();
     setMensaje({
       tipo: 'exito',
       texto: 'La visita fue desagrupada y sus remitos volvieron a la bandeja de pendientes.',
     });
   };
 
-  const handleResetDemo = () => {
-    remitoService.resetearDatosMock();
+  const handleResetDemo = async () => {
+    await remitoService.resetearDatosAsync();
     setSeleccionados(new Set());
     setUltimaVisitaId(null);
     setMensaje(null);
-    recargarDatos();
+    setBusqueda('');
+    await recargarDatos();
   };
+
+  // Filtrado reactivo de pendientes por texto (número de remito, marca o comercio)
+  const terminoBusqueda = busqueda.trim().toLowerCase();
+  const pendientesFiltrados = pendientes.filter((r) => {
+    if (!terminoBusqueda) return true;
+    const marca = getMarca(r.marcaId);
+    const comercio = getComercio(r.comercioId);
+    return (
+      r.numeroRemito.toLowerCase().includes(terminoBusqueda) ||
+      (marca && marca.nombre.toLowerCase().includes(terminoBusqueda)) ||
+      (comercio && comercio.razonSocial.toLowerCase().includes(terminoBusqueda))
+    );
+  });
 
   // Análisis en vivo de los remitos que el usuario tiene tildados actualmente
   const remitosSeleccionadosObj = pendientes.filter((r) => seleccionados.has(r.id));
@@ -100,9 +141,22 @@ export const AgrupadorRemitos: React.FC = () => {
       {/* Cabecera de la Historia de Usuario y Contadores */}
       <div className="bg-slate-900 text-white p-4 rounded-md flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 bg-blue-500/20 text-blue-300 border border-blue-400/30 rounded">
-            Épica 1.1 • Planificación de Hoja de Ruta
-          </span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 bg-blue-500/20 text-blue-300 border border-blue-400/30 rounded">
+              Épica 1.1 • Planificación de Hoja de Ruta
+            </span>
+            {backendConectado ? (
+              <span className="text-[10px] font-mono px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 rounded inline-flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                Backend SQLite Conectado (:3001)
+              </span>
+            ) : (
+              <span className="text-[10px] font-mono px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-400/30 rounded inline-flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                Modo Mock Local
+              </span>
+            )}
+          </div>
           <h2 className="text-sm font-semibold mt-1">
             Agrupación de Remitos por Comercio para Armar Visitas
           </h2>
@@ -162,26 +216,50 @@ export const AgrupadorRemitos: React.FC = () => {
             </span>
           </div>
 
-          {/* Botones de filtro rápido por comercio */}
+          {/* Barra de Búsqueda Rápida y Filtros */}
           {pendientes.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5 bg-slate-50 p-2 rounded border border-slate-200/80">
-              <span className="text-[11px] text-slate-600 font-medium mr-1">
-                Autoseleccionar por comercio:
-              </span>
-              {comercios.map((com) => {
-                const cant = pendientes.filter((r) => r.comercioId === com.id).length;
-                if (cant === 0) return null;
-                return (
+            <div className="space-y-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar por nro. remito, comercio o marca..."
+                  value={busqueda}
+                  onChange={(e) => setBusqueda(e.target.value)}
+                  className="w-full pl-8 pr-7 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white transition-all"
+                />
+                {busqueda && (
                   <button
-                    key={com.id}
                     type="button"
-                    onClick={() => handleSeleccionarPorComercio(com.id)}
-                    className="px-2 py-1 text-[11px] bg-white hover:bg-blue-50 hover:border-blue-300 text-slate-700 font-medium rounded border border-slate-300 transition-colors shadow-2xs"
+                    onClick={() => setBusqueda('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                    title="Limpiar búsqueda"
                   >
-                    {com.razonSocial} <span className="text-blue-600 font-bold">({cant})</span>
+                    <X className="w-3.5 h-3.5" />
                   </button>
-                );
-              })}
+                )}
+              </div>
+
+              {/* Botones de filtro rápido por comercio */}
+              <div className="flex flex-wrap items-center gap-1.5 bg-slate-50 p-2 rounded border border-slate-200/80">
+                <span className="text-[11px] text-slate-600 font-medium mr-1">
+                  Autoseleccionar por comercio:
+                </span>
+                {comercios.map((com) => {
+                  const cant = pendientes.filter((r) => r.comercioId === com.id).length;
+                  if (cant === 0) return null;
+                  return (
+                    <button
+                      key={com.id}
+                      type="button"
+                      onClick={() => handleSeleccionarPorComercio(com.id)}
+                      className="px-2 py-1 text-[11px] bg-white hover:bg-blue-50 hover:border-blue-300 text-slate-700 font-medium rounded border border-slate-300 transition-colors shadow-2xs"
+                    >
+                      {com.razonSocial} <span className="text-blue-600 font-bold">({cant})</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -197,9 +275,22 @@ export const AgrupadorRemitos: React.FC = () => {
                   Revisá las Visitas Consolidadas en la columna de la derecha o desagrupá alguna para seguir probando.
                 </p>
               </div>
+            ) : pendientesFiltrados.length === 0 ? (
+              <div className="border border-slate-200 rounded-md p-6 text-center space-y-1 bg-slate-50">
+                <div className="text-xs font-medium text-slate-700">
+                  No se encontraron remitos para "{busqueda}"
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setBusqueda('')}
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  Limpiar filtro de búsqueda
+                </button>
+              </div>
             ) : (
-              pendientes.map((remito) => {
-                const marca = remitoService.getMarcaById(remito.marcaId);
+              pendientesFiltrados.map((remito) => {
+                const marca = getMarca(remito.marcaId);
                 const isSelected = seleccionados.has(remito.id);
 
                 return (
@@ -225,7 +316,7 @@ export const AgrupadorRemitos: React.FC = () => {
                           </span>
                           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700 text-[10px] font-medium">
                             <Tag className="w-2.5 h-2.5 text-slate-500" />
-                            Proveedor: {marca?.nombre}
+                            Proveedor: {marca?.nombre || remito.marcaId}
                           </span>
                         </div>
                         <div className="text-[11px] text-slate-600">
@@ -248,7 +339,7 @@ export const AgrupadorRemitos: React.FC = () => {
                       >
                         {comercios.map((c) => (
                           <option key={c.id} value={c.id}>
-                            {c.razonSocial} ({c.id})
+                            {c.razonSocial} (ID: {c.id})
                           </option>
                         ))}
                       </select>
@@ -281,27 +372,45 @@ export const AgrupadorRemitos: React.FC = () => {
                     <span>
                       Destino común:{' '}
                       <strong>
-                        {remitoService.getComercioById(comerciosEnSeleccion[0])?.razonSocial} (
-                        {comerciosEnSeleccion[0]})
+                        {getComercio(comerciosEnSeleccion[0])?.razonSocial || comerciosEnSeleccion[0]} (ID: {comerciosEnSeleccion[0]})
                       </strong>
                     </span>
                   ) : (
                     <span className="text-amber-800 font-medium">
                       Atención: Seleccionaste remitos de {comerciosEnSeleccion.length} comercios
-                      distintos ({comerciosEnSeleccion.join(', ')}).
+                      distintos ({comerciosEnSeleccion.join(', ')}). La regla exige el mismo comercio.
                     </span>
                   )}
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={handleAgrupar}
-                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded shadow-xs transition-colors flex-shrink-0"
-              >
-                <span>Agrupar</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex items-center gap-2 self-end sm:self-center">
+                <button
+                  type="button"
+                  onClick={handleLimpiarSeleccion}
+                  className="px-2.5 py-1.5 text-xs text-slate-600 hover:text-slate-800 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors"
+                >
+                  Limpiar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAgrupar}
+                  disabled={!seleccionEsValida}
+                  className={`inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold rounded shadow-xs transition-colors flex-shrink-0 ${
+                    seleccionEsValida
+                      ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                      : 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-80'
+                  }`}
+                  title={
+                    !seleccionEsValida
+                      ? 'Solo se agrupan remitos que compartan exactamente el mismo identificador de comercio'
+                      : 'Consolidar documentos en una visita unificada'
+                  }
+                >
+                  <span>Agrupar</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -335,7 +444,7 @@ export const AgrupadorRemitos: React.FC = () => {
           ) : (
             <div className="space-y-3">
               {visitas.map((visita, index) => {
-                const comercio = remitoService.getComercioById(visita.comercioId);
+                const comercio = getComercio(visita.comercioId);
                 const esReciente = visita.id === ultimaVisitaId;
 
                 return (
@@ -361,10 +470,10 @@ export const AgrupadorRemitos: React.FC = () => {
                           )}
                         </div>
                         <div className="text-sm font-bold text-slate-900 mt-1">
-                          {comercio?.razonSocial}
+                          {comercio?.razonSocial || `Comercio #${visita.comercioId}`}
                         </div>
                         <div className="text-[11px] text-slate-600">
-                          {comercio?.domicilio} •{' '}
+                          {comercio?.domicilio || 'Domicilio registrado'} •{' '}
                           <span className="font-mono text-slate-500">ID: {visita.comercioId}</span>
                         </div>
                       </div>
@@ -386,7 +495,7 @@ export const AgrupadorRemitos: React.FC = () => {
                         Documentos Consolidados en este Envío ({visita.remitos.length})
                       </div>
                       {visita.remitos.map((r) => {
-                        const marca = remitoService.getMarcaById(r.marcaId);
+                        const marca = getMarca(r.marcaId);
                         return (
                           <div
                             key={r.id}
@@ -398,7 +507,7 @@ export const AgrupadorRemitos: React.FC = () => {
                                 {r.numeroRemito}
                               </span>
                               <span className="text-[11px] text-slate-500">
-                                ({marca?.nombre})
+                                ({marca?.nombre || r.marcaId})
                               </span>
                             </div>
                             <span className="font-mono font-medium text-slate-800">

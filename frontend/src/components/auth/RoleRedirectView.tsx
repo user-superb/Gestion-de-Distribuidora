@@ -10,7 +10,6 @@ import {
   Key,
   Clock,
   Smartphone,
-  CheckCircle2,
   Package,
 } from 'lucide-react';
 import { AgrupadorRemitos } from '../dashboard/AgrupadorRemitos';

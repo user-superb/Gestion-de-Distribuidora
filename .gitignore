@@ -33,3 +33,9 @@ Thumbs.db
 
 # TypeScript build info
 *.tsbuildinfo
+
+# Environment & local databases
+.env
+.env.local
+*.sqlite
+backend/data/

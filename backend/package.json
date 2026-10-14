@@ -1,0 +1,28 @@
+{
+  "name": "tutucas-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test": "tsx --test src/__tests__/remitoApi.test.ts",
+    "db:init": "tsx src/scripts/initDb.ts"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.23.1",
+    "pg-mem": "^3.0.14",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
