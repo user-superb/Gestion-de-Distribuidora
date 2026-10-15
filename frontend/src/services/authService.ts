@@ -1,187 +1,182 @@
-import { AuthResult, LoginCredentials, LockoutStatus, UserRole, UserSession } from '../types/auth';
+// frontend/src/services/authService.ts
+import { AuthResult, LoginCredentials, LockoutStatus, UserSession } from '../types/auth';
 
-/**
- * Usuarios de prueba preconfigurados para validar los diferentes roles del ERP Tutucas.
- */
-export const MOCK_USERS: Array<{
-  email: string;
-  username: string;
-  password: string;
-  name: string;
-  role: UserRole;
-  branch: string;
-  redirectUrl: string;
-}> = [
-  {
-    email: 'admin@tutucas.com.ar',
-    username: 'admin',
-    password: 'Password123!',
-    name: 'Martín Coordinador',
-    role: 'Administrativo',
-    branch: 'Sucursal Central - La Plata',
-    redirectUrl: '/dashboard',
-  },
-  {
-    email: 'chofer@tutucas.com.ar',
-    username: 'chofer',
-    password: 'Password123!',
-    name: 'Carlos Repartidor',
-    role: 'Transportista',
-    branch: 'Depósito Sur - Berisso',
-    redirectUrl: '/mobile-dispatch',
-  },
-  {
-    email: 'supervisor@tutucas.com.ar',
-    username: 'supervisor',
-    password: 'Password123!',
-    name: 'Valeria Logística',
-    role: 'Supervisor',
-    branch: 'Hub Central - Distribución',
-    redirectUrl: '/operations/routes',
-  },
-  {
-    email: 'gerencia@tutucas.com.ar',
-    username: 'gerencia',
-    password: 'Password123!',
-    name: 'Roberto Gerente',
-    role: 'Gerente',
-    branch: 'Sede Administrativa Central',
-    redirectUrl: '/management/metrics',
-  },
-];
-
-const MAX_FAILED_ATTEMPTS = 5;
-const STORAGE_KEY_ATTEMPTS = 'tutucas_auth_failed_attempts';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 const STORAGE_KEY_SESSION = 'tutucas_auth_session';
 
 class AuthService {
   private failedAttempts: number = 0;
-
-  constructor() {
-    this.loadState();
-  }
-
-  private loadState(): void {
-    try {
-      const stored = sessionStorage.getItem(STORAGE_KEY_ATTEMPTS);
-      if (stored) {
-        this.failedAttempts = parseInt(stored, 10) || 0;
-      }
-    } catch {
-      this.failedAttempts = 0;
-    }
-  }
-
-  private persistAttempts(): void {
-    try {
-      sessionStorage.setItem(STORAGE_KEY_ATTEMPTS, this.failedAttempts.toString());
-    } catch {
-      // Ignorar fallback en entornos sin storage
-    }
-  }
+  private isLocked: boolean = false;
 
   /**
    * Obtiene el estado actual de intentos y bloqueo
    */
   public getLockoutStatus(): LockoutStatus {
     return {
-      isLocked: this.failedAttempts >= MAX_FAILED_ATTEMPTS,
+      isLocked: this.isLocked,
       failedAttempts: this.failedAttempts,
-      maxAttempts: MAX_FAILED_ATTEMPTS,
+      maxAttempts: 5,
     };
   }
 
   /**
-   * Simula el proceso de autenticación con latencia de red controlada (600-800ms)
+   * Autenticación real contra el Backend PostgreSQL
    */
   public async login(credentials: LoginCredentials): Promise<AuthResult> {
-    // 1. Simulación de latencia de red realista
-    await new Promise((resolve) => setTimeout(resolve, 750));
-
-    // 2. Verificar si el usuario ya está bloqueado preventivamente
-    if (this.failedAttempts >= MAX_FAILED_ATTEMPTS) {
-      return {
-        success: false,
-        error: {
-          type: 'ACCOUNT_LOCKED',
-          message: 'Cuenta bloqueada preventivamente por reiterados intentos fallidos.',
-          remainingAttempts: 0,
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-      };
-    }
+        body: JSON.stringify({
+          identifier: credentials.identifier.trim(),
+          password: credentials.password,
+        }),
+      });
 
-    const cleanIdentifier = credentials.identifier.trim().toLowerCase();
-    const cleanPassword = credentials.password;
+      const data = await response.json();
 
-    // 3. Buscar coincidencia por email o username
-    const foundUser = MOCK_USERS.find(
-      (u) =>
-        (u.email.toLowerCase() === cleanIdentifier || u.username.toLowerCase() === cleanIdentifier) &&
-        u.password === cleanPassword
-    );
+      if (response.ok && data.success) {
+        // Éxito: Guardar sesión con token en sessionStorage
+        this.failedAttempts = 0;
+        this.isLocked = false;
 
-    // 4. Caso credenciales incorrectas
-    if (!foundUser) {
-      this.failedAttempts += 1;
-      this.persistAttempts();
+        try {
+          sessionStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(data.session));
+        } catch {
+          // Ignorar si storage está deshabilitado
+        }
 
-      const isNowLocked = this.failedAttempts >= MAX_FAILED_ATTEMPTS;
+        return {
+          success: true,
+          session: data.session,
+          redirectUrl: data.redirectUrl,
+        };
+      }
 
-      if (isNowLocked) {
+      // Si el backend reporta bloqueo preventivo (HTTP 423)
+      if (response.status === 423 || data.error?.type === 'ACCOUNT_LOCKED') {
+        this.isLocked = true;
+        this.failedAttempts = 5;
         return {
           success: false,
           error: {
             type: 'ACCOUNT_LOCKED',
-            message: 'Cuenta bloqueada preventivamente por reiterados intentos fallidos.',
+            message: data.error?.message || 'Cuenta bloqueada preventivamente por reiterados intentos fallidos.',
             remainingAttempts: 0,
           },
         };
       }
 
+      // Si fallaron las credenciales (HTTP 401)
+      this.failedAttempts += 1;
+      const remaining = data.error?.remainingAttempts ?? Math.max(0, 5 - this.failedAttempts);
+
+      if (this.failedAttempts >= 5) {
+        this.isLocked = true;
+      }
+
       return {
         success: false,
         error: {
-          type: 'INVALID_CREDENTIALS',
-          // Texto estricto requerido por el Criterio de Aceptación 2
-          message: 'Credenciales incorrectas',
-          remainingAttempts: MAX_FAILED_ATTEMPTS - this.failedAttempts,
+          type: this.isLocked ? 'ACCOUNT_LOCKED' : 'INVALID_CREDENTIALS',
+          // Criterio de aceptación 2: Texto exacto
+          message: this.isLocked
+            ? 'Cuenta bloqueada preventivamente por reiterados intentos fallidos.'
+            : (data.error?.message || 'Credenciales incorrectas'),
+          remainingAttempts: remaining,
+        },
+      };
+    } catch (err: any) {
+      console.error('Error al conectar con la API de autenticación:', err);
+      return {
+        success: false,
+        error: {
+          type: 'NETWORK_ERROR',
+          message: 'No se pudo conectar con el servidor backend. Verificá que el backend esté iniciado en http://localhost:3001.',
         },
       };
     }
+  }
 
-    // 5. Caso éxito: resetear intentos fallidos y generar token de sesión
-    this.failedAttempts = 0;
-    this.persistAttempts();
+  /**
+   * ESCENARIO 1: Cierre de sesión voluntario
+   * Revoca inmediatamente el token en PostgreSQL y limpia el almacenamiento local
+   */
+  public async logout(reason: 'manual' | 'inactividad' = 'manual'): Promise<void> {
+    const session = this.getCurrentSession();
+    const token = session?.token;
 
-    const timestamp = new Date().toISOString();
-    const simulatedToken = `tutucas_jwt_${btoa(`${foundUser.email}:${timestamp}`)}`;
-
-    const session: UserSession = {
-      id: `usr_${Math.random().toString(36).substring(2, 9)}`,
-      name: foundUser.name,
-      email: foundUser.email,
-      role: foundUser.role,
-      branch: foundUser.branch,
-      token: simulatedToken,
-      authenticatedAt: timestamp,
-    };
-
-    // Guardar en sesión
+    // 1. Limpieza inmediata de datos sensibles locales
     try {
-      sessionStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(session));
+      sessionStorage.removeItem(STORAGE_KEY_SESSION);
     } catch {
       // Ignorar fallback
     }
 
-    return {
-      success: true,
-      session,
-      redirectUrl: foundUser.redirectUrl,
-    };
+    // 2. Prevenir que el botón 'Atrás' del navegador vuelva a mostrar datos operativos
+    if (typeof window !== 'undefined' && window.history) {
+      window.history.replaceState(null, '', '/');
+    }
+
+    // 3. Notificar al backend para invalidación inmediata de la sesión en PostgreSQL
+    if (token) {
+      try {
+        await fetch(`${API_BASE_URL}/api/auth/logout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ token, reason }),
+        });
+      } catch (err) {
+        console.warn('Aviso: No se pudo notificar la revocación al backend (el cliente ya fue limpiado):', err);
+      }
+    }
   }
 
   /**
-   * Obtiene la sesión activa si existe
+   * ESCENARIO 2: Verificación de sesión activa contra PostgreSQL (detecta expiración por inactividad)
+   */
+  public async verifySession(): Promise<{ valid: boolean; session?: UserSession; expired?: boolean }> {
+    const session = this.getCurrentSession();
+    if (!session?.token) {
+      return { valid: false };
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/verify`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${session.token}`,
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        // Si expiró por inactividad o fue revocado
+        await this.logout('inactividad');
+        return {
+          valid: false,
+          expired: errorData.error?.type === 'SESSION_EXPIRED',
+        };
+      }
+
+      const data = await response.json();
+      return {
+        valid: data.valid,
+        session: data.session,
+      };
+    } catch {
+      // Si el backend no responde, conservar sesión local pero reportar
+      return { valid: true, session };
+    }
+  }
+
+  /**
+   * Obtiene la sesión activa si existe en sessionStorage
    */
   public getCurrentSession(): UserSession | null {
     try {
@@ -196,22 +191,20 @@ class AuthService {
   }
 
   /**
-   * Cierra sesión
-   */
-  public logout(): void {
-    try {
-      sessionStorage.removeItem(STORAGE_KEY_SESSION);
-    } catch {
-      // Fallback
-    }
-  }
-
-  /**
    * Restablece los intentos fallidos (para pruebas de QA y soporte)
    */
-  public resetLockout(): void {
+  public async resetLockout(): Promise<void> {
     this.failedAttempts = 0;
-    this.persistAttempts();
+    this.isLocked = false;
+    try {
+      await fetch(`${API_BASE_URL}/api/auth/reset-lockout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+    } catch {
+      // Ignorar fallback
+    }
   }
 }
 

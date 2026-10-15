@@ -4,16 +4,34 @@
 
 BEGIN;
 
--- 1. Sucursal
+-- 1. Sucursales
 INSERT INTO sucursal (nombre, domicilio, activa) VALUES
-  ('Sucursal Central - La Plata', 'Calle 12 N° 500, La Plata', true)
+  ('Sucursal Central - La Plata', 'Calle 12 N° 500, La Plata', true),
+  ('Depósito Sur - Berisso', 'Av. Río de la Plata 1240, Berisso', true),
+  ('Hub Central - Distribución', 'Ruta 2 Km 45, La Plata', true),
+  ('Sede Administrativa Central', 'Calle 7 N° 850, La Plata', true)
 ON CONFLICT (nombre) DO NOTHING;
 
--- 2. Usuarios
-INSERT INTO usuario (usuario, nombre, email, password_hash, es_transportista, activo) VALUES
-  ('admin', 'Martín Jirafales Coordinador', 'admin@tutucas.com.ar', '$2b$10$e8w67wK4jE52m1R0W3m2xeU6hH6Zt6lX6.Yy1tVn2z5c4m9l4d4dO', false, true),
-  ('chofer', 'Carlos Repartidor', 'chofer@tutucas.com.ar', '$2b$10$e8w67wK4jE52m1R0W3m2xeU6hH6Zt6lX6.Yy1tVn2z5c4m9l4d4dO', true, true)
+-- 2. Usuarios con roles para cada perfil operativo (Clave: Password123!)
+INSERT INTO usuario (usuario, nombre, email, password_hash, rol, es_transportista, activo) VALUES
+  ('admin', 'Martín Jirafales Coordinador', 'admin@tutucas.com.ar', '$2b$10$e3NYwqO7uVTBhE56XYXR3uKzT9pm6IVV/LnAfghzSx50r1FgP5HuO', 'Administrativo', false, true),
+  ('chofer', 'Carlos Repartidor', 'chofer@tutucas.com.ar', '$2b$10$e3NYwqO7uVTBhE56XYXR3uKzT9pm6IVV/LnAfghzSx50r1FgP5HuO', 'Transportista', true, true),
+  ('supervisor', 'Valeria Logística', 'supervisor@tutucas.com.ar', '$2b$10$e3NYwqO7uVTBhE56XYXR3uKzT9pm6IVV/LnAfghzSx50r1FgP5HuO', 'Supervisor', false, true),
+  ('gerencia', 'Roberto Gerente', 'gerencia@tutucas.com.ar', '$2b$10$e3NYwqO7uVTBhE56XYXR3uKzT9pm6IVV/LnAfghzSx50r1FgP5HuO', 'Gerente', false, true)
 ON CONFLICT (usuario) DO NOTHING;
+
+-- 2.1 Asignación Usuario - Sucursal
+INSERT INTO usuario_sucursal (usuario_id, sucursal_id)
+SELECT u.id, s.id
+FROM (VALUES
+  ('admin', 'Sucursal Central - La Plata'),
+  ('chofer', 'Depósito Sur - Berisso'),
+  ('supervisor', 'Hub Central - Distribución'),
+  ('gerencia', 'Sede Administrativa Central')
+) AS us(usuario_nom, sucursal_nom)
+JOIN usuario u ON u.usuario = us.usuario_nom
+JOIN sucursal s ON s.nombre = us.sucursal_nom
+ON CONFLICT (usuario_id, sucursal_id) DO NOTHING;
 
 -- 3. Marcas
 INSERT INTO marca (nombre, activa) VALUES

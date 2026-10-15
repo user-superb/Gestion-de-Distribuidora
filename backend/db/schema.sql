@@ -37,6 +37,7 @@ CREATE TABLE usuario (
     -- Hash de contraseña con bcrypt / scrypt / Argon2, NUNCA SHA-256.
     -- El salt va embebido en el string del algoritmo.
     password_hash   text        NOT NULL,
+    rol             text        NOT NULL DEFAULT 'Administrativo' CHECK (rol IN ('Administrativo', 'Transportista', 'Supervisor', 'Gerente')),
     es_transportista boolean    NOT NULL DEFAULT false,
     activo          boolean     NOT NULL DEFAULT true,
     creado_en       timestamptz NOT NULL DEFAULT now(),
@@ -49,6 +50,21 @@ CREATE TABLE usuario_sucursal (
     usuario_id      bigint NOT NULL REFERENCES usuario(id)  ON DELETE CASCADE,
     sucursal_id     bigint NOT NULL REFERENCES sucursal(id) ON DELETE CASCADE,
     PRIMARY KEY (usuario_id, sucursal_id)
+);
+
+-- Sesiones activas y tokens para autenticación, expiración por inactividad e invalidación/logout
+CREATE TABLE sesion_usuario (
+    id              text PRIMARY KEY,
+    usuario_id      bigint NOT NULL REFERENCES usuario(id) ON DELETE CASCADE,
+    token           text NOT NULL UNIQUE,
+    ip_address      text,
+    user_agent      text,
+    creado_en       timestamptz NOT NULL DEFAULT now(),
+    ultimo_acceso   timestamptz NOT NULL DEFAULT now(),
+    expira_en       timestamptz NOT NULL,
+    revocado        boolean NOT NULL DEFAULT false,
+    revocado_en     timestamptz,
+    motivo_cierre   text -- 'manual' | 'inactividad' | 'expirado'
 );
 
 -- Catálogo de acciones. Se agrega una fila por cada permiso nuevo del

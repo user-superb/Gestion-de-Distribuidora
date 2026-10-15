@@ -1,4 +1,3 @@
-// src/components/auth/RoleRedirectView.tsx
 import React from 'react';
 import { UserSession } from '../../types/auth';
 import {
@@ -6,13 +5,13 @@ import {
   Building2,
   ShieldCheck,
   BarChart3,
-  LogOut,
   Key,
   Clock,
   Smartphone,
   Package,
 } from 'lucide-react';
 import { AgrupadorRemitos } from '../dashboard/AgrupadorRemitos';
+import { ProfileMenu } from './ProfileMenu';
 
 interface RoleRedirectViewProps {
   session: UserSession;
@@ -68,21 +67,15 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
           isAdmin ? 'max-w-5xl' : 'max-w-2xl'
         } bg-white border border-slate-200 rounded-md shadow-sm overflow-hidden`}
       >
-        {/* Cabecera de Simulación de Redirección */}
-        <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
+        {/* Cabecera institucional con Menú de Perfil (Escenario 1) */}
+        <div className="bg-slate-900 text-white px-6 py-3.5 flex items-center justify-between border-b border-slate-800">
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
             <span className="text-sm font-semibold tracking-wide">
-              Sesión Activa - Gestión de Distribuidora Tutucas
+              Gestión de Distribuidora - Tutucas
             </span>
           </div>
-          <button
-            onClick={onLogout}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-medium rounded transition-colors"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Cerrar sesión</span>
-          </button>
+          <ProfileMenu session={session} onLogout={onLogout} />
         </div>
 
         <div className="p-6 space-y-6">

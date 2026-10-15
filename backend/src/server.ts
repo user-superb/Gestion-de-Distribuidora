@@ -4,6 +4,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { db } from './db.js';
 import { remitoRouter } from './routes/remitoRoutes.js';
+import { authRouter } from './routes/authRoutes.js';
 
 dotenv.config();
 
@@ -20,11 +21,12 @@ app.get('/api/health', async (_req, res) => {
   res.json({
     status: 'ok',
     service: 'Tutucas Distribuidora API',
-    database: dbConnected ? 'PostgreSQL Conectado' : 'PostgreSQL Desconectado',
+    database: dbConnected ? (db.isMemory() ? 'PostgreSQL In-Memory (pg-mem)' : 'PostgreSQL Conectado') : 'PostgreSQL Desconectado',
     timestamp: new Date().toISOString(),
   });
 });
 
+app.use('/api', authRouter);
 app.use('/api', remitoRouter);
 
 // Iniciar servidor solo si no estamos importando para testing
