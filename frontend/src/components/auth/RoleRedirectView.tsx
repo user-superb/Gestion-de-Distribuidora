@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { UserSession } from '../../types/auth';
 import {
   Truck,
@@ -9,8 +9,13 @@ import {
   Clock,
   Smartphone,
   Package,
+  Route,
+  Landmark,
+  Banknote,
+  ChartNoAxesCombined,
 } from 'lucide-react';
 import { AgrupadorRemitos } from '../dashboard/AgrupadorRemitos';
+import { ConciliadorMovimientos } from '../dashboard/ConciliadorMovimientos';
 import { ProfileMenu } from './ProfileMenu';
 
 interface RoleRedirectViewProps {
@@ -24,6 +29,18 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
   redirectUrl,
   onLogout,
 }) => {
+  const [seccion, setSeccion] = useState<'hojas' | 'conciliacion'>(() =>
+    window.location.pathname.endsWith('/conciliacion') ? 'conciliacion' : 'hojas'
+  );
+
+  useEffect(() => {
+    const syncSection = () => setSeccion(
+      window.location.pathname.endsWith('/conciliacion') ? 'conciliacion' : 'hojas'
+    );
+    window.addEventListener('popstate', syncSection);
+    return () => window.removeEventListener('popstate', syncSection);
+  }, []);
+
   const getRoleBadge = () => {
     switch (session.role) {
       case 'Administrativo':
@@ -59,6 +76,84 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
 
   const badge = getRoleBadge();
   const isAdmin = session.role === 'Administrativo';
+
+  const navigate = (next: 'hojas' | 'conciliacion') => {
+    const path = next === 'conciliacion' ? '/dashboard/conciliacion' : '/dashboard';
+    if (window.location.pathname !== path) window.history.pushState(null, '', path);
+    setSeccion(next);
+  };
+
+  if (isAdmin) {
+    const navItems = [
+      { id: 'hojas' as const, label: 'Hojas de ruta', icon: Route, path: '/dashboard' },
+      { id: 'conciliacion' as const, label: 'Conciliación', icon: Landmark, path: '/dashboard/conciliacion' },
+    ];
+
+    return (
+      <div className="min-h-screen bg-slate-100">
+        <header className="bg-slate-900 text-white shadow-sm">
+          <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center gap-x-8 gap-y-3 px-4 py-3 sm:px-6">
+            <div className="flex shrink-0 items-center gap-2 text-xs font-bold tracking-[0.16em]">
+              <Package className="h-5 w-5 text-emerald-400" />
+              <span>DISTRIBUIDORA</span>
+            </div>
+
+            <nav aria-label="Navegación principal" className="order-3 flex w-full gap-1 overflow-x-auto sm:order-2 sm:w-auto">
+              {navItems.map(({ id, label, icon: Icon, path }) => (
+                <a
+                  key={id}
+                  href={path}
+                  aria-current={seccion === id ? 'page' : undefined}
+                  onClick={(event) => { event.preventDefault(); navigate(id); }}
+                  className={`flex shrink-0 items-center gap-2 border-b-2 px-3 py-2 text-sm transition-colors ${
+                    seccion === id
+                      ? 'border-emerald-400 text-white'
+                      : 'border-transparent text-slate-400 hover:border-slate-500 hover:text-white'
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </a>
+              ))}
+              {[
+                { label: 'Efectivo', icon: Banknote },
+                { label: 'Reportes', icon: ChartNoAxesCombined },
+              ].map(({ label, icon: Icon }) => (
+                <span key={label} aria-disabled="true" title="Módulo aún no disponible" className="flex shrink-0 cursor-not-allowed items-center gap-2 border-b-2 border-transparent px-3 py-2 text-sm text-slate-600">
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </span>
+              ))}
+            </nav>
+
+            <div className="ml-auto flex items-center gap-4 sm:order-3">
+              <div className="hidden items-center gap-2 text-xs text-slate-300 md:flex">
+                <Building2 className="h-4 w-4 text-slate-400" />
+                <span>{session.branch}</span>
+              </div>
+              <ProfileMenu session={session} onLogout={onLogout} />
+            </div>
+          </div>
+        </header>
+
+        <main className="mx-auto max-w-screen-2xl px-4 py-6 sm:px-6 lg:py-8">
+          <div className="mb-5">
+            <h1 className="text-xl font-semibold text-slate-900">
+              {seccion === 'hojas' ? 'Armado de hoja de ruta' : 'Conciliación de transferencias'}
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              {seccion === 'hojas'
+                ? 'Organizá los remitos y las visitas de reparto.'
+                : 'Imputá los movimientos de la cuenta a los remitos pendientes.'}
+            </p>
+          </div>
+          {seccion === 'hojas'
+            ? <AgrupadorRemitos />
+            : <ConciliadorMovimientos session={session} />}
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 selection:bg-slate-900 selection:text-white">
@@ -109,6 +204,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
 
           {/* Módulo de Administrativo: Agrupador de Remitos en Visitas */}
           {isAdmin && <AgrupadorRemitos />}
+          {isAdmin && <ConciliadorMovimientos session={session} />}
 
           {/* Si es transportista, mostramos la simulación de acceso móvil */}
           {session.role === 'Transportista' && (
