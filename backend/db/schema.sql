@@ -37,12 +37,15 @@ CREATE TABLE usuario (
     -- Hash de contraseña con bcrypt / scrypt / Argon2, NUNCA SHA-256.
     -- El salt va embebido en el string del algoritmo.
     password_hash   text        NOT NULL,
-    rol             text        NOT NULL DEFAULT 'Administrativo' CHECK (rol IN ('Administrativo', 'Transportista', 'Supervisor', 'Gerente')),
+    rol             text        NOT NULL DEFAULT 'Administrativo' CHECK (rol IN ('Administrador del sistema', 'Administrativo', 'Transportista', 'Supervisor', 'Gerente')),
     es_transportista boolean    NOT NULL DEFAULT false,
     activo          boolean     NOT NULL DEFAULT true,
     creado_en       timestamptz NOT NULL DEFAULT now(),
     actualizado_en  timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX usuario_nombre_login_unico ON usuario (lower(usuario));
+CREATE UNIQUE INDEX usuario_email_login_unico ON usuario (lower(email)) WHERE email IS NOT NULL;
 
 -- Un usuario puede operar sobre varias sucursales. El cliente pidió
 -- explícitamente que el alcance sea configurable y no se deduzca del cargo.
@@ -80,6 +83,15 @@ CREATE TABLE usuario_permiso (
     otorgado_en     timestamptz NOT NULL DEFAULT now(),
     otorgado_por    bigint REFERENCES usuario(id),
     PRIMARY KEY (usuario_id, permiso_codigo)
+);
+
+CREATE TABLE usuario_sucursal_permiso (
+    usuario_id      bigint NOT NULL,
+    sucursal_id     bigint NOT NULL,
+    permiso_codigo  text   NOT NULL REFERENCES permiso(codigo) ON DELETE CASCADE,
+    PRIMARY KEY (usuario_id, sucursal_id, permiso_codigo),
+    FOREIGN KEY (usuario_id, sucursal_id)
+        REFERENCES usuario_sucursal(usuario_id, sucursal_id) ON DELETE CASCADE
 );
 
 

@@ -15,16 +15,23 @@ ON CONFLICT (nombre) DO NOTHING;
 -- 2. Usuarios con roles para cada perfil operativo (Clave: Password123!)
 INSERT INTO usuario (usuario, nombre, email, password_hash, rol, es_transportista, activo) VALUES
   ('admin', 'Martín Jirafales Coordinador', 'admin@tutucas.com.ar', '$2b$10$e3NYwqO7uVTBhE56XYXR3uKzT9pm6IVV/LnAfghzSx50r1FgP5HuO', 'Administrativo', false, true),
+  ('admin_sistema', 'Administrador del Sistema', 'admin.sistema@tutucas.com.ar', '$2b$10$e3NYwqO7uVTBhE56XYXR3uKzT9pm6IVV/LnAfghzSx50r1FgP5HuO', 'Administrador del sistema', false, true),
   ('chofer', 'Carlos Repartidor', 'chofer@tutucas.com.ar', '$2b$10$e3NYwqO7uVTBhE56XYXR3uKzT9pm6IVV/LnAfghzSx50r1FgP5HuO', 'Transportista', true, true),
   ('supervisor', 'Valeria Logística', 'supervisor@tutucas.com.ar', '$2b$10$e3NYwqO7uVTBhE56XYXR3uKzT9pm6IVV/LnAfghzSx50r1FgP5HuO', 'Supervisor', false, true),
   ('gerencia', 'Roberto Gerente', 'gerencia@tutucas.com.ar', '$2b$10$e3NYwqO7uVTBhE56XYXR3uKzT9pm6IVV/LnAfghzSx50r1FgP5HuO', 'Gerente', false, true)
 ON CONFLICT (usuario) DO NOTHING;
+
+-- Corrige la cuenta demo existente si se ejecutó una migración anterior que la elevaba.
+UPDATE usuario
+SET rol = 'Administrativo', actualizado_en = now()
+WHERE usuario = 'admin' AND email = 'admin@tutucas.com.ar';
 
 -- 2.1 Asignación Usuario - Sucursal
 INSERT INTO usuario_sucursal (usuario_id, sucursal_id)
 SELECT u.id, s.id
 FROM (VALUES
   ('admin', 'Sucursal Central - La Plata'),
+  ('admin_sistema', 'Sucursal Central - La Plata'),
   ('chofer', 'Depósito Sur - Berisso'),
   ('supervisor', 'Hub Central - Distribución'),
   ('gerencia', 'Sede Administrativa Central')

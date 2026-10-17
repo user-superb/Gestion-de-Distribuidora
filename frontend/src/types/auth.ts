@@ -1,4 +1,4 @@
-export type UserRole = 'Administrativo' | 'Transportista' | 'Supervisor' | 'Gerente';
+export type UserRole = 'Administrador del sistema' | 'Administrativo' | 'Transportista' | 'Supervisor' | 'Gerente';
 
 export interface UserSession {
   id: string;

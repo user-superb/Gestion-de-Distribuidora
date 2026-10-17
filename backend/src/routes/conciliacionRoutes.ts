@@ -5,7 +5,7 @@ import { ConciliacionError, conciliacionService } from '../services/conciliacion
 export const conciliacionRouter = Router();
 
 conciliacionRouter.use(requireAuth, (req: Request, res: Response, next: NextFunction) => {
-  if ((req as any).userSession?.role !== 'Administrativo') {
+  if (!['Administrativo', 'Administrador del sistema'].includes((req as any).userSession?.role)) {
     return res.status(403).json({ error: 'FORBIDDEN', message: 'Solo un usuario administrativo puede conciliar movimientos.' });
   }
   next();

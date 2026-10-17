@@ -14,7 +14,7 @@ export interface UserSessionData {
   id: string;
   name: string;
   email: string;
-  role: 'Administrativo' | 'Transportista' | 'Supervisor' | 'Gerente';
+  role: 'Administrador del sistema' | 'Administrativo' | 'Transportista' | 'Supervisor' | 'Gerente';
   branch: string;
   token: string;
   authenticatedAt: string;
@@ -124,6 +124,7 @@ export const authService = {
 
       // 7. Determinar redirección según rol
       const redirectMap: Record<string, string> = {
+        'Administrador del sistema': '/dashboard',
         Administrativo: '/dashboard',
         Transportista: '/mobile-dispatch',
         Supervisor: '/operations/routes',

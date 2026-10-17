@@ -50,6 +50,26 @@ function setupMemoryDb() {
       PRIMARY KEY (usuario_id, sucursal_id)
     );
 
+    CREATE TABLE IF NOT EXISTS permiso (codigo text PRIMARY KEY, descripcion text NOT NULL);
+
+    CREATE TABLE IF NOT EXISTS usuario_sucursal_permiso (
+      usuario_id bigint NOT NULL,
+      sucursal_id bigint NOT NULL,
+      permiso_codigo text NOT NULL,
+      PRIMARY KEY (usuario_id, sucursal_id, permiso_codigo)
+    );
+
+    CREATE TABLE IF NOT EXISTS cuenta_recepcion (
+      id serial PRIMARY KEY,
+      sucursal_id bigint NOT NULL,
+      alias text NOT NULL,
+      cbu char(22),
+      banco text,
+      activa boolean NOT NULL DEFAULT true,
+      creado_en timestamp DEFAULT now(),
+      UNIQUE (sucursal_id, alias)
+    );
+
     CREATE TABLE IF NOT EXISTS sesion_usuario (
       id text PRIMARY KEY,
       usuario_id bigint NOT NULL,
@@ -67,6 +87,7 @@ function setupMemoryDb() {
     CREATE TABLE IF NOT EXISTS marca (
       id serial PRIMARY KEY,
       nombre text NOT NULL UNIQUE,
+      cuit char(11),
       activa boolean NOT NULL DEFAULT true,
       creado_en timestamp DEFAULT now()
     );
@@ -74,9 +95,14 @@ function setupMemoryDb() {
     CREATE TABLE IF NOT EXISTS comercio (
       id serial PRIMARY KEY,
       razon_social text NOT NULL,
+      nombre_fantasia text,
+      cuit char(11),
       domicilio text NOT NULL,
       localidad text,
-      activo boolean NOT NULL DEFAULT true
+      contacto text,
+      telefono text,
+      activo boolean NOT NULL DEFAULT true,
+      actualizado_en timestamp DEFAULT now()
     );
 
     CREATE TABLE IF NOT EXISTS visita (
@@ -103,6 +129,22 @@ function setupMemoryDb() {
   const hash = bcryptjs.hashSync('Password123!', 10);
 
   mem.public.none(`
+    INSERT INTO permiso (codigo, descripcion) VALUES
+      ('comercio.ver', 'Consultar comercios'),
+      ('comercio.editar', 'Dar de alta y modificar comercios'),
+      ('archivo.importar', 'Importar archivos de proveedor'),
+      ('excepcion.resolver', 'Resolver excepciones de importación'),
+      ('hoja_ruta.armar', 'Armar y ordenar hojas de ruta'),
+      ('hoja_ruta.publicar', 'Publicar una hoja de ruta al transportista'),
+      ('remito.cargar', 'Cargar entregas manuales'),
+      ('cobro.registrar', 'Registrar cobros desde la aplicación móvil'),
+      ('imputacion.crear', 'Imputar cobros a remitos'),
+      ('imputacion.anular', 'Anular una imputación existente'),
+      ('efectivo.validar', 'Validar la rendición física de efectivo'),
+      ('liquidacion.generar', 'Generar liquidaciones a las marcas'),
+      ('reporte.ver', 'Consultar reportes e indicadores'),
+      ('usuario.administrar', 'Administrar usuarios y permisos');
+
     INSERT INTO sucursal (id, nombre, domicilio) VALUES
       (1, 'Sucursal Central - La Plata', 'Calle 12 N° 500, La Plata'),
       (2, 'Depósito Sur - Berisso', 'Av. Río de la Plata 1240, Berisso'),
@@ -114,15 +156,21 @@ function setupMemoryDb() {
       (1, 'admin', 'Martín Jirafales Coordinador', 'admin@tutucas.com.ar', '${hash}', 'Administrativo', false, true),
       (2, 'chofer', 'Carlos Repartidor', 'chofer@tutucas.com.ar', '${hash}', 'Transportista', true, true),
       (3, 'supervisor', 'Valeria Logística', 'supervisor@tutucas.com.ar', '${hash}', 'Supervisor', false, true),
-      (4, 'gerencia', 'Roberto Gerente', 'gerencia@tutucas.com.ar', '${hash}', 'Gerente', false, true)
+      (4, 'gerencia', 'Roberto Gerente', 'gerencia@tutucas.com.ar', '${hash}', 'Gerente', false, true),
+      (5, 'admin_sistema', 'Administrador del Sistema', 'admin.sistema@tutucas.com.ar', '${hash}', 'Administrador del sistema', false, true)
     ON CONFLICT (usuario) DO NOTHING;
 
     INSERT INTO usuario_sucursal (usuario_id, sucursal_id) VALUES
       (1, 1),
       (2, 2),
       (3, 3),
-      (4, 4)
+      (4, 4),
+      (5, 1)
     ON CONFLICT (usuario_id, sucursal_id) DO NOTHING;
+
+    INSERT INTO cuenta_recepcion (sucursal_id, alias, banco)
+    SELECT id, 'Cuenta operativa demo', 'Banco Demo' FROM sucursal WHERE nombre = 'Sucursal Central - La Plata'
+    ON CONFLICT (sucursal_id, alias) DO NOTHING;
 
     INSERT INTO marca (id, nombre) VALUES
       (1, 'Lácteos del Sur'),

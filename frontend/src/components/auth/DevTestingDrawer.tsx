@@ -26,6 +26,13 @@ const SEED_USERS_DB: Array<{
     branch: 'Sucursal Central - La Plata',
   },
   {
+    email: 'admin.sistema@tutucas.com.ar',
+    password: 'Password123!',
+    name: 'Administrador del Sistema',
+    role: 'Administrador del sistema',
+    branch: 'Sucursal Central - La Plata',
+  },
+  {
     email: 'chofer@tutucas.com.ar',
     password: 'Password123!',
     name: 'Carlos Repartidor',
@@ -127,7 +134,7 @@ export const DevTestingDrawer: React.FC<DevTestingDrawerProps> = ({
               <span>Roles en PostgreSQL</span>
             </div>
             <div className="grid grid-cols-2 gap-1.5">
-              {(['Administrativo', 'Transportista', 'Supervisor', 'Gerente'] as UserRole[]).map(
+              {(['Administrador del sistema', 'Administrativo', 'Transportista', 'Supervisor', 'Gerente'] as UserRole[]).map(
                 (role) => (
                   <button
                     key={role}

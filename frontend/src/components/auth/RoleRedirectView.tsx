@@ -13,9 +13,11 @@ import {
   Landmark,
   Banknote,
   ChartNoAxesCombined,
+  Settings,
 } from 'lucide-react';
 import { AgrupadorRemitos } from '../dashboard/AgrupadorRemitos';
 import { ConciliadorMovimientos } from '../dashboard/ConciliadorMovimientos';
+import { Configuracion } from '../dashboard/Configuracion';
 import { ProfileMenu } from './ProfileMenu';
 
 interface RoleRedirectViewProps {
@@ -29,20 +31,36 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
   redirectUrl,
   onLogout,
 }) => {
-  const [seccion, setSeccion] = useState<'hojas' | 'conciliacion'>(() =>
-    window.location.pathname.endsWith('/conciliacion') ? 'conciliacion' : 'hojas'
-  );
+  type Seccion = 'hojas' | 'conciliacion' | 'configuracion';
+  const [seccion, setSeccion] = useState<Seccion>(() => {
+    const path = window.location.pathname;
+    if (path.endsWith('/conciliacion')) return 'conciliacion';
+    if ((path.endsWith('/configuracion') || path.endsWith('/usuarios')) && session.role === 'Administrador del sistema') return 'configuracion';
+    return 'hojas';
+  });
 
   useEffect(() => {
-    const syncSection = () => setSeccion(
-      window.location.pathname.endsWith('/conciliacion') ? 'conciliacion' : 'hojas'
-    );
+    const syncSection = () => {
+      const path = window.location.pathname;
+      setSeccion(path.endsWith('/conciliacion')
+        ? 'conciliacion'
+        : (path.endsWith('/configuracion') || path.endsWith('/usuarios')) && session.role === 'Administrador del sistema'
+          ? 'configuracion'
+          : 'hojas');
+    };
     window.addEventListener('popstate', syncSection);
     return () => window.removeEventListener('popstate', syncSection);
-  }, []);
+  }, [session.role]);
 
   const getRoleBadge = () => {
     switch (session.role) {
+      case 'Administrador del sistema':
+        return {
+          icon: <ShieldCheck className="w-4 h-4 text-indigo-600" />,
+          color: 'bg-indigo-50 border-indigo-200 text-indigo-800',
+          title: 'Administrador del sistema',
+          desc: 'Administración de usuarios, roles y sucursales, además de acceso a los módulos administrativos.',
+        };
       case 'Administrativo':
         return {
           icon: <Building2 className="w-4 h-4 text-blue-600" />,
@@ -75,10 +93,10 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
   };
 
   const badge = getRoleBadge();
-  const isAdmin = session.role === 'Administrativo';
+  const isAdmin = session.role === 'Administrativo' || session.role === 'Administrador del sistema';
 
-  const navigate = (next: 'hojas' | 'conciliacion') => {
-    const path = next === 'conciliacion' ? '/dashboard/conciliacion' : '/dashboard';
+  const navigate = (next: Seccion) => {
+    const path = next === 'conciliacion' ? '/dashboard/conciliacion' : next === 'configuracion' ? '/dashboard/configuracion' : '/dashboard';
     if (window.location.pathname !== path) window.history.pushState(null, '', path);
     setSeccion(next);
   };
@@ -87,6 +105,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
     const navItems = [
       { id: 'hojas' as const, label: 'Hojas de ruta', icon: Route, path: '/dashboard' },
       { id: 'conciliacion' as const, label: 'Conciliación', icon: Landmark, path: '/dashboard/conciliacion' },
+      ...(session.role === 'Administrador del sistema' ? [{ id: 'configuracion' as const, label: 'Configuración', icon: Settings, path: '/dashboard/configuracion' }] : []),
     ];
 
     return (
@@ -139,17 +158,19 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
         <main className="mx-auto max-w-screen-2xl px-4 py-6 sm:px-6 lg:py-8">
           <div className="mb-5">
             <h1 className="text-xl font-semibold text-slate-900">
-              {seccion === 'hojas' ? 'Armado de hoja de ruta' : 'Conciliación de transferencias'}
+              {seccion === 'hojas' ? 'Armado de hoja de ruta' : seccion === 'conciliacion' ? 'Conciliación de transferencias' : 'Configuración'}
             </h1>
             <p className="mt-1 text-sm text-slate-500">
               {seccion === 'hojas'
                 ? 'Organizá los remitos y las visitas de reparto.'
-                : 'Imputá los movimientos de la cuenta a los remitos pendientes.'}
+                : seccion === 'conciliacion' ? 'Imputá los movimientos de la cuenta a los remitos pendientes.' : 'Administrá usuarios, marcas, comercios, sucursales y permisos.'}
             </p>
           </div>
           {seccion === 'hojas'
             ? <AgrupadorRemitos />
-            : <ConciliadorMovimientos session={session} />}
+            : seccion === 'conciliacion'
+              ? <ConciliadorMovimientos session={session} />
+              : <Configuracion session={session} />}
         </main>
       </div>
     );

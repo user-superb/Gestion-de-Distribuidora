@@ -32,13 +32,13 @@ export interface Visita {
 export const remitoService = {
   async getComercios(): Promise<Comercio[]> {
     const res = await db.query(
-      'SELECT id::text as id, razon_social as "razonSocial", domicilio FROM comercio ORDER BY id'
+      'SELECT id::text as id, razon_social as "razonSocial", domicilio FROM comercio WHERE activo = true ORDER BY id'
     );
     return res.rows;
   },
 
   async getMarcas(): Promise<Marca[]> {
-    const res = await db.query('SELECT id::text as id, nombre FROM marca ORDER BY id');
+    const res = await db.query('SELECT id::text as id, nombre FROM marca WHERE activa = true ORDER BY id');
     return res.rows;
   },
 
