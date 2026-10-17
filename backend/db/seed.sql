@@ -53,6 +53,8 @@ SELECT m.id, c.id, s.id, r.numero, r.importe_centavos, 'pendiente'
 FROM (VALUES
   ('Lácteos del Sur', 'Mayorista El Sol S.R.L.', 'R-0001-45120', 15000000::bigint),
   ('Bebidas Nacionales', 'Mayorista El Sol S.R.L.', 'R-0002-89310', 700000::bigint),
+  ('Lácteos del Sur', 'Mayorista El Sol S.R.L.', 'R-0001-45122', 10000000::bigint),
+  ('Bebidas Nacionales', 'Mayorista El Sol S.R.L.', 'R-0002-89311', 5700000::bigint),
   ('Lácteos del Sur', 'Autoservicio Luna', 'R-0001-45121', 6200000::bigint),
   ('Alimentos Río de la Plata', 'Autoservicio Luna', 'R-0003-11200', 11000000::bigint),
   ('Bebidas Nacionales', 'Distribuidora Los Andes', 'R-0002-89315', 9400000::bigint)
@@ -61,5 +63,39 @@ JOIN marca m ON m.nombre = r.marca_nombre
 JOIN comercio c ON c.razon_social = r.comercio_nombre
 JOIN sucursal s ON s.nombre = 'Sucursal Central - La Plata'
 ON CONFLICT (marca_id, numero) DO NOTHING;
+
+-- Remitos entregados de ejemplo para la bandeja de cobranza y conciliación exacta.
+UPDATE remito SET estado = 'entregado', entregado_en = now() - interval '12 days'
+WHERE numero IN ('R-0001-45120', 'R-0002-89310', 'R-0001-45122', 'R-0002-89311');
+
+-- 6. Movimientos bancarios de ejemplo para probar E5-04
+INSERT INTO cuenta_recepcion (sucursal_id, alias, banco)
+SELECT id, 'Cuenta operativa demo', 'Banco Demo'
+FROM sucursal
+WHERE nombre = 'Sucursal Central - La Plata'
+ON CONFLICT (sucursal_id, alias) DO NOTHING;
+
+INSERT INTO movimiento_bancario (cuenta_id, fecha_hora, ordenante, referencia_externa, importe_centavos)
+SELECT cr.id, now(), c.razon_social, demo.referencia, demo.importe_centavos
+FROM cuenta_recepcion cr
+JOIN sucursal s ON s.id = cr.sucursal_id
+CROSS JOIN (VALUES
+  ('Mayorista El Sol S.R.L.', 'DEMO-E5-04-001', 15700000::bigint), -- exacto: R-0001-45120 + R-0002-89310
+  ('Mayorista El Sol S.R.L.', 'DEMO-E5-04-002', 15600000::bigint), -- movimiento corto: diferencia de -$1.000
+  ('Mayorista El Sol S.R.L.', 'DEMO-E5-04-003', 15800000::bigint), -- movimiento excedido: diferencia de +$1.000
+  ('Autoservicio Luna',      'DEMO-E5-04-004', 15700000::bigint), -- ordenante distinto al de esos dos remitos
+  ('Mayorista El Sol S.R.L.', 'DEMO-E5-04-005', 15700000::bigint), -- repetir tras conciliar 001: remitos ya saldados
+  ('Mayorista El Sol S.R.L.', 'DEMO-E5-04-006', 15700000::bigint), -- exacto para probar HU sin reutilizar remitos saldados
+  ('Mayorista El Sol S.R.L.', 'DEMO-E5-04-007', 5000000::bigint), -- primer pago parcial de R-0001-45122
+  ('Mayorista El Sol S.R.L.', 'DEMO-E5-04-008', 5000000::bigint)  -- segundo pago completa ese remito
+) AS demo(ordenante, referencia, importe_centavos)
+JOIN comercio c ON c.razon_social = demo.ordenante
+WHERE s.nombre = 'Sucursal Central - La Plata'
+  AND cr.sucursal_id = s.id
+  AND cr.alias = 'Cuenta operativa demo'
+  AND NOT EXISTS (
+      SELECT 1 FROM movimiento_bancario mb
+      WHERE mb.cuenta_id = cr.id AND mb.referencia_externa = demo.referencia
+  );
 
 COMMIT;

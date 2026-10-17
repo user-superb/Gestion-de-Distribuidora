@@ -175,6 +175,7 @@ CREATE TABLE remito (
     archivo_id          bigint      REFERENCES archivo_proveedor(id),  -- NULL = carga manual
     numero              text        NOT NULL,
     fecha_emision       date,
+    entregado_en        timestamptz,
     importe_centavos    bigint      NOT NULL,
     estado              text        NOT NULL DEFAULT 'pendiente',
     motivo_no_entrega   text,
@@ -184,10 +185,33 @@ CREATE TABLE remito (
     CONSTRAINT remito_numero_unico_por_marca UNIQUE (marca_id, numero),
     CONSTRAINT remito_importe_positivo CHECK (importe_centavos > 0),
     CONSTRAINT remito_estado_valido
-        CHECK (estado IN ('pendiente','en_ruta','entregado','no_entregado','anulado')),
+        CHECK (estado IN ('pendiente','en_ruta','entregado','no_entregado','anulado','devuelto')),
     CONSTRAINT remito_motivo_si_no_entregado
         CHECK (estado <> 'no_entregado' OR motivo_no_entrega IS NOT NULL)
 );
+
+ALTER TABLE remito ADD COLUMN IF NOT EXISTS entregado_en timestamptz;
+ALTER TABLE remito DROP CONSTRAINT IF EXISTS remito_estado_valido;
+ALTER TABLE remito ADD CONSTRAINT remito_estado_valido
+    CHECK (estado IN ('pendiente','en_ruta','entregado','no_entregado','anulado','devuelto'));
+
+CREATE OR REPLACE FUNCTION registrar_entrega_remito() RETURNS trigger AS $$
+BEGIN
+    IF NEW.estado = 'entregado' THEN
+        NEW.entregado_en := COALESCE(NEW.entregado_en, OLD.entregado_en, now());
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS remito_entrega_fecha ON remito;
+CREATE TRIGGER remito_entrega_fecha
+    BEFORE INSERT OR UPDATE ON remito
+    FOR EACH ROW EXECUTE FUNCTION registrar_entrega_remito();
+
+UPDATE remito r
+SET entregado_en = COALESCE((SELECT v.registrada_en FROM visita v WHERE v.id = r.visita_id), r.actualizado_en, now())
+WHERE r.estado = 'entregado' AND r.entregado_en IS NULL;
 
 CREATE INDEX remito_comercio_idx ON remito (comercio_id);
 CREATE INDEX remito_marca_idx    ON remito (marca_id);
@@ -391,27 +415,56 @@ CREATE TABLE comprobante (
 --  6. IMPUTACIÓN  (el corazón del sistema)
 -- =====================================================================
 
--- Relación N a N entre cobros y remitos. Un cobro puede saldar varios
--- remitos y un remito puede saldarse con varios cobros. El cliente fue
--- explícito en que los montos no coinciden uno a uno.
+-- Relación N a N entre cobros o movimientos bancarios y remitos.
+-- Una transferencia consolidada puede saldar varios remitos directamente.
 CREATE TABLE imputacion (
     id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    cobro_id            bigint      NOT NULL REFERENCES cobro(id)  ON DELETE CASCADE,
+    cobro_id            bigint      REFERENCES cobro(id)  ON DELETE CASCADE,
+    movimiento_bancario_id bigint    REFERENCES movimiento_bancario(id),
     remito_id           bigint      NOT NULL REFERENCES remito(id) ON DELETE CASCADE,
     importe_centavos    bigint      NOT NULL,
     imputado_por        bigint      NOT NULL REFERENCES usuario(id),
     imputado_en         timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT imputacion_par_unico UNIQUE (cobro_id, remito_id),
+    CONSTRAINT imputacion_origen_unico CHECK ((cobro_id IS NULL) <> (movimiento_bancario_id IS NULL)),
     CONSTRAINT imputacion_importe_positivo CHECK (importe_centavos > 0)
 );
 
+CREATE UNIQUE INDEX imputacion_cobro_remito_unica
+    ON imputacion (cobro_id, remito_id) WHERE cobro_id IS NOT NULL;
+CREATE UNIQUE INDEX imputacion_movimiento_remito_unica
+    ON imputacion (movimiento_bancario_id, remito_id) WHERE movimiento_bancario_id IS NOT NULL;
 CREATE INDEX imputacion_remito_idx ON imputacion (remito_id);
 
--- OJO: estas dos reglas NO se pueden expresar con un CHECK, porque son
+CREATE TABLE discrepancia_conciliacion (
+    id                   bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    movimiento_id        bigint      NOT NULL REFERENCES movimiento_bancario(id),
+    movimiento_ids       bigint[]    NOT NULL DEFAULT '{}',
+    remito_ids           bigint[]    NOT NULL,
+    importe_movimiento   bigint      NOT NULL,
+    importe_seleccionado bigint      NOT NULL,
+    diferencia_centavos  bigint      NOT NULL,
+    nota                 text        NOT NULL,
+    estado               text        NOT NULL DEFAULT 'pendiente',
+    creada_por           bigint      NOT NULL REFERENCES usuario(id),
+    creada_en            timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT discrepancia_montos CHECK (diferencia_centavos <> 0),
+    CONSTRAINT discrepancia_nota_no_vacia CHECK (length(trim(nota)) > 0),
+    CONSTRAINT discrepancia_estado_valido CHECK (estado IN ('pendiente','resuelta'))
+);
+ALTER TABLE discrepancia_conciliacion
+    ADD COLUMN IF NOT EXISTS movimiento_ids bigint[] NOT NULL DEFAULT '{}';
+UPDATE discrepancia_conciliacion
+SET movimiento_ids = ARRAY[movimiento_id]
+WHERE cardinality(movimiento_ids) = 0;
+CREATE UNIQUE INDEX discrepancia_pendiente_unica_por_movimiento
+    ON discrepancia_conciliacion (movimiento_id) WHERE estado = 'pendiente';
+
+-- OJO: estas reglas NO se pueden expresar con un CHECK, porque son
 -- agregados sobre varias filas. Van por trigger o en la capa de negocio,
 -- siempre dentro de la misma transacción que inserta la imputación:
---   a) SUM(imputacion.importe) por cobro_id  <= cobro.importe_centavos
---   b) SUM(imputacion.importe) por remito_id <= remito.importe_centavos
+--   a) SUM(imputacion.importe) por cobro_id <= cobro.importe_centavos
+--   b) SUM(imputacion.importe) por movimiento_bancario_id <= importe_centavos
+--   c) SUM(imputacion.importe) por remito_id <= remito.importe_centavos
 -- Sin esto se puede imputar plata que no existe.
 
 -- Vista de saldos, para la pantalla de conciliación.
@@ -421,7 +474,12 @@ SELECT  r.id                AS remito_id,
         r.marca_id,
         r.importe_centavos,
         COALESCE(SUM(i.importe_centavos), 0)                      AS imputado_centavos,
-        r.importe_centavos - COALESCE(SUM(i.importe_centavos), 0) AS saldo_centavos
+        r.importe_centavos - COALESCE(SUM(i.importe_centavos), 0) AS saldo_centavos,
+        CASE
+            WHEN r.importe_centavos = COALESCE(SUM(i.importe_centavos), 0) THEN 'saldado'
+            WHEN COALESCE(SUM(i.importe_centavos), 0) > 0 THEN 'parcial'
+            ELSE 'pendiente'
+        END AS estado_cobro
 FROM    remito r
 LEFT JOIN imputacion i ON i.remito_id = r.id
 GROUP BY r.id;
