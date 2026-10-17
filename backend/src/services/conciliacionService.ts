@@ -234,8 +234,8 @@ export const conciliacionService = {
     const remitoIds = parsearIds(remitoIdsValue, 'remito');
     return enTransaccion(async (client) => {
       const result = await validarSeleccion(client, movimientoIds, remitoIds);
-      if (result.diferencia !== 0n) {
-        throw new ConciliacionError('El total de movimientos debe coincidir exactamente con los saldos seleccionados.', 422, {
+      if (result.diferencia > 0n) {
+        throw new ConciliacionError('El total de movimientos supera los saldos seleccionados.', 422, {
           importeMovimiento: result.importeMovimiento.toString(),
           importeSeleccionado: result.importeSeleccionado.toString(),
           diferenciaCentavos: result.diferencia.toString(),
@@ -306,8 +306,8 @@ export const conciliacionService = {
 
     return enTransaccion(async (client) => {
       const result = await validarSeleccion(client, movimientoIds, remitoIds);
-      if (result.diferencia === 0n) {
-        throw new ConciliacionError('Los importes coinciden; corresponde conciliar los movimientos.', 422);
+      if (result.diferencia <= 0n) {
+        throw new ConciliacionError('No hay sobrante de movimientos; corresponde imputarlos a los remitos.', 422);
       }
       const existing = await client.query(
         `SELECT id::text AS id FROM discrepancia_conciliacion

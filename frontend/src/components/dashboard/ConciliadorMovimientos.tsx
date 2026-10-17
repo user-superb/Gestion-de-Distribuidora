@@ -125,7 +125,7 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
 
   const ejecutar = async () => {
     if (!movimientosSeleccionados.size || !remitosSeleccionados.size) return;
-    const derivar = diferencia !== 0n;
+    const derivar = diferencia > 0n;
     if (derivar && !nota.trim()) {
       setError('Agregá una nota para derivar la diferencia a la bandeja.');
       return;
@@ -237,21 +237,21 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
       </div>
 
       {movimientosSeleccionados.size > 0 && remitosSeleccionados.size > 0 && (
-        <div className={`rounded border p-3 space-y-3 ${diferencia === 0n ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+        <div className={`rounded border p-3 space-y-3 ${diferencia <= 0n ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
           <div className="grid gap-2 text-xs sm:grid-cols-3">
             <div>{movimientosSeleccionados.size} movimiento(s): <strong>{formatoARS(importe)}</strong></div>
             <div>{remitosSeleccionados.size} saldo(s) seleccionado(s): <strong>{formatoARS(suma)}</strong></div>
-            <div>Diferencia: <strong>{diferencia === 0n ? 'Exacta' : `${diferencia > 0n ? 'Sobra ' : 'Faltan '}${formatoARS(diferencia > 0n ? diferencia : -diferencia)}`}</strong></div>
+            <div>{diferencia > 0n ? 'Sobrante sin imputar: ' : diferencia < 0n ? 'Saldo que queda pendiente: ' : 'Diferencia: '}<strong>{diferencia > 0n ? formatoARS(diferencia) : diferencia < 0n ? formatoARS(-diferencia) : 'Exacta'}</strong></div>
           </div>
-          {diferencia !== 0n && (
+          {diferencia > 0n && (
             <label className="block text-xs text-slate-700">
               Nota para la bandeja de discrepancias
               <textarea value={nota} onChange={(event) => setNota(event.target.value)} rows={2} maxLength={500} className="mt-1 w-full rounded border border-slate-300 p-2" placeholder="Explicá la diferencia encontrada" />
             </label>
           )}
           <div className="flex justify-end">
-            <button type="button" onClick={() => void ejecutar()} disabled={cargando || (diferencia !== 0n && !nota.trim())} className="rounded bg-blue-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
-              {cargando ? 'Procesando…' : diferencia !== 0n ? 'Derivar discrepancia' : 'Conciliar selección'}
+            <button type="button" onClick={() => void ejecutar()} disabled={cargando || (diferencia > 0n && !nota.trim())} className="rounded bg-blue-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+              {cargando ? 'Procesando…' : diferencia > 0n ? 'Derivar discrepancia' : 'Conciliar selección'}
             </button>
           </div>
         </div>
