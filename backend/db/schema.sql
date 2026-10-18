@@ -191,6 +191,9 @@ CREATE TABLE remito (
 );
 
 ALTER TABLE remito ADD COLUMN IF NOT EXISTS entregado_en timestamptz;
+ALTER TABLE remito ADD COLUMN IF NOT EXISTS entregado_por bigint REFERENCES usuario(id);
+ALTER TABLE remito ADD COLUMN IF NOT EXISTS latitud numeric(9,6);
+ALTER TABLE remito ADD COLUMN IF NOT EXISTS longitud numeric(9,6);
 ALTER TABLE remito DROP CONSTRAINT IF EXISTS remito_estado_valido;
 ALTER TABLE remito ADD CONSTRAINT remito_estado_valido
     CHECK (estado IN ('pendiente','en_ruta','entregado','no_entregado','anulado','devuelto'));

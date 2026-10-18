@@ -79,12 +79,28 @@ function setupMemoryDb() {
       activo boolean NOT NULL DEFAULT true
     );
 
+    CREATE TABLE IF NOT EXISTS hoja_de_ruta (
+      id serial PRIMARY KEY,
+      sucursal_id bigint,
+      transportista_id bigint NOT NULL,
+      fecha_reparto date NOT NULL,
+      patente text,
+      estado text NOT NULL DEFAULT 'borrador',
+      armada_por bigint,
+      publicada_en timestamp,
+      cerrada_en timestamp,
+      creado_en timestamp DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS visita (
       id serial PRIMARY KEY,
       comercio_id bigint NOT NULL,
       hoja_de_ruta_id bigint,
       orden integer,
-      estado text NOT NULL DEFAULT 'pendiente'
+      estado text NOT NULL DEFAULT 'pendiente',
+      registrada_en timestamp,
+      latitud numeric,
+      longitud numeric
     );
 
     CREATE TABLE IF NOT EXISTS remito (
@@ -95,7 +111,11 @@ function setupMemoryDb() {
       sucursal_id bigint,
       importe_centavos bigint NOT NULL,
       estado text NOT NULL DEFAULT 'pendiente',
-      visita_id bigint
+      visita_id bigint,
+      entregado_en timestamp,
+      entregado_por bigint,
+      latitud numeric,
+      longitud numeric
     );
   `);
 
@@ -141,6 +161,23 @@ function setupMemoryDb() {
       (3, 'R-0001-45121', 1, 2, 1, 6200000, 'pendiente'),
       (4, 'R-0003-11200', 3, 2, 1, 11000000, 'pendiente'),
       (5, 'R-0002-89315', 2, 3, 1, 9400000, 'pendiente');
+
+    -- Hoja de ruta activa asignada al chofer Carlos Repartidor (id: 2)
+    INSERT INTO hoja_de_ruta (id, sucursal_id, transportista_id, fecha_reparto, patente, estado) VALUES
+      (1, 1, 2, CURRENT_DATE, 'AF-321-JK', 'en_curso');
+
+    -- Parada 1: Mayorista El Sol S.R.L. (Visita con 2 remitos para validar Regla 3)
+    INSERT INTO visita (id, comercio_id, hoja_de_ruta_id, orden, estado) VALUES
+      (1, 1, 1, 1, 'en_curso'),
+      (2, 2, 1, 2, 'pendiente');
+
+    -- Remitos asignados a la ruta del transportista:
+    -- Remitos 6 y 7 en Visita 1 (Mayorista El Sol)
+    -- Remito 8 en Visita 2 (Autoservicio Luna)
+    INSERT INTO remito (id, numero, marca_id, comercio_id, sucursal_id, importe_centavos, estado, visita_id) VALUES
+      (6, 'R-0004-90001', 1, 1, 1, 12500000, 'pendiente', 1),
+      (7, 'R-0004-90002', 2, 1, 1, 4500000, 'pendiente', 1),
+      (8, 'R-0004-90003', 3, 2, 1, 8200000, 'pendiente', 2);
   `);
 
   memDbInstance = mem.adapters.createPg().Pool;

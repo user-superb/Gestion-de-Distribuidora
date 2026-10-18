@@ -68,6 +68,45 @@ ON CONFLICT (marca_id, numero) DO NOTHING;
 UPDATE remito SET estado = 'entregado', entregado_en = now() - interval '12 days'
 WHERE numero IN ('R-0001-45120', 'R-0002-89310', 'R-0001-45122', 'R-0002-89311');
 
+-- 5.1 Hoja de ruta activa asignada al chofer (Carlos Repartidor)
+INSERT INTO hoja_de_ruta (sucursal_id, transportista_id, fecha_reparto, patente, estado)
+SELECT s.id, u.id, CURRENT_DATE, 'AF-321-JK', 'en_curso'
+FROM sucursal s, usuario u
+WHERE s.nombre = 'Sucursal Central - La Plata' AND u.usuario = 'chofer'
+ON CONFLICT (transportista_id, fecha_reparto) DO NOTHING;
+
+-- Visitas asignadas a la hoja de ruta
+INSERT INTO visita (hoja_de_ruta_id, comercio_id, orden, estado)
+SELECT hdr.id, c.id, 1, 'en_curso'
+FROM hoja_de_ruta hdr
+JOIN comercio c ON c.razon_social = 'Mayorista El Sol S.R.L.'
+JOIN usuario u ON u.id = hdr.transportista_id AND u.usuario = 'chofer'
+WHERE hdr.fecha_reparto = CURRENT_DATE
+ON CONFLICT DO NOTHING;
+
+INSERT INTO visita (hoja_de_ruta_id, comercio_id, orden, estado)
+SELECT hdr.id, c.id, 2, 'pendiente'
+FROM hoja_de_ruta hdr
+JOIN comercio c ON c.razon_social = 'Autoservicio Luna'
+JOIN usuario u ON u.id = hdr.transportista_id AND u.usuario = 'chofer'
+WHERE hdr.fecha_reparto = CURRENT_DATE
+ON CONFLICT DO NOTHING;
+
+-- Remitos adicionales para la entrega móvil
+INSERT INTO remito (marca_id, comercio_id, sucursal_id, numero, importe_centavos, estado, visita_id)
+SELECT m.id, c.id, s.id, r.numero, r.importe_centavos, 'pendiente', v.id
+FROM (VALUES
+  ('Lácteos del Sur', 'Mayorista El Sol S.R.L.', 'R-0004-90001', 12500000::bigint, 1),
+  ('Bebidas Nacionales', 'Mayorista El Sol S.R.L.', 'R-0004-90002', 4500000::bigint, 1),
+  ('Alimentos Río de la Plata', 'Autoservicio Luna', 'R-0004-90003', 8200000::bigint, 2)
+) AS r(marca_nombre, comercio_nombre, numero, importe_centavos, orden_visita)
+JOIN marca m ON m.nombre = r.marca_nombre
+JOIN comercio c ON c.razon_social = r.comercio_nombre
+JOIN sucursal s ON s.nombre = 'Sucursal Central - La Plata'
+JOIN hoja_de_ruta hdr ON hdr.transportista_id = (SELECT id FROM usuario WHERE usuario = 'chofer') AND hdr.fecha_reparto = CURRENT_DATE
+JOIN visita v ON v.hoja_de_ruta_id = hdr.id AND v.orden = r.orden_visita
+ON CONFLICT (marca_id, numero) DO NOTHING;
+
 -- 6. Movimientos bancarios de ejemplo para probar E5-04
 INSERT INTO cuenta_recepcion (sucursal_id, alias, banco)
 SELECT id, 'Cuenta operativa demo', 'Banco Demo'

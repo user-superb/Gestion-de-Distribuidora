@@ -6,6 +6,7 @@ import { db } from './db.js';
 import { remitoRouter } from './routes/remitoRoutes.js';
 import { authRouter } from './routes/authRoutes.js';
 import { conciliacionRouter } from './routes/conciliacionRoutes.js';
+import { transportistaRouter } from './routes/transportistaRoutes.js';
 
 dotenv.config();
 
@@ -30,6 +31,7 @@ app.get('/api/health', async (_req, res) => {
 app.use('/api', authRouter);
 app.use('/api', remitoRouter);
 app.use('/api/conciliacion', conciliacionRouter);
+app.use('/api/transportista', transportistaRouter);
 
 // Iniciar servidor solo si no estamos importando para testing
 if (process.env.NODE_ENV !== 'test') {
