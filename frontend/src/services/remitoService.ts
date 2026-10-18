@@ -1,5 +1,4 @@
-// src/services/remitoService.ts
-import { Remito, Visita, Comercio, Marca } from '../types/domain';
+import { Remito, Visita, Comercio, Marca, HojaDeRuta } from '../types/domain';
 
 export const MOCK_COMERCIOS: Comercio[] = [
   { id: 'com-101', razonSocial: 'Mayorista El Sol S.R.L.', domicilio: 'Av. Hipólito Yrigoyen 4500, Lanús' },
@@ -23,6 +22,11 @@ const INITIAL_REMITOS: Remito[] = [
 
 let mockRemitos: Remito[] = [...INITIAL_REMITOS];
 let mockVisitas: Visita[] = [];
+let mockHojaDeRuta: HojaDeRuta = {
+  id: 'hdr-1',
+  fechaReparto: new Date().toISOString().split('T')[0],
+  estado: 'borrador',
+};
 let cachedComercios: Comercio[] = [...MOCK_COMERCIOS];
 let cachedMarcas: Marca[] = [...MOCK_MARCAS];
 
@@ -93,10 +97,48 @@ export const remitoService = {
       comercioId: comercioIdBase,
       remitos: remitosActualizados,
       importeTotal: remitosActualizados.reduce((acc, r) => acc + r.importe, 0),
+      orden: mockVisitas.length + 1,
+      hojaDeRutaId: mockHojaDeRuta.id,
+      estado: 'pendiente',
     };
 
     mockVisitas = [nuevaVisita, ...mockVisitas];
     return { success: true, visita: nuevaVisita };
+  },
+
+  getHojaDeRutaActiva: (): HojaDeRuta => ({ ...mockHojaDeRuta }),
+
+  cambiarEstadoHojaDeRuta: (nuevoEstado: HojaDeRuta['estado']): void => {
+    mockHojaDeRuta.estado = nuevoEstado;
+  },
+
+  reordenarVisitas: (
+    visitaIds: string[]
+  ): { success: boolean; visitas?: Visita[]; error?: string; status?: number } => {
+    if (!visitaIds || visitaIds.length === 0) {
+      return { success: false, error: 'Debe especificar la lista de visitas a ordenar.', status: 400 };
+    }
+
+    if (mockHojaDeRuta.estado === 'en_curso' || mockHojaDeRuta.estado === 'cerrada') {
+      return {
+        success: false,
+        error: 'No se puede modificar el orden: la hoja de ruta ya fue despachada y se encuentra en ejecución.',
+        status: 409,
+      };
+    }
+
+    const mapa = new Map(mockVisitas.map((v) => [v.id, v]));
+    const nuevas: Visita[] = [];
+
+    visitaIds.forEach((id, index) => {
+      const v = mapa.get(id);
+      if (v) {
+        nuevas.push({ ...v, orden: index + 1 });
+      }
+    });
+
+    mockVisitas = nuevas;
+    return { success: true, visitas: [...mockVisitas] };
   },
 
   desagruparVisita: (visitaId: string): void => {
@@ -113,6 +155,11 @@ export const remitoService = {
   resetearDatosMock: (): void => {
     mockRemitos = [...INITIAL_REMITOS];
     mockVisitas = [];
+    mockHojaDeRuta = {
+      id: 'hdr-1',
+      fechaReparto: new Date().toISOString().split('T')[0],
+      estado: 'borrador',
+    };
   },
 
   // -------------------------------------------------------------
@@ -236,5 +283,59 @@ export const remitoService = {
       // Fallback
     }
     remitoService.resetearDatosMock();
+  },
+
+  async getHojaDeRutaActivaAsync(): Promise<HojaDeRuta | null> {
+    try {
+      const res = await fetch(`${API_BASE}/hoja-de-ruta/activa`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        const data = await res.json();
+        if (data) return data;
+      }
+    } catch {
+      // Fallback
+    }
+    return remitoService.getHojaDeRutaActiva();
+  },
+
+  async cambiarEstadoHojaDeRutaAsync(id: string, estado: string): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/hoja-de-ruta/${encodeURIComponent(id)}/estado`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ estado }),
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) return;
+    } catch {
+      // Fallback
+    }
+    remitoService.cambiarEstadoHojaDeRuta(estado as any);
+  },
+
+  async reordenarVisitasAsync(
+    visitaIds: string[],
+    hojaDeRutaId?: string
+  ): Promise<{ success: boolean; visitas?: Visita[]; error?: string; status?: number }> {
+    try {
+      const res = await fetch(`${API_BASE}/visitas/reordenar`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visitaIds, hojaDeRutaId }),
+        signal: AbortSignal.timeout(3000),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        return data;
+      }
+      return {
+        success: false,
+        error: data.error || 'Error al reordenar visitas.',
+        status: res.status,
+      };
+    } catch {
+      // Fallback a lógica en memoria
+    }
+    return remitoService.reordenarVisitas(visitaIds);
   },
 };

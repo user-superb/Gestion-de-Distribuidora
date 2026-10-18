@@ -14,8 +14,12 @@ import {
   FileText,
   Search,
   X,
+  GripVertical,
+  ArrowUp,
+  ArrowDown,
+  Truck,
 } from 'lucide-react';
-import { Remito, Visita, Comercio, Marca } from '../../types/domain';
+import { Remito, Visita, Comercio, Marca, HojaDeRuta } from '../../types/domain';
 import { remitoService } from '../../services/remitoService';
 
 export const AgrupadorRemitos: React.FC = () => {
@@ -23,6 +27,8 @@ export const AgrupadorRemitos: React.FC = () => {
   const [visitas, setVisitas] = useState<Visita[]>([]);
   const [comercios, setComercios] = useState<Comercio[]>([]);
   const [marcas, setMarcas] = useState<Marca[]>([]);
+  const [hojaRuta, setHojaRuta] = useState<HojaDeRuta | null>(null);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
   const [busqueda, setBusqueda] = useState<string>('');
   const [ultimaVisitaId, setUltimaVisitaId] = useState<string | null>(null);
@@ -39,17 +45,19 @@ export const AgrupadorRemitos: React.FC = () => {
     const isOnline = await remitoService.checkBackend();
     setBackendConectado(isOnline);
 
-    const [pend, vis, com, mar] = await Promise.all([
+    const [pend, vis, com, mar, hr] = await Promise.all([
       remitoService.getRemitosPendientesAsync(),
       remitoService.getVisitasAsync(),
       remitoService.getComerciosAsync(),
       remitoService.getMarcasAsync(),
+      remitoService.getHojaDeRutaActivaAsync(),
     ]);
 
     setPendientes(pend);
     setVisitas(vis);
     setComercios(com);
     setMarcas(mar);
+    setHojaRuta(hr);
   };
 
   useEffect(() => {
@@ -115,6 +123,113 @@ export const AgrupadorRemitos: React.FC = () => {
     setMensaje(null);
     setBusqueda('');
     await recargarDatos();
+  };
+
+  const rutaEnCurso = hojaRuta?.estado === 'en_curso' || hojaRuta?.estado === 'cerrada';
+
+  const handleReordenar = async (nuevoOrdenVisitas: Visita[]) => {
+    if (rutaEnCurso) {
+      setMensaje({
+        tipo: 'error',
+        texto: 'El cambio de orden fue bloqueado: la hoja de ruta ya fue despachada y se encuentra en ejecución (Criterio de Aceptación Escenario 2).',
+      });
+      return;
+    }
+
+    const ids = nuevoOrdenVisitas.map((v) => v.id);
+    const res = await remitoService.reordenarVisitasAsync(ids, hojaRuta?.id);
+    if (res.success) {
+      setVisitas(res.visitas || nuevoOrdenVisitas);
+      setMensaje({
+        tipo: 'exito',
+        texto: '¡Secuencia de reparto actualizada! La numeración de toda la ruta fue recalculada correctamente (Criterio de Aceptación Escenario 1).',
+      });
+    } else {
+      setMensaje({
+        tipo: 'error',
+        texto: res.error || 'No se pudo modificar el orden de las visitas.',
+      });
+      await recargarDatos();
+    }
+  };
+
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(index));
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    const sourceIndex = draggedIndex ?? Number(e.dataTransfer.getData('text/plain'));
+    setDraggedIndex(null);
+
+    if (sourceIndex === null || isNaN(sourceIndex) || sourceIndex === targetIndex) {
+      return;
+    }
+
+    if (rutaEnCurso) {
+      setMensaje({
+        tipo: 'error',
+        texto: 'El cambio de orden fue bloqueado: la hoja de ruta ya fue despachada y se encuentra en ejecución (Criterio de Aceptación Escenario 2).',
+      });
+      return;
+    }
+
+    const nuevaLista = [...visitas];
+    const [removido] = nuevaLista.splice(sourceIndex, 1);
+    nuevaLista.splice(targetIndex, 0, removido);
+    await handleReordenar(nuevaLista);
+  };
+
+  const handleMoverArriba = async (index: number) => {
+    if (index <= 0) return;
+    if (rutaEnCurso) {
+      setMensaje({
+        tipo: 'error',
+        texto: 'El cambio de orden fue bloqueado: la hoja de ruta ya fue despachada y se encuentra en ejecución (Criterio de Aceptación Escenario 2).',
+      });
+      return;
+    }
+    const nuevaLista = [...visitas];
+    const temp = nuevaLista[index - 1];
+    nuevaLista[index - 1] = nuevaLista[index];
+    nuevaLista[index] = temp;
+    await handleReordenar(nuevaLista);
+  };
+
+  const handleMoverAbajo = async (index: number) => {
+    if (index >= visitas.length - 1) return;
+    if (rutaEnCurso) {
+      setMensaje({
+        tipo: 'error',
+        texto: 'El cambio de orden fue bloqueado: la hoja de ruta ya fue despachada y se encuentra en ejecución (Criterio de Aceptación Escenario 2).',
+      });
+      return;
+    }
+    const nuevaLista = [...visitas];
+    const temp = nuevaLista[index + 1];
+    nuevaLista[index + 1] = nuevaLista[index];
+    nuevaLista[index] = temp;
+    await handleReordenar(nuevaLista);
+  };
+
+  const handleToggleEstadoRuta = async () => {
+    if (!hojaRuta) return;
+    const nuevoEstado = hojaRuta.estado === 'en_curso' ? 'borrador' : 'en_curso';
+    await remitoService.cambiarEstadoHojaDeRutaAsync(hojaRuta.id, nuevoEstado);
+    setHojaRuta({ ...hojaRuta, estado: nuevoEstado });
+    setMensaje({
+      tipo: nuevoEstado === 'en_curso' ? 'error' : 'exito',
+      texto: nuevoEstado === 'en_curso'
+        ? 'Hoja de ruta despachada (EN CURSO). Se bloqueó la posibilidad de alterar la secuencia de paradas.'
+        : 'Hoja de ruta en estado BORRADOR. El orden de las visitas es editable nuevamente.',
+    });
   };
 
   // Filtrado reactivo de pendientes por texto (número de remito, marca o comercio)
@@ -417,16 +532,53 @@ export const AgrupadorRemitos: React.FC = () => {
 
         {/* COLUMNA DERECHA (5 cols): Grupos de Remitos / Visitas Creadas */}
         <div className="lg:col-span-5 bg-white border border-slate-200 rounded-md p-4 shadow-sm space-y-3">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-2.5 gap-2">
             <div className="flex items-center gap-2">
               <MapPin className="w-4 h-4 text-emerald-600" />
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                2. Visitas Armadas por Comercio ({visitas.length})
-              </h3>
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                  2. Secuencia de Visitas ({visitas.length})
+                </h3>
+                <span className="text-[10px] text-slate-500">
+                  {rutaEnCurso
+                    ? '🔒 Ruta en ejecución: orden bloqueado'
+                    : 'Arrastrá una visita a la primera posición para reordenar'}
+                </span>
+              </div>
             </div>
-            <span className="text-[10px] font-mono bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-semibold">
-              Hoja de Ruta
-            </span>
+
+            <div className="flex items-center gap-2">
+              {/* Badge de estado de la Hoja de Ruta */}
+              <span
+                className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold inline-flex items-center gap-1 ${
+                  rutaEnCurso
+                    ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                    : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                }`}
+                title="Estado de la hoja de ruta"
+              >
+                <Truck className="w-3 h-3" />
+                {rutaEnCurso ? 'DESPACHADA (EN CURSO)' : 'BORRADOR'}
+              </span>
+
+              {/* Botón para alternar estado de la ruta y probar Criterios de Aceptación */}
+              <button
+                type="button"
+                onClick={handleToggleEstadoRuta}
+                className={`text-[10px] font-medium px-2 py-1 rounded border transition-colors ${
+                  rutaEnCurso
+                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                    : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                }`}
+                title={
+                  rutaEnCurso
+                    ? 'Reabrir a estado Borrador para permitir reordenar'
+                    : 'Simular que la ruta fue despachada (probar Escenario 2)'
+                }
+              >
+                {rutaEnCurso ? 'Volver a Borrador' : 'Simular Despacho'}
+              </button>
+            </div>
           </div>
 
           {visitas.length === 0 ? (
@@ -446,47 +598,107 @@ export const AgrupadorRemitos: React.FC = () => {
               {visitas.map((visita, index) => {
                 const comercio = getComercio(visita.comercioId);
                 const esReciente = visita.id === ultimaVisitaId;
+                const isDragging = draggedIndex === index;
+                const ordenNumero = visita.orden ?? index + 1;
 
                 return (
                   <div
                     key={visita.id}
+                    draggable={!rutaEnCurso}
+                    onDragStart={(e) => handleDragStart(e, index)}
+                    onDragOver={handleDragOver}
+                    onDrop={(e) => handleDrop(e, index)}
                     className={`border rounded-md p-3.5 space-y-3 transition-all ${
+                      isDragging ? 'opacity-40 border-dashed border-blue-400 bg-blue-50' : ''
+                    } ${
+                      !rutaEnCurso
+                        ? 'cursor-grab active:cursor-grabbing hover:border-blue-300'
+                        : 'cursor-not-allowed opacity-90'
+                    } ${
                       esReciente
                         ? 'border-emerald-500 bg-emerald-50/50 ring-2 ring-emerald-500/20'
                         : 'border-slate-200 bg-slate-50/60'
                     }`}
                   >
-                    {/* Cabecera de la Visita (Comercio Destino) */}
+                    {/* Cabecera de la Visita con Parada #N, Asa de arrastre y flechas */}
                     <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="px-1.5 py-0.5 bg-emerald-600 text-white font-mono text-[10px] font-bold rounded">
-                            VISITA #{index + 1} ({visita.id})
-                          </span>
-                          {esReciente && (
-                            <span className="text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-semibold">
-                              Recién agrupada
+                      <div className="flex items-start gap-2 flex-1">
+                        {!rutaEnCurso && (
+                          <div
+                            className="mt-0.5 text-slate-400 hover:text-slate-700 cursor-grab active:cursor-grabbing p-1 rounded hover:bg-slate-200/60"
+                            title="Arrastrá para reordenar la secuencia"
+                          >
+                            <GripVertical className="w-4 h-4" />
+                          </div>
+                        )}
+                        <div className="flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="px-2 py-0.5 bg-blue-700 text-white font-mono text-[11px] font-bold rounded shadow-2xs">
+                              PARADA #{ordenNumero}
                             </span>
-                          )}
-                        </div>
-                        <div className="text-sm font-bold text-slate-900 mt-1">
-                          {comercio?.razonSocial || `Comercio #${visita.comercioId}`}
-                        </div>
-                        <div className="text-[11px] text-slate-600">
-                          {comercio?.domicilio || 'Domicilio registrado'} •{' '}
-                          <span className="font-mono text-slate-500">ID: {visita.comercioId}</span>
+                            <span className="text-[10px] font-mono text-slate-500 bg-slate-200/80 px-1 py-0.5 rounded">
+                              ID: {visita.id}
+                            </span>
+                            {esReciente && (
+                              <span className="text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-semibold">
+                                Recién agrupada
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-sm font-bold text-slate-900 mt-1">
+                            {comercio?.razonSocial || `Comercio #${visita.comercioId}`}
+                          </div>
+                          <div className="text-[11px] text-slate-600">
+                            {comercio?.domicilio || 'Domicilio registrado'}
+                          </div>
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleDesagrupar(visita.id)}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-slate-600 hover:text-red-700 bg-white hover:bg-red-50 border border-slate-200 rounded transition-colors"
-                        title="Desarmar esta visita y devolver los remitos a pendientes"
-                      >
-                        <Undo2 className="w-3 h-3" />
-                        <span>Desagrupar</span>
-                      </button>
+                      <div className="flex items-center gap-1">
+                        {/* Controles de orden accesibles: Subir / Bajar */}
+                        <div className="flex flex-col gap-0.5">
+                          <button
+                            type="button"
+                            disabled={index === 0 || rutaEnCurso}
+                            onClick={() => handleMoverArriba(index)}
+                            className="p-1 rounded bg-white hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed border border-slate-200 text-slate-600 hover:text-blue-600"
+                            title={
+                              rutaEnCurso
+                                ? 'Ruta en ejecución: orden bloqueado'
+                                : index === 0
+                                ? 'Ya está en la primera posición'
+                                : 'Mover arriba'
+                            }
+                          >
+                            <ArrowUp className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={index === visitas.length - 1 || rutaEnCurso}
+                            onClick={() => handleMoverAbajo(index)}
+                            className="p-1 rounded bg-white hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed border border-slate-200 text-slate-600 hover:text-blue-600"
+                            title={
+                              rutaEnCurso
+                                ? 'Ruta en ejecución: orden bloqueado'
+                                : index === visitas.length - 1
+                                ? 'Ya está en la última posición'
+                                : 'Mover abajo'
+                            }
+                          >
+                            <ArrowDown className="w-3 h-3" />
+                          </button>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDesagrupar(visita.id)}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-slate-600 hover:text-red-700 bg-white hover:bg-red-50 border border-slate-200 rounded transition-colors ml-1"
+                          title="Desarmar esta visita y devolver los remitos a pendientes"
+                        >
+                          <Undo2 className="w-3 h-3" />
+                          <span>Desagrupar</span>
+                        </button>
+                      </div>
                     </div>
 
                     {/* Lista de Remitos consolidados adentro de esta Visita */}

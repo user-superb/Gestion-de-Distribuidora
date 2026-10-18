@@ -27,6 +27,19 @@ export interface Visita {
   comercioId: string;
   remitos: Remito[];
   importeTotal: number;
+  orden?: number;
+  hojaDeRutaId?: string | null;
+  estado?: string;
+}
+
+export interface HojaDeRuta {
+  id: string;
+  sucursalId?: string;
+  transportistaId?: string;
+  fechaReparto: string;
+  patente?: string;
+  estado: 'borrador' | 'publicada' | 'en_curso' | 'cerrada' | 'anulada';
+  visitas?: Visita[];
 }
 
 export const remitoService = {
@@ -70,7 +83,10 @@ export const remitoService = {
 
   async getVisitas(): Promise<Visita[]> {
     const visitasRes = await db.query(
-      'SELECT id::text as id, comercio_id::text as "comercioId" FROM visita ORDER BY id DESC'
+      `SELECT id::text as id, comercio_id::text as "comercioId",
+              hoja_de_ruta_id::text as "hojaDeRutaId", orden, estado
+       FROM visita
+       ORDER BY COALESCE(orden, 999999), id ASC`
     );
 
     const visitas: Visita[] = [];
@@ -95,6 +111,9 @@ export const remitoService = {
         comercioId: v.comercioId,
         remitos,
         importeTotal,
+        orden: v.orden != null ? Number(v.orden) : undefined,
+        hojaDeRutaId: v.hojaDeRutaId || null,
+        estado: v.estado,
       });
     }
 
@@ -158,9 +177,18 @@ export const remitoService = {
     if (visitaExistenteRes.rows.length > 0) {
       targetVisitaId = visitaExistenteRes.rows[0].id;
     } else {
+      let hojaId: string | null = null;
+      try {
+        const hojaRes = await db.query('SELECT id::text as id FROM hoja_de_ruta ORDER BY id ASC LIMIT 1');
+        if (hojaRes.rows.length > 0) hojaId = hojaRes.rows[0].id;
+      } catch {
+        // En tests unitarios sin hoja_de_ruta, continuar con null
+      }
+      const ordenRes = await db.query('SELECT COALESCE(MAX(orden), 0) + 1 as sig FROM visita');
+      const sigOrden = Number(ordenRes.rows[0]?.sig || 1);
       const nuevaVisitaRes = await db.query(
-        'INSERT INTO visita (comercio_id, estado) VALUES ($1::bigint, $2) RETURNING id::text as id',
-        [primerComercioId, 'pendiente']
+        'INSERT INTO visita (comercio_id, estado, orden, hoja_de_ruta_id) VALUES ($1::bigint, $2, $3, $4) RETURNING id::text as id',
+        [primerComercioId, 'pendiente', sigOrden, hojaId]
       );
       targetVisitaId = nuevaVisitaRes.rows[0].id;
     }
@@ -185,12 +213,16 @@ export const remitoService = {
 
     const remitosConsolidados: Remito[] = remitosConsolidadosRes.rows;
     const importeTotal = remitosConsolidados.reduce((acc, r) => acc + Number(r.importe), 0);
+    const vRow = await db.query('SELECT orden, hoja_de_ruta_id::text as "hojaDeRutaId", estado FROM visita WHERE id::text = $1', [targetVisitaId]);
 
     const visitaActualizada: Visita = {
       id: targetVisitaId,
       comercioId: primerComercioId,
       remitos: remitosConsolidados,
       importeTotal,
+      orden: vRow.rows[0]?.orden != null ? Number(vRow.rows[0].orden) : undefined,
+      hojaDeRutaId: vRow.rows[0]?.hojaDeRutaId || null,
+      estado: vRow.rows[0]?.estado,
     };
 
     return { success: true, visita: visitaActualizada };
@@ -199,5 +231,80 @@ export const remitoService = {
   async desagruparVisita(visitaId: string): Promise<void> {
     await db.query('UPDATE remito SET visita_id = NULL WHERE visita_id::text = $1', [visitaId]);
     await db.query('DELETE FROM visita WHERE id::text = $1', [visitaId]);
+  },
+
+  async getHojaDeRutaActiva(): Promise<HojaDeRuta | null> {
+    try {
+      const res = await db.query(
+        'SELECT id::text as id, sucursal_id::text as "sucursalId", transportista_id::text as "transportistaId", fecha_reparto as "fechaReparto", estado FROM hoja_de_ruta ORDER BY id ASC LIMIT 1'
+      );
+      if (res.rows.length === 0) return null;
+      const row = res.rows[0];
+      return {
+        id: String(row.id),
+        sucursalId: row.sucursalId ? String(row.sucursalId) : undefined,
+        transportistaId: row.transportistaId ? String(row.transportistaId) : undefined,
+        fechaReparto: String(row.fechaReparto || ''),
+        estado: row.estado,
+      };
+    } catch {
+      return null;
+    }
+  },
+
+  async cambiarEstadoHojaDeRuta(id: string, nuevoEstado: string): Promise<void> {
+    await db.query('UPDATE hoja_de_ruta SET estado = $1 WHERE id::text = $2', [nuevoEstado, id]);
+  },
+
+  async reordenarVisitas(
+    visitaIds: string[],
+    hojaDeRutaId?: string
+  ): Promise<{ success: boolean; visitas?: Visita[]; error?: string; status?: number }> {
+    if (!Array.isArray(visitaIds) || visitaIds.length === 0) {
+      return { success: false, error: 'Debe especificar la lista de visitas a ordenar.', status: 400 };
+    }
+
+    // Criterio de Aceptación ESCENARIO 2:
+    // "El administrativo intenta reordenar una hoja de ruta que ya fue despachada.
+    // El sistema bloquea el cambio por encontrarse en ejecución."
+    let targetHojaId = hojaDeRutaId;
+    if (!targetHojaId) {
+      const checkHoja = await db.query(
+        'SELECT DISTINCT hoja_de_ruta_id::text as "hojaId" FROM visita WHERE id::text = ANY($1) AND hoja_de_ruta_id IS NOT NULL',
+        [visitaIds]
+      );
+      if (checkHoja.rows.length > 0) {
+        targetHojaId = checkHoja.rows[0].hojaId;
+      }
+    }
+
+    if (targetHojaId) {
+      const hojaRes = await db.query('SELECT estado FROM hoja_de_ruta WHERE id::text = $1', [targetHojaId]);
+      if (hojaRes.rows.length > 0) {
+        const estadoRuta = hojaRes.rows[0].estado;
+        if (estadoRuta === 'en_curso' || estadoRuta === 'cerrada' || estadoRuta === 'anulada') {
+          return {
+            success: false,
+            error: 'No se puede modificar el orden: la hoja de ruta ya fue despachada y se encuentra en ejecución.',
+            status: 409,
+          };
+        }
+      }
+    }
+
+    // Criterio de Aceptación ESCENARIO 1:
+    // "El administrativo arrastra una visita a la primera posición. El sistema actualiza la secuencia numérica de toda la ruta."
+    // Fase 1: valores temporales negativos para no colisionar con restricción UNIQUE (hoja_de_ruta_id, orden)
+    for (let i = 0; i < visitaIds.length; i++) {
+      await db.query('UPDATE visita SET orden = $1 WHERE id::text = $2', [-(i + 1), visitaIds[i]]);
+    }
+
+    // Fase 2: asignar orden 1, 2, 3...
+    for (let i = 0; i < visitaIds.length; i++) {
+      await db.query('UPDATE visita SET orden = $1 WHERE id::text = $2', [i + 1, visitaIds[i]]);
+    }
+
+    const visitasActualizadas = await this.getVisitas();
+    return { success: true, visitas: visitasActualizadas };
   },
 };

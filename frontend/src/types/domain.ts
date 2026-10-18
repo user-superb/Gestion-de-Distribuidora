@@ -25,4 +25,17 @@ export interface Visita {
   comercioId: string;
   remitos: Remito[];
   importeTotal: number;
+  orden?: number;
+  hojaDeRutaId?: string | null;
+  estado?: string;
+}
+
+export interface HojaDeRuta {
+  id: string;
+  sucursalId?: string;
+  transportistaId?: string;
+  fechaReparto: string;
+  patente?: string;
+  estado: 'borrador' | 'publicada' | 'en_curso' | 'cerrada' | 'anulada';
+  visitas?: Visita[];
 }

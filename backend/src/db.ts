@@ -105,6 +105,16 @@ function setupMemoryDb() {
       actualizado_en timestamp DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS hoja_de_ruta (
+      id serial PRIMARY KEY,
+      sucursal_id bigint NOT NULL DEFAULT 1,
+      transportista_id bigint,
+      fecha_reparto date NOT NULL DEFAULT CURRENT_DATE,
+      patente text,
+      estado text NOT NULL DEFAULT 'borrador',
+      creado_en timestamp DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS visita (
       id serial PRIMARY KEY,
       comercio_id bigint NOT NULL,
@@ -171,6 +181,10 @@ function setupMemoryDb() {
     INSERT INTO cuenta_recepcion (sucursal_id, alias, banco)
     SELECT id, 'Cuenta operativa demo', 'Banco Demo' FROM sucursal WHERE nombre = 'Sucursal Central - La Plata'
     ON CONFLICT (sucursal_id, alias) DO NOTHING;
+
+    INSERT INTO hoja_de_ruta (id, sucursal_id, transportista_id, estado) VALUES
+      (1, 1, 2, 'borrador')
+    ON CONFLICT DO NOTHING;
 
     INSERT INTO marca (id, nombre) VALUES
       (1, 'Lácteos del Sur'),

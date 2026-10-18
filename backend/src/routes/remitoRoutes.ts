@@ -87,3 +87,43 @@ remitoRouter.delete('/visitas/:id', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+remitoRouter.get('/hoja-de-ruta/activa', async (_req, res) => {
+  try {
+    const hoja = await remitoService.getHojaDeRutaActiva();
+    res.json(hoja);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+remitoRouter.patch('/hoja-de-ruta/:id/estado', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { estado } = req.body;
+    if (!estado) {
+      return res.status(400).json({ error: 'Debe especificar el nuevo estado.' });
+    }
+    await remitoService.cambiarEstadoHojaDeRuta(id, estado);
+    res.json({ success: true, id, estado });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+remitoRouter.put('/visitas/reordenar', async (req, res) => {
+  try {
+    const { visitaIds, hojaDeRutaId } = req.body;
+    if (!Array.isArray(visitaIds)) {
+      return res.status(400).json({ success: false, error: 'Debe enviar un arreglo de visitaIds.' });
+    }
+    const result = await remitoService.reordenarVisitas(visitaIds, hojaDeRutaId);
+    if (!result.success) {
+      return res.status(result.status || 400).json(result);
+    }
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+

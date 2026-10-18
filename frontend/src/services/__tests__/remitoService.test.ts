@@ -100,3 +100,61 @@ describe('Historia de Usuario #12 - Agrupación de Remitos por Comercio', () => 
     expect(remitoService.getRemitosPendientes().find((r) => r.id === 'rem-2')).toBeDefined();
   });
 });
+
+describe('Historia de Usuario #13 - Ordenar Secuencias de Visitas', () => {
+  beforeEach(() => {
+    remitoService.resetearDatosMock();
+  });
+
+  it('ESCENARIO 1: Cambio de orden exitoso: El administrativo arrastra una visita a la primera posición. El sistema actualiza la secuencia numérica de toda la ruta.', () => {
+    // Agrupar visitas para dos comercios distintos
+    const v1 = remitoService.agruparEnVisita(['rem-1']); // com-101
+    const v2 = remitoService.agruparEnVisita(['rem-3']); // com-102
+    const v3 = remitoService.agruparEnVisita(['rem-5']); // com-103
+
+    expect(v1.success).toBe(true);
+    expect(v2.success).toBe(true);
+    expect(v3.success).toBe(true);
+
+    const visitas = remitoService.getVisitas();
+    expect(visitas.length).toBe(3);
+
+    const id1 = v1.visita!.id;
+    const id2 = v2.visita!.id;
+    const id3 = v3.visita!.id;
+
+    // El administrativo mueve la visita 3 a la primera posición: [id3, id1, id2]
+    const resultado = remitoService.reordenarVisitas([id3, id1, id2]);
+    expect(resultado.success).toBe(true);
+    expect(resultado.visitas).toBeDefined();
+
+    // La secuencia numérica de toda la ruta debe actualizarse (1, 2, 3)
+    const reordenadas = resultado.visitas!;
+    expect(reordenadas[0].id).toBe(id3);
+    expect(reordenadas[0].orden).toBe(1);
+
+    expect(reordenadas[1].id).toBe(id1);
+    expect(reordenadas[1].orden).toBe(2);
+
+    expect(reordenadas[2].id).toBe(id2);
+    expect(reordenadas[2].orden).toBe(3);
+  });
+
+  it('ESCENARIO 2: Fallo por ruta en curso: El administrativo intenta reordenar una hoja de ruta que ya fue despachada. El sistema bloquea el cambio por encontrarse en ejecución.', () => {
+    const v1 = remitoService.agruparEnVisita(['rem-1']);
+    const v2 = remitoService.agruparEnVisita(['rem-3']);
+
+    // Simular que la hoja de ruta fue despachada / está en ejecución
+    remitoService.cambiarEstadoHojaDeRuta('en_curso');
+
+    const id1 = v1.visita!.id;
+    const id2 = v2.visita!.id;
+
+    // Intentar reordenar
+    const resultado = remitoService.reordenarVisitas([id2, id1]);
+
+    expect(resultado.success).toBe(false);
+    expect(resultado.status).toBe(409);
+    expect(resultado.error).toMatch(/despachada.*en ejecución|en ejecución/i);
+  });
+});
