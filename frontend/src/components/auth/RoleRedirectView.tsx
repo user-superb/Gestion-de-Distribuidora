@@ -7,7 +7,6 @@ import {
   BarChart3,
   Key,
   Clock,
-  Smartphone,
   Package,
   Route,
   Landmark,
@@ -18,6 +17,7 @@ import {
 import { AgrupadorRemitos } from '../dashboard/AgrupadorRemitos';
 import { ConciliadorMovimientos } from '../dashboard/ConciliadorMovimientos';
 import { Configuracion } from '../dashboard/Configuracion';
+import { MobileDispatchView } from '../mobile/MobileDispatchView';
 import { ProfileMenu } from './ProfileMenu';
 
 interface RoleRedirectViewProps {
@@ -180,7 +180,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 selection:bg-slate-900 selection:text-white">
       <div
         className={`w-full ${
-          isAdmin ? 'max-w-5xl' : 'max-w-2xl'
+          isAdmin || session.role === 'Transportista' ? 'max-w-5xl' : 'max-w-2xl'
         } bg-white border border-slate-200 rounded-md shadow-sm overflow-hidden`}
       >
         {/* Cabecera institucional con Menú de Perfil (Escenario 1) */}
@@ -227,20 +227,8 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
           {isAdmin && <AgrupadorRemitos />}
           {isAdmin && <ConciliadorMovimientos session={session} />}
 
-          {/* Si es transportista, mostramos la simulación de acceso móvil */}
-          {session.role === 'Transportista' && (
-            <div className="border border-slate-200 rounded-md p-4 bg-slate-50 space-y-3">
-              <div className="flex items-center gap-2 text-slate-800 text-xs font-semibold uppercase tracking-wider">
-                <Smartphone className="w-4 h-4 text-emerald-600" />
-                <span>Vista Informativa: Acceso Móvil Transportistas</span>
-              </div>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Has iniciado sesión con el perfil de <strong>Transportista</strong>. En el flujo
-                real de campo de Tutucas, esta pantalla sincroniza la planilla de carga vehicular
-                con el dispositivo del chofer y habilita la firma digital sin conexión.
-              </p>
-            </div>
-          )}
+          {/* Módulo de Transporte Móvil (HU #22: Confirmar Entrega Remito Individual) */}
+          {session.role === 'Transportista' && <MobileDispatchView session={session} />}
 
           {/* Detalle Técnico de Sesión Guardada */}
           <div className="border border-slate-200 rounded-md p-4 bg-slate-900 text-slate-100 font-mono text-xs space-y-2">

@@ -9,6 +9,7 @@ import { conciliacionRouter } from './routes/conciliacionRoutes.js';
 import { usuarioRouter } from './routes/usuarioRoutes.js';
 import { configuracionRouter } from './routes/configuracionRoutes.js';
 import { movilRouter } from './routes/movilRoutes.js';
+import { transportistaRouter } from './routes/transportistaRoutes.js';
 
 dotenv.config();
 
@@ -33,8 +34,9 @@ app.get('/api/health', async (_req, res) => {
 app.use('/api', authRouter);
 app.use('/api', remitoRouter);
 app.use('/api/conciliacion', conciliacionRouter);
-// Antes de usuarioRouter: ese router exige administrador para todo lo que pase por /api.
+// Las rutas del transportista van antes de usuarioRouter: ese router exige administrador para todo lo que pase por /api.
 app.use('/api/movil', movilRouter);
+app.use('/api/transportista', transportistaRouter);
 app.use('/api', usuarioRouter);
 app.use('/api', configuracionRouter);
 
