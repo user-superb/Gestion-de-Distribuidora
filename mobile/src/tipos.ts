@@ -25,7 +25,10 @@ export interface ImporteVisita {
 export interface Visita {
   id: string;
   orden: number | null;
+  /** Lo cierra la entrega de todos los remitos (HU #22). */
   estado: string;
+  /** Ya tiene el cobro registrado en el servidor (HU #25 a #29). */
+  cobrada: boolean;
   comercio: {
     razonSocial: string;
     nombreFantasia: string | null;
@@ -59,6 +62,13 @@ export interface Ubicacion {
   latitud: number;
   longitud: number;
   precisionMetros: number | null;
+}
+
+/** Cuerpo de POST /api/transportista/remitos/:id/confirmar (HU #22). La API exige GPS. */
+export interface EntregaDto {
+  timestamp: string;
+  latitud: number;
+  longitud: number;
 }
 
 /** Cuerpo de POST /api/movil/visitas/:id/cobro */

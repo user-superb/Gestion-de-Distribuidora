@@ -1,14 +1,14 @@
-// Estado de la jornada: hoja de ruta (del servidor o guardada en el celular) y cola de cobros.
+// Estado de la jornada: hoja de ruta (del servidor o guardada en el celular) y cola de entregas y cobros.
 import { useCallback, useEffect, useState } from 'react';
 import { obtenerHojaDeRuta } from './api';
-import { colaCobros, guardarHoja, HojaGuardada, leerHoja } from './almacenamiento';
+import { colaOperaciones, guardarHoja, HojaGuardada, leerHoja } from './almacenamiento';
 import { ErrorApi, ErrorRed } from './errores';
-import type { CobroEnCola } from './sincronizacion/cola';
+import type { ColaPorClave } from './dominio/estadoVisita';
 import type { Sesion } from './tipos';
 
 export function useJornada(sesion: Sesion | null, enLinea: boolean, onSesionVencida: () => void) {
   const [guardada, setGuardada] = useState<HojaGuardada | null>(null);
-  const [cola, setCola] = useState<Map<string, CobroEnCola>>(new Map());
+  const [cola, setCola] = useState<ColaPorClave>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
 
@@ -23,7 +23,7 @@ export function useJornada(sesion: Sesion | null, enLinea: boolean, onSesionVenc
       if (local) setGuardada(local);
 
       if (enLinea) {
-        const sincronizacion = await colaCobros.sincronizar();
+        const sincronizacion = await colaOperaciones.sincronizar();
         if (sincronizacion.sesionVencida) {
           onSesionVencida();
           return;
@@ -40,7 +40,7 @@ export function useJornada(sesion: Sesion | null, enLinea: boolean, onSesionVenc
           else if (!(e instanceof ErrorRed)) setError((e as Error).message);
         }
       }
-      setCola(await colaCobros.estadoPorVisita());
+      setCola(await colaOperaciones.estadoPorClave());
     } finally {
       setCargando(false);
     }

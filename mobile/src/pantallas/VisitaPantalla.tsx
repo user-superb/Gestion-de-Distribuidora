@@ -1,8 +1,8 @@
-// HU #25 a #29: importe a cobrar y registro del cobro de una visita.
+// Una visita: entrega de sus remitos (HU #22) y cobro (HU #25 a #29).
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
-import { colaCobros } from '../almacenamiento';
+import { colaOperaciones } from '../almacenamiento';
 import { Aviso } from '../componentes/Aviso';
 import {
   importeRestante,
@@ -13,30 +13,70 @@ import {
   validarCobro,
 } from '../dominio/cobro';
 import { centavosATexto, formatearPesos, parsearPesos } from '../dominio/dinero';
-import { estadoVisitaLocal } from '../dominio/estadoVisita';
+import { armarEntrega, puedeConfirmarse } from '../dominio/entrega';
+import { ColaPorClave, estadoCobro, estadoEntrega, ETIQUETA_ENTREGA, EstadoLocal } from '../dominio/estadoVisita';
 import { colores, estilos } from '../estilos';
-import type { CobroEnCola } from '../sincronizacion/cola';
-import type { CobroDto, Visita } from '../tipos';
+import type { CobroDto, Remito, Visita } from '../tipos';
 import { obtenerUbicacion } from '../ubicacion';
 
 interface Props {
   visita: Visita;
-  enCola?: CobroEnCola;
+  cola: ColaPorClave;
   enLinea: boolean;
+  onCambio: () => Promise<void>;
   onVolver: () => void;
   onListo: (mensaje: string) => void;
 }
 
 const MEDIOS: MedioPago[] = ['efectivo', 'transferencia', 'qr'];
 
-export function CobroPantalla({ visita, enCola, enLinea, onVolver, onListo }: Props) {
+const ETIQUETA_NO_ENTREGABLE: Record<string, string> = {
+  no_entregado: 'No entregado',
+  devuelto: 'Devuelto',
+  anulado: 'Anulado',
+};
+
+const COLOR_ESTADO: Record<EstadoLocal, string> = {
+  pendiente: colores.textoSuave,
+  hecho: colores.ok,
+  sin_sincronizar: colores.alerta,
+  rechazado: colores.error,
+};
+
+export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onListo }: Props) {
   const { importe, comercio } = visita;
   const [pagos, setPagos] = useState<PagoEnCarga[]>([]);
   const [guardando, setGuardando] = useState(false);
-  const [rechazo, setRechazo] = useState<string | null>(enCola?.estado === 'rechazado' ? enCola.motivo || null : null);
-  const estado = estadoVisitaLocal(visita.estado, enCola);
-  const yaCobrada = estado === 'cobrada' || estado === 'sin_sincronizar';
+  const [entregando, setEntregando] = useState(false);
+  const [errorEntrega, setErrorEntrega] = useState<string | null>(null);
+  const enColaCobro = cola.get(`cobro:${visita.id}`);
+  const [rechazo, setRechazo] = useState<string | null>(enColaCobro?.estado === 'rechazado' ? enColaCobro.motivo || null : null);
+  const estado = estadoCobro(visita, cola);
+  const yaCobrada = estado === 'hecho' || estado === 'sin_sincronizar';
   const validacion = validarCobro(pagos, importe.totalCentavos, enLinea);
+  const porEntregar = visita.remitos.filter(
+    (remito) => puedeConfirmarse(remito) && ['pendiente', 'rechazado'].includes(estadoEntrega(remito, cola))
+  );
+
+  // HU #22: cada remito se confirma por separado, con hora y GPS. Se guarda primero en el celular.
+  async function confirmarEntregas(remitos: Remito[]) {
+    setEntregando(true);
+    setErrorEntrega(null);
+    try {
+      const entrega = armarEntrega(await obtenerUbicacion());
+      if (!entrega) {
+        setErrorEntrega('No se pudo obtener la ubicación GPS, y la entrega la exige. Activá la ubicación y volvé a intentar.');
+        return;
+      }
+      for (const remito of remitos) {
+        await colaOperaciones.encolar({ tipo: 'entrega', visitaId: visita.id, remitoId: remito.id, cuerpo: entrega });
+      }
+      if (enLinea) await colaOperaciones.sincronizar();
+      await onCambio();
+    } finally {
+      setEntregando(false);
+    }
+  }
 
   function agregarMedio(medioPago: MedioPago) {
     const restante = importeRestante(pagos, importe.totalCentavos);
@@ -47,7 +87,7 @@ export function CobroPantalla({ visita, enCola, enLinea, onVolver, onListo }: Pr
     setPagos(pagos.map((pago, j) => (j === i ? { ...pago, ...cambios } : pago)));
   }
 
-  async function confirmar() {
+  async function confirmarCobro() {
     if (!validacion.puedeConfirmar) return;
     setGuardando(true);
     setRechazo(null);
@@ -63,10 +103,10 @@ export function CobroPantalla({ visita, enCola, enLinea, onVolver, onListo }: Pr
         ubicacion: await obtenerUbicacion(),
       };
       // Primero se guarda en el celular: el registro no depende de la señal (HU #26 E2, #29 E2).
-      await colaCobros.encolar(visita.id, cuerpo);
-      if (enLinea) await colaCobros.sincronizar();
+      await colaOperaciones.encolar({ tipo: 'cobro', visitaId: visita.id, cuerpo });
+      if (enLinea) await colaOperaciones.sincronizar();
 
-      const resultado = (await colaCobros.estadoPorVisita()).get(visita.id);
+      const resultado = (await colaOperaciones.estadoPorClave()).get(`cobro:${visita.id}`);
       if (resultado?.estado === 'rechazado') {
         setRechazo(resultado.motivo || 'El servidor rechazó el cobro.');
         return;
@@ -89,7 +129,55 @@ export function CobroPantalla({ visita, enCola, enLinea, onVolver, onListo }: Pr
       <Text style={estilos.titulo}>{comercio.nombreFantasia || comercio.razonSocial}</Text>
       <Text style={estilos.subtitulo}>{comercio.domicilio}</Text>
 
+      {/* HU #22: confirmación individual de entrega de remitos */}
+      <Text style={[estilos.texto, { fontWeight: '700' }]}>Entrega de remitos</Text>
+      <View style={estilos.tarjeta}>
+        {visita.remitos.map((remito) => {
+          const noEntregable = ETIQUETA_NO_ENTREGABLE[remito.estado];
+          const estadoRemito = estadoEntrega(remito, cola);
+          const motivo = cola.get(`entrega:${remito.id}`)?.motivo;
+          return (
+            <View key={remito.id} style={{ paddingVertical: 8, gap: 4, borderBottomWidth: 1, borderBottomColor: colores.borde }}>
+              <View style={estilos.fila}>
+                <Text style={[estilos.texto, { flex: 1 }]}>{remito.numero} · {remito.marca}</Text>
+                <Text style={estilos.texto}>{formatearPesos(remito.importeCentavos)}</Text>
+              </View>
+              <View style={estilos.fila}>
+                <Text style={{ fontWeight: '700', color: noEntregable ? colores.textoSuave : COLOR_ESTADO[estadoRemito] }}>
+                  {noEntregable || ETIQUETA_ENTREGA[estadoRemito]}
+                </Text>
+                {!noEntregable && ['pendiente', 'rechazado'].includes(estadoRemito) ? (
+                  <Pressable
+                    onPress={() => confirmarEntregas([remito])}
+                    disabled={entregando}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Confirmar entrega del remito ${remito.numero}`}
+                    hitSlop={8}
+                  >
+                    <Text style={estilos.botonSecundarioTexto}>Confirmar entrega</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+              {estadoRemito === 'rechazado' && motivo ? <Text style={{ color: colores.error }}>{motivo}</Text> : null}
+            </View>
+          );
+        })}
+      </View>
+      {porEntregar.length > 1 ? (
+        <Pressable
+          style={[estilos.botonSecundario, entregando && { borderColor: colores.deshabilitado }]}
+          disabled={entregando}
+          onPress={() => confirmarEntregas(porEntregar)}
+          accessibilityRole="button"
+        >
+          <Text style={estilos.botonSecundarioTexto}>Confirmar entrega de los {porEntregar.length} remitos</Text>
+        </Pressable>
+      ) : null}
+      {entregando ? <ActivityIndicator /> : null}
+      {errorEntrega ? <Aviso tono="error">{errorEntrega}</Aviso> : null}
+
       {/* HU #25: importe de solo lectura, con desglose por marca */}
+      <Text style={[estilos.texto, { fontWeight: '700' }]}>Cobro</Text>
       <View style={estilos.tarjeta} accessibilityLabel={`Importe a cobrar ${formatearPesos(importe.totalCentavos)}`}>
         <Text style={estilos.textoSuave}>Importe a cobrar</Text>
         <Text style={{ fontSize: 34, fontWeight: '800', color: colores.texto }}>{formatearPesos(importe.totalCentavos)}</Text>
@@ -109,10 +197,10 @@ export function CobroPantalla({ visita, enCola, enLinea, onVolver, onListo }: Pr
 
       {yaCobrada ? (
         <Aviso tono="ok">
-          {estado === 'cobrada' ? 'Esta visita ya está cobrada.' : 'Cobro guardado en el celular, pendiente de sincronizar.'}
+          {estado === 'hecho' ? 'Esta visita ya está cobrada.' : 'Cobro guardado en el celular, pendiente de sincronizar.'}
         </Aviso>
       ) : importe.sinCobroEnDestino ? (
-        <BotonConfirmar texto="Cerrar visita" habilitado={!guardando} guardando={guardando} onPress={confirmar} />
+        <BotonConfirmar texto="Cerrar visita" habilitado={!guardando} guardando={guardando} onPress={confirmarCobro} />
       ) : (
         <>
           {pagos.map((pago, i) => (
@@ -157,7 +245,11 @@ export function CobroPantalla({ visita, enCola, enLinea, onVolver, onListo }: Pr
                   accessibilityRole="button"
                   accessibilityState={{ disabled: !habilitado }}
                 >
-                  <Text style={[estilos.botonSecundarioTexto, { fontSize: 15 }, !habilitado && { color: colores.deshabilitado }]} numberOfLines={1} adjustsFontSizeToFit>
+                  <Text
+                    style={[estilos.botonSecundarioTexto, { fontSize: 15 }, !habilitado && { color: colores.deshabilitado }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                  >
                     {medio === 'qr' ? 'QR' : NOMBRE_MEDIO[medio]}
                   </Text>
                 </Pressable>
@@ -176,7 +268,7 @@ export function CobroPantalla({ visita, enCola, enLinea, onVolver, onListo }: Pr
                 texto={`Confirmar cobro · ${formatearPesos(validacion.declaradoCentavos)}`}
                 habilitado={validacion.puedeConfirmar && !guardando}
                 guardando={guardando}
-                onPress={confirmar}
+                onPress={confirmarCobro}
               />
             </>
           ) : null}

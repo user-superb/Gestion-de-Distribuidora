@@ -98,7 +98,7 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
       CREATE TABLE visita (
         id serial PRIMARY KEY, hoja_de_ruta_id bigint, comercio_id bigint NOT NULL, orden integer,
         estado text NOT NULL DEFAULT 'pendiente', registrada_en timestamptz, latitud numeric(9,6), longitud numeric(9,6),
-        precision_metros numeric(7,1), gps_disponible boolean
+        precision_metros numeric(7,1), gps_disponible boolean, cobrada_en timestamptz
       );
       CREATE TABLE remito (
         id serial PRIMARY KEY, marca_id bigint NOT NULL, comercio_id bigint NOT NULL, numero text NOT NULL,
@@ -169,7 +169,7 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
       assert.equal(importe.sinCobroEnDestino, true);
 
       const resultado = await cobroService.registrarCobro(CHOFER, '3', liquidacion([]));
-      assert.equal(resultado.estado, 'completada');
+      assert.equal(resultado.cobrada, true);
       assert.equal(await contar('SELECT count(*) AS n FROM cobro'), 0);
     });
 
@@ -191,13 +191,12 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
       assert.equal(resultado.duplicado, false);
       assert.equal(resultado.totalCentavos, 5750050);
 
-      const visita = (await db.query('SELECT estado, gps_disponible FROM visita WHERE id = 1')).rows[0];
-      assert.equal(visita.estado, 'completada');
-      assert.equal(visita.gps_disponible, true);
-      const cobro = (await db.query('SELECT medio_pago, estado, registrado_por FROM cobro')).rows[0];
-      assert.deepEqual({ ...cobro, registrado_por: Number(cobro.registrado_por) },
-        { medio_pago: 'efectivo', estado: 'pendiente', registrado_por: CHOFER });
-      assert.equal(await contar("SELECT count(*) AS n FROM remito WHERE visita_id = 1 AND estado = 'entregado'"), 2);
+      assert.equal(await contar('SELECT count(*) AS n FROM visita WHERE id = 1 AND cobrada_en IS NOT NULL'), 1);
+      const cobro = (await db.query('SELECT medio_pago, estado, registrado_por, latitud FROM cobro')).rows[0];
+      assert.deepEqual({ ...cobro, registrado_por: Number(cobro.registrado_por), latitud: Number(cobro.latitud) },
+        { medio_pago: 'efectivo', estado: 'pendiente', registrado_por: CHOFER, latitud: -34.9214 });
+      // La entrega de los remitos la confirma la HU #22, no el cobro.
+      assert.equal(await contar("SELECT count(*) AS n FROM remito WHERE visita_id = 1 AND estado = 'en_ruta'"), 2);
       assert.equal(await contar("SELECT count(*) AS n FROM auditoria WHERE entidad = 'cobro' AND accion = 'alta'"), 1);
     });
 
@@ -222,7 +221,7 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
         /menor al importe exigido/
       );
       assert.equal(await contar('SELECT count(*) AS n FROM cobro'), 0);
-      assert.equal((await db.query('SELECT estado FROM visita WHERE id = 1')).rows[0].estado, 'pendiente');
+      assert.equal(await contar('SELECT count(*) AS n FROM visita WHERE id = 1 AND cobrada_en IS NULL'), 1);
     });
   });
 
@@ -230,7 +229,7 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
     it('registra que la visita se cobró por QR y la liquida', async () => {
       await cobroService.registrarCobro(CHOFER, '2', liquidacion([pago('qr', 3000000)]));
       assert.equal((await db.query('SELECT medio_pago FROM cobro')).rows[0].medio_pago, 'qr');
-      assert.equal((await db.query('SELECT estado FROM visita WHERE id = 2')).rows[0].estado, 'completada');
+      assert.equal(await contar('SELECT count(*) AS n FROM visita WHERE id = 2 AND cobrada_en IS NOT NULL'), 1);
       // El remito devuelto no pasa a entregado.
       assert.equal((await db.query('SELECT estado FROM remito WHERE id = 4')).rows[0].estado, 'devuelto');
     });
@@ -250,13 +249,13 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
         409,
         /ya fue utilizado por este comercio hoy/
       );
-      assert.equal((await db.query('SELECT estado FROM visita WHERE id = 1')).rows[0].estado, 'pendiente');
+      assert.equal(await contar('SELECT count(*) AS n FROM visita WHERE id = 1 AND cobrada_en IS NULL'), 1);
     });
 
     it('ESCENARIO 2: la misma referencia en otro día no se considera duplicada', async () => {
       await cobroService.registrarCobro(OTRO_CHOFER, '4', liquidacion([pago('transferencia', 1000000, 'OP-1')], '2026-10-18T09:00:00.000-03:00'));
       const resultado = await cobroService.registrarCobro(CHOFER, '1', liquidacion([pago('transferencia', 5750050, 'OP-1')]));
-      assert.equal(resultado.estado, 'completada');
+      assert.equal(resultado.cobrada, true);
     });
 
     it('ESCENARIO 3: sin referencia del banco no se puede confirmar el cobro', async () => {
@@ -278,7 +277,7 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
       assert.deepEqual(resultado.cobros.map((c) => c.medioPago), ['efectivo', 'transferencia', 'qr']);
       assert.equal(resultado.totalCentavos, 5750050);
       assert.equal(await contar('SELECT count(*) AS n FROM cobro WHERE visita_id = 1'), 3);
-      assert.equal((await db.query('SELECT estado FROM visita WHERE id = 1')).rows[0].estado, 'completada');
+      assert.equal(await contar('SELECT count(*) AS n FROM visita WHERE id = 1 AND cobrada_en IS NOT NULL'), 1);
     });
 
     it('ESCENARIO 2: el desglose guardado sin conexión se sincroniza completo y sin duplicar', async () => {
@@ -317,6 +316,18 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
       await rechaza(cobroService.registrarCobro(CHOFER, '1', liquidacion([pago('qr', 5750050)])), 409, /ya fue cobrada/);
     });
 
+    it('una visita cerrada por la entrega de todos sus remitos (HU #22) se puede cobrar', async () => {
+      await db.query("UPDATE remito SET estado = 'entregado' WHERE visita_id = 1");
+      await db.query("UPDATE visita SET estado = 'completada' WHERE id = 1");
+      const hoja = await cobroService.getHojaDelDia(CHOFER, '2026-10-19');
+      assert.equal(hoja!.visitas[0].cobrada, false);
+      assert.equal(hoja!.visitas[0].importe.totalCentavos, 5750050);
+
+      const resultado = await cobroService.registrarCobro(CHOFER, '1', liquidacion([pago('efectivo', 5750050)]));
+      assert.equal(resultado.cobrada, true);
+      assert.equal((await db.query('SELECT estado FROM visita WHERE id = 1')).rows[0].estado, 'completada');
+    });
+
     it('no permite cobrar visitas de la hoja de ruta de otro transportista', async () => {
       await rechaza(cobroService.registrarCobro(CHOFER, '4', liquidacion([pago('efectivo', 1000000)])), 404, /no pertenece/);
     });
@@ -329,7 +340,7 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
     it('la API móvil registra el cobro del transportista autenticado', async () => {
       const res = await dispatch('post', '/visitas/:id/cobro', { id: '1' }, await token('chofer'), liquidacion([pago('efectivo', 5750050)]));
       assert.equal(res.statusCode, 201);
-      assert.equal(res.body.estado, 'completada');
+      assert.equal(res.body.cobrada, true);
     });
 
     it('calcula el día en hora argentina', () => {

@@ -3,6 +3,10 @@ BEGIN;
 
 ALTER TABLE cobro ADD COLUMN IF NOT EXISTS referencia_transferencia text;
 
+-- Momento en que se registró el cobro de la visita. Es independiente de visita.estado,
+-- que pasa a 'completada' cuando se confirman todos los remitos (HU #22).
+ALTER TABLE visita ADD COLUMN IF NOT EXISTS cobrada_en timestamptz;
+
 ALTER TABLE cobro DROP CONSTRAINT IF EXISTS cobro_referencia_si_transferencia;
 ALTER TABLE cobro ADD CONSTRAINT cobro_referencia_si_transferencia CHECK (
     medio_pago <> 'transferencia'

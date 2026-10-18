@@ -234,7 +234,7 @@ function respuestaCobros(visitaId: string, rows: any[], duplicado: boolean) {
   }));
   return {
     visitaId,
-    estado: 'completada',
+    cobrada: true,
     duplicado,
     totalCentavos: cobros.reduce((suma, cobro) => suma + cobro.importeCentavos, 0),
     cobros,
@@ -258,7 +258,7 @@ export const cobroService = {
     if (!hoja) return null;
 
     const visitasRes = await db.query(
-      `SELECT v.id::text AS id, v.orden, v.estado,
+      `SELECT v.id::text AS id, v.orden, v.estado, v.cobrada_en IS NOT NULL AS cobrada,
               c.razon_social, c.nombre_fantasia, c.domicilio, c.localidad,
               c.ventana_desde::text AS ventana_desde, c.ventana_hasta::text AS ventana_hasta, c.telefono
        FROM visita v
@@ -275,6 +275,7 @@ export const cobroService = {
         id: v.id,
         orden: v.orden,
         estado: v.estado,
+        cobrada: !!v.cobrada,
         comercio: {
           razonSocial: v.razon_social,
           nombreFantasia: v.nombre_fantasia,
@@ -308,7 +309,7 @@ export const cobroService = {
     try {
       return await enTransaccion(async (client) => {
         const visitaRes = await client.query(
-          `SELECT v.id::text AS id, v.estado, v.comercio_id::text AS comercio_id,
+          `SELECT v.id::text AS id, v.cobrada_en IS NOT NULL AS cobrada, v.comercio_id::text AS comercio_id,
                   h.transportista_id::text AS transportista_id, h.estado AS hoja_estado
            FROM visita v
            JOIN hoja_de_ruta h ON h.id = v.hoja_de_ruta_id
@@ -334,7 +335,8 @@ export const cobroService = {
           throw new CobroError('Las claves del cobro ya se usaron en otra visita.', 409);
         }
 
-        if (visita.estado === 'completada') {
+        // La visita puede estar 'completada' por la entrega (HU #22) y todavía no cobrada.
+        if (visita.cobrada) {
           throw new CobroError('La visita ya fue cobrada.', 409);
         }
         if (!['publicada', 'en_curso'].includes(visita.hoja_estado)) {
@@ -393,19 +395,8 @@ export const cobroService = {
           );
         }
 
-        // D5: la visita queda liquidada y los remitos cobrables, entregados.
-        await client.query(
-          `UPDATE visita
-           SET estado = 'completada', registrada_en = $2, latitud = $3, longitud = $4,
-               precision_metros = $5, gps_disponible = $6
-           WHERE id::text = $1`,
-          [visitaId, dto.registradoEn, u?.latitud ?? null, u?.longitud ?? null, u?.precisionMetros ?? null, !!u]
-        );
-        await client.query(
-          `UPDATE remito SET estado = 'entregado', actualizado_en = now()
-           WHERE visita_id::text = $1 AND NOT (estado = ANY($2))`,
-          [visitaId, ESTADOS_REMITO_NO_COBRABLES]
-        );
+        // D5: la visita queda cobrada. El estado de la visita y de sus remitos lo maneja la entrega (HU #22).
+        await client.query('UPDATE visita SET cobrada_en = $2 WHERE id::text = $1', [visitaId, dto.registradoEn]);
 
         return respuestaCobros(visitaId, insertados, false);
       });

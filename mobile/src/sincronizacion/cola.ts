@@ -1,17 +1,18 @@
-// Cola de cobros registrados en el celular, pendientes de llegar al servidor.
+// Cola de operaciones registradas en el celular, pendientes de llegar al servidor:
+// entregas de remitos (HU #22) y cobros de visitas (HU #26 a #29).
 // RNF: la app funciona sin conexión y sincroniza apenas recupera el acceso.
-// Cada pago lleva su clave de idempotencia, así un reenvío nunca duplica el cobro.
+// Se envían en el orden en que se registraron, así la entrega llega antes que el cobro.
+// Reenviar es seguro: el cobro lleva claves de idempotencia y la entrega de un remito ya entregado no se pisa.
 import { ErrorApi } from '../errores';
-import type { CobroDto } from '../tipos';
+import type { CobroDto, EntregaDto } from '../tipos';
 
 export type EstadoEnCola = 'pendiente' | 'sincronizado' | 'rechazado';
 
-export interface CobroEnCola {
-  visitaId: string;
-  cuerpo: CobroDto;
-  estado: EstadoEnCola;
-  motivo?: string;
-}
+export type Operacion =
+  | { tipo: 'cobro'; visitaId: string; cuerpo: CobroDto }
+  | { tipo: 'entrega'; visitaId: string; remitoId: string; cuerpo: EntregaDto };
+
+export type ItemCola = Operacion & { estado: EstadoEnCola; motivo?: string };
 
 /** Almacenamiento clave-valor. En la app es AsyncStorage; en los tests, un Map. */
 export interface Almacen {
@@ -19,7 +20,7 @@ export interface Almacen {
   setItem(clave: string, valor: string): Promise<void>;
 }
 
-export type EnviarCobro = (visitaId: string, cuerpo: CobroDto) => Promise<void>;
+export type EnviarOperacion = (operacion: Operacion) => Promise<void>;
 
 export interface ResultadoSincronizacion {
   sincronizados: number;
@@ -31,39 +32,50 @@ export interface ResultadoSincronizacion {
 const CLAVE = 'cola-cobros';
 const MANTENER_SINCRONIZADOS_MS = 48 * 60 * 60 * 1000;
 
-export class ColaCobros {
+/** Identifica la operación: un cobro por visita y una entrega por remito. */
+export function claveOperacion(operacion: Operacion): string {
+  return operacion.tipo === 'cobro' ? `cobro:${operacion.visitaId}` : `entrega:${operacion.remitoId}`;
+}
+
+function registradaEn(operacion: Operacion): number {
+  return new Date(operacion.tipo === 'cobro' ? operacion.cuerpo.registradoEn : operacion.cuerpo.timestamp).getTime();
+}
+
+export class ColaOperaciones {
   private sincronizando = false;
 
-  constructor(private almacen: Almacen, private enviar: EnviarCobro) {}
+  constructor(private almacen: Almacen, private enviar: EnviarOperacion) {}
 
-  async listar(): Promise<CobroEnCola[]> {
+  async listar(): Promise<ItemCola[]> {
     const guardado = await this.almacen.getItem(CLAVE);
-    return guardado ? JSON.parse(guardado) : [];
+    // Las versiones anteriores de la app solo guardaban cobros, sin el campo tipo.
+    return guardado ? JSON.parse(guardado).map((item: any) => ({ tipo: 'cobro', ...item })) : [];
   }
 
-  private async guardar(cola: CobroEnCola[]) {
+  private async guardar(cola: ItemCola[]) {
     await this.almacen.setItem(CLAVE, JSON.stringify(cola));
   }
 
   /**
-   * Guarda el cobro en el celular. Si había un intento rechazado de la misma visita, lo reemplaza.
-   * De paso descarta los ya sincronizados de jornadas anteriores (más de 48 h).
+   * Guarda la operación en el celular. Si había un intento rechazado de la misma operación, lo reemplaza.
+   * De paso descarta las ya sincronizadas de jornadas anteriores (más de 48 h).
    */
-  async encolar(visitaId: string, cuerpo: CobroDto, ahora = new Date()): Promise<void> {
+  async encolar(operacion: Operacion, ahora = new Date()): Promise<void> {
+    const clave = claveOperacion(operacion);
     const limite = ahora.getTime() - MANTENER_SINCRONIZADOS_MS;
     const cola = (await this.listar()).filter(
       (item) =>
-        !(item.visitaId === visitaId && item.estado === 'rechazado') &&
-        !(item.estado === 'sincronizado' && new Date(item.cuerpo.registradoEn).getTime() < limite)
+        !(claveOperacion(item) === clave && item.estado === 'rechazado') &&
+        !(item.estado === 'sincronizado' && registradaEn(item) < limite)
     );
-    cola.push({ visitaId, cuerpo, estado: 'pendiente' });
+    cola.push({ ...operacion, estado: 'pendiente' });
     await this.guardar(cola);
   }
 
   /**
    * Envía los pendientes en orden. Si no hay red, se detiene y los deja para el próximo intento.
    * Si la sesión venció (401), también se detiene: se reintenta después de volver a iniciar sesión (supuesto S5).
-   * Si el servidor rechaza el cobro por una regla de negocio (4xx), queda marcado para que el transportista lo corrija.
+   * Si el servidor rechaza la operación por una regla de negocio (4xx), queda marcada para que el transportista la corrija.
    */
   async sincronizar(): Promise<ResultadoSincronizacion> {
     const resultado = { sincronizados: 0, rechazados: 0, pendientes: 0, sesionVencida: false };
@@ -77,7 +89,8 @@ export class ColaCobros {
       for (const item of cola) {
         if (item.estado !== 'pendiente') continue;
         try {
-          await this.enviar(item.visitaId, item.cuerpo);
+          const { estado, motivo, ...operacion } = item;
+          await this.enviar(operacion as Operacion);
           item.estado = 'sincronizado';
           resultado.sincronizados += 1;
         } catch (error) {
@@ -103,8 +116,8 @@ export class ColaCobros {
     }
   }
 
-  /** Estado local de cada visita según la cola: lo último registrado manda. */
-  async estadoPorVisita(): Promise<Map<string, CobroEnCola>> {
-    return new Map((await this.listar()).map((item) => [item.visitaId, item]));
+  /** Último estado de cada operación, por clave ("cobro:<visita>" o "entrega:<remito>"). */
+  async estadoPorClave(): Promise<Map<string, ItemCola>> {
+    return new Map((await this.listar()).map((item) => [claveOperacion(item), item]));
   }
 }

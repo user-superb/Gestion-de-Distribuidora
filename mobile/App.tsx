@@ -4,9 +4,9 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { useNetInfo } from '@react-native-community/netinfo';
 import { cerrarSesion } from './src/api';
-import { borrarHoja, colaCobros, guardarSesion, leerSesion } from './src/almacenamiento';
+import { borrarHoja, colaOperaciones, guardarSesion, leerSesion } from './src/almacenamiento';
 import { estilos } from './src/estilos';
-import { CobroPantalla } from './src/pantallas/CobroPantalla';
+import { VisitaPantalla } from './src/pantallas/VisitaPantalla';
 import { HojaDeRutaPantalla } from './src/pantallas/HojaDeRutaPantalla';
 import { LoginPantalla } from './src/pantallas/LoginPantalla';
 import type { Sesion } from './src/tipos';
@@ -33,7 +33,7 @@ export default function App() {
   const onSesionVencida = useCallback(() => {
     guardarSesion(null);
     setSesion(null);
-    setAvisoLogin('Tu sesión venció. Volvé a ingresar: los cobros guardados en el celular se envían después.');
+    setAvisoLogin('Tu sesión venció. Volvé a ingresar: lo guardado en el celular se envía después.');
   }, []);
 
   const jornada = useJornada(sesion, enLinea, onSesionVencida);
@@ -45,7 +45,7 @@ export default function App() {
   }
 
   async function salir() {
-    const pendientes = (await colaCobros.listar()).filter((item) => item.estado === 'pendiente').length;
+    const pendientes = (await colaOperaciones.listar()).filter((item) => item.estado === 'pendiente').length;
     const cerrar = async () => {
       if (sesion) await cerrarSesion(sesion.token);
       await borrarHoja();
@@ -53,7 +53,7 @@ export default function App() {
       setSesion(null);
     };
     if (pendientes > 0) {
-      Alert.alert('Cobros sin sincronizar', `Tenés ${pendientes} cobro(s) sin enviar. Quedan guardados y se envían al volver a ingresar.`, [
+      Alert.alert('Operaciones sin sincronizar', `Tenés ${pendientes} entrega(s) o cobro(s) sin enviar. Quedan guardados y se envían al volver a ingresar.`, [
         { text: 'Cancelar', style: 'cancel' },
         { text: 'Salir igual', onPress: cerrar },
       ]);
@@ -75,10 +75,11 @@ export default function App() {
         ) : !sesion ? (
           <LoginPantalla aviso={avisoLogin} onIngreso={ingresar} />
         ) : visita ? (
-          <CobroPantalla
+          <VisitaPantalla
             visita={visita}
-            enCola={jornada.cola.get(visita.id)}
+            cola={jornada.cola}
             enLinea={enLinea}
+            onCambio={jornada.recargar}
             onVolver={() => setVisitaAbierta(null)}
             onListo={(texto) => {
               setMensaje(texto);

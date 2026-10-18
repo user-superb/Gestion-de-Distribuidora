@@ -1,6 +1,6 @@
 // Cliente HTTP de la API móvil.
 import { ErrorApi, ErrorRed } from './errores';
-import type { CobroDto, HojaDeRuta, Sesion } from './tipos';
+import type { CobroDto, EntregaDto, HojaDeRuta, Sesion } from './tipos';
 
 // En el celular, "localhost" es el propio teléfono: hay que poner la IP de la PC en mobile/.env
 export const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001/api';
@@ -28,7 +28,8 @@ async function pedir<T>(ruta: string, opciones: RequestInit = {}, token?: string
   const cuerpo = await respuesta.json().catch(() => ({}));
   if (!respuesta.ok) {
     const { message, error, ...detalles } = cuerpo || {};
-    throw new ErrorApi(message || error?.message || 'El servidor rechazó la operación.', respuesta.status, detalles);
+    const mensaje = message || (typeof error === 'string' ? error : error?.message);
+    throw new ErrorApi(mensaje || 'El servidor rechazó la operación.', respuesta.status, detalles);
   }
   return cuerpo as T;
 }
@@ -47,6 +48,11 @@ export async function cerrarSesion(token: string): Promise<void> {
 
 export function obtenerHojaDeRuta(token: string): Promise<HojaDeRuta> {
   return pedir<HojaDeRuta>('/movil/hoja-de-ruta', {}, token);
+}
+
+/** HU #22: confirma la entrega de un remito (API de backend/src/routes/transportistaRoutes.ts). */
+export async function confirmarEntrega(token: string, remitoId: string, cuerpo: EntregaDto): Promise<void> {
+  await pedir(`/transportista/remitos/${remitoId}/confirmar`, { method: 'POST', body: JSON.stringify(cuerpo) }, token);
 }
 
 export async function enviarCobro(token: string, visitaId: string, cuerpo: CobroDto): Promise<void> {

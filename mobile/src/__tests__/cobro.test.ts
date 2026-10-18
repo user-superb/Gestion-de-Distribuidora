@@ -4,7 +4,10 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { importeRestante, PagoEnCarga, validarCobro } from '../dominio/cobro';
 import { centavosATexto, formatearPesos, parsearPesos } from '../dominio/dinero';
-import { estadoVisitaLocal } from '../dominio/estadoVisita';
+import { armarEntrega, puedeConfirmarse } from '../dominio/entrega';
+import { estadoCobro, estadoEntrega, resumenEntregas } from '../dominio/estadoVisita';
+import type { ItemCola } from '../sincronizacion/cola';
+import type { Remito, Visita } from '../tipos';
 
 const TOTAL = 5750050; // $ 57.500,50
 
@@ -106,13 +109,55 @@ describe('HU #29 · Cobro combinado', () => {
   });
 });
 
-describe('Estado de la visita en el celular', () => {
+describe('HU #22 · Confirmación de entrega de remitos', () => {
+  const remito = (id: string, estado: string): Remito => ({ id, numero: `R-${id}`, marca: 'Lácteos', importeCentavos: 1000, estado });
+
+  it('REGLA 1: la confirmación lleva la hora del celular y el GPS; sin ubicación no se arma', () => {
+    const ahora = new Date('2026-10-19T08:00:00.000Z');
+    assert.deepEqual(armarEntrega({ latitud: -34.9, longitud: -57.9, precisionMetros: 10 }, ahora), {
+      timestamp: '2026-10-19T08:00:00.000Z',
+      latitud: -34.9,
+      longitud: -57.9,
+    });
+    assert.equal(armarEntrega(null, ahora), null);
+  });
+
+  it('solo se confirman los remitos que no están en un estado final', () => {
+    assert.equal(puedeConfirmarse(remito('1', 'en_ruta')), true);
+    assert.equal(puedeConfirmarse(remito('2', 'pendiente')), true);
+    assert.equal(puedeConfirmarse(remito('3', 'entregado')), false);
+    assert.equal(puedeConfirmarse(remito('4', 'devuelto')), false);
+  });
+
+  it('cuenta las entregas confirmadas en el servidor y en el celular, sin contar los devueltos', () => {
+    const visita: Visita = {
+      id: '1', orden: 1, estado: 'en_curso', cobrada: false,
+      comercio: { razonSocial: 'X', nombreFantasia: null, domicilio: 'Y', localidad: null, ventanaDesde: null, ventanaHasta: null, telefono: null },
+      remitos: [remito('1', 'entregado'), remito('2', 'en_ruta'), remito('3', 'en_ruta'), remito('4', 'devuelto')],
+      importe: { totalCentavos: 3000, subtotalesPorMarca: [], remitosExcluidos: ['R-4'], sinCobroEnDestino: false },
+    };
+    const enCola = new Map<string, ItemCola>([
+      ['entrega:2', { tipo: 'entrega', visitaId: '1', remitoId: '2', cuerpo: { timestamp: '', latitud: 0, longitud: 0 }, estado: 'pendiente' }],
+    ]);
+    assert.deepEqual(resumenEntregas(visita, enCola), { confirmados: 2, total: 3 });
+    assert.equal(estadoEntrega(visita.remitos[1], enCola), 'sin_sincronizar');
+    assert.equal(estadoEntrega(visita.remitos[2], enCola), 'pendiente');
+  });
+});
+
+describe('Estado del cobro en el celular', () => {
   const cuerpo = { pagos: [], registradoEn: '2026-10-19T08:00:00.000Z', ubicacion: null };
+  const visita = (cobrada: boolean, estado = 'pendiente') => ({ id: '1', cobrada, estado } as Visita);
+  const enCola = (estado: ItemCola['estado']) => new Map<string, ItemCola>([['cobro:1', { tipo: 'cobro', visitaId: '1', cuerpo, estado }]]);
 
   it('combina lo del servidor con la cola local', () => {
-    assert.equal(estadoVisitaLocal('pendiente'), 'pendiente');
-    assert.equal(estadoVisitaLocal('pendiente', { visitaId: '1', cuerpo, estado: 'pendiente' }), 'sin_sincronizar');
-    assert.equal(estadoVisitaLocal('pendiente', { visitaId: '1', cuerpo, estado: 'rechazado' }), 'rechazada');
-    assert.equal(estadoVisitaLocal('completada', { visitaId: '1', cuerpo, estado: 'rechazado' }), 'cobrada');
+    assert.equal(estadoCobro(visita(false), new Map()), 'pendiente');
+    assert.equal(estadoCobro(visita(false), enCola('pendiente')), 'sin_sincronizar');
+    assert.equal(estadoCobro(visita(false), enCola('rechazado')), 'rechazado');
+    assert.equal(estadoCobro(visita(true), enCola('rechazado')), 'hecho');
+  });
+
+  it('una visita cerrada por la entrega (HU #22) sigue sin cobrar', () => {
+    assert.equal(estadoCobro(visita(false, 'completada'), new Map()), 'pendiente');
   });
 });

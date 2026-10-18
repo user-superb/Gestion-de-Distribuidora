@@ -1,9 +1,9 @@
 /// <reference types="node" />
-// Cola de sincronización sin conexión (HU #26 E2, #29 E2 y RNF de idempotencia).
+// Cola de sincronización sin conexión: entregas (HU #22 E2) y cobros (HU #26 E2, #29 E2), con idempotencia.
 import { beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { ErrorApi, ErrorRed } from '../errores';
-import { Almacen, ColaCobros } from '../sincronizacion/cola';
+import { Almacen, ColaOperaciones, Operacion } from '../sincronizacion/cola';
 import type { CobroDto } from '../tipos';
 
 function almacenEnMemoria(): Almacen {
@@ -14,95 +14,126 @@ function almacenEnMemoria(): Almacen {
   };
 }
 
-function cobro(clave: string, registradoEn = '2026-10-19T08:00:00.000Z'): CobroDto {
-  return {
-    pagos: [{ claveIdempotencia: clave, medioPago: 'efectivo', importeCentavos: 1000 }],
-    registradoEn,
-    ubicacion: null,
-  };
+function cuerpoCobro(clave: string, registradoEn = '2026-10-19T08:00:00.000Z'): CobroDto {
+  return { pagos: [{ claveIdempotencia: clave, medioPago: 'efectivo', importeCentavos: 1000 }], registradoEn, ubicacion: null };
 }
 
-describe('Cola de cobros sin conexión', () => {
+function cobro(visitaId: string, clave: string, registradoEn?: string): Operacion {
+  return { tipo: 'cobro', visitaId, cuerpo: cuerpoCobro(clave, registradoEn) };
+}
+
+function entrega(remitoId: string, timestamp = '2026-10-19T07:55:00.000Z'): Operacion {
+  return { tipo: 'entrega', visitaId: '1', remitoId, cuerpo: { timestamp, latitud: -34.92, longitud: -57.95 } };
+}
+
+describe('Cola de operaciones sin conexión', () => {
   let almacen: Almacen;
-  let respuesta: (visitaId: string) => Promise<void>;
-  let enviados: { visitaId: string; cuerpo: CobroDto }[];
-  let cola: ColaCobros;
+  let respuesta: (operacion: Operacion) => Promise<void>;
+  let enviados: Operacion[];
+  let cola: ColaOperaciones;
 
   beforeEach(() => {
     almacen = almacenEnMemoria();
     enviados = [];
     respuesta = async () => undefined;
-    cola = new ColaCobros(almacen, async (visitaId, cuerpo) => {
-      await respuesta(visitaId);
-      enviados.push({ visitaId, cuerpo });
+    cola = new ColaOperaciones(almacen, async (operacion) => {
+      await respuesta(operacion);
+      enviados.push(operacion);
     });
   });
 
-  it('guarda el cobro sin red y lo envía cuando vuelve la conexión', async () => {
+  it('guarda las operaciones sin red y las envía en orden cuando vuelve la conexión', async () => {
     respuesta = async () => { throw new ErrorRed(); };
-    await cola.encolar('1', cobro('a'));
-    await cola.encolar('2', cobro('b'));
+    await cola.encolar(entrega('10'));
+    await cola.encolar(entrega('11'));
+    await cola.encolar(cobro('1', 'a'));
 
     const sinRed = await cola.sincronizar();
-    assert.deepEqual(sinRed, { sincronizados: 0, rechazados: 0, pendientes: 2, sesionVencida: false });
+    assert.deepEqual(sinRed, { sincronizados: 0, rechazados: 0, pendientes: 3, sesionVencida: false });
 
     respuesta = async () => undefined;
-    const conRed = await cola.sincronizar();
-    assert.equal(conRed.sincronizados, 2);
-    assert.deepEqual(enviados.map((e) => e.visitaId), ['1', '2']);
+    assert.equal((await cola.sincronizar()).sincronizados, 3);
+    // La entrega llega antes que el cobro de la misma visita.
+    assert.deepEqual(enviados.map((op) => op.tipo), ['entrega', 'entrega', 'cobro']);
+  });
+
+  it('HU #22 ESCENARIO 2: la entrega guardada sin conexión conserva la hora en que se confirmó', async () => {
+    respuesta = async () => { throw new ErrorRed(); };
+    await cola.encolar(entrega('10', '2026-10-19T05:12:00.000Z'));
+    await cola.sincronizar();
+    respuesta = async () => undefined;
+    await cola.sincronizar();
+    const enviada = enviados[0];
+    assert.equal(enviada.tipo === 'entrega' && enviada.cuerpo.timestamp, '2026-10-19T05:12:00.000Z');
   });
 
   it('sobrevive a un cierre de la app: la cola queda en el almacenamiento', async () => {
-    await cola.encolar('1', cobro('a'));
-    const reabierta = new ColaCobros(almacen, async () => undefined);
+    await cola.encolar(cobro('1', 'a'));
+    const reabierta = new ColaOperaciones(almacen, async () => undefined);
     assert.equal((await reabierta.listar())[0].estado, 'pendiente');
     assert.equal((await reabierta.sincronizar()).sincronizados, 1);
+  });
+
+  it('lee la cola guardada por la versión anterior de la app (solo cobros, sin tipo)', async () => {
+    await almacen.setItem('cola-cobros', JSON.stringify([{ visitaId: '9', cuerpo: cuerpoCobro('x'), estado: 'pendiente' }]));
+    const [item] = await cola.listar();
+    assert.equal(item.tipo, 'cobro');
+    assert.equal((await cola.estadoPorClave()).get('cobro:9')?.estado, 'pendiente');
   });
 
   it('reenvía siempre las mismas claves de idempotencia y no vuelve a enviar lo sincronizado', async () => {
     let intentos = 0;
     respuesta = async () => { intentos += 1; if (intentos === 1) throw new ErrorRed(); };
-    await cola.encolar('1', cobro('clave-fija'));
+    await cola.encolar(cobro('1', 'clave-fija'));
     await cola.sincronizar();
     await cola.sincronizar();
     await cola.sincronizar();
     assert.equal(intentos, 2);
-    assert.equal(enviados[0].cuerpo.pagos[0].claveIdempotencia, 'clave-fija');
+    const enviado = enviados[0];
+    assert.equal(enviado.tipo === 'cobro' && enviado.cuerpo.pagos[0].claveIdempotencia, 'clave-fija');
   });
 
-  it('si el servidor rechaza el cobro lo marca para corregirlo y sigue con los demás', async () => {
-    respuesta = async (visitaId) => {
-      if (visitaId === '1') throw new ErrorApi('Ese número de comprobante ya fue utilizado por este comercio hoy.', 409);
+  it('si el servidor rechaza una operación la marca para corregirla y sigue con las demás', async () => {
+    respuesta = async (op) => {
+      if (op.tipo === 'cobro' && op.visitaId === '1') throw new ErrorApi('Ese número de comprobante ya fue utilizado por este comercio hoy.', 409);
     };
-    await cola.encolar('1', cobro('a'));
-    await cola.encolar('2', cobro('b'));
+    await cola.encolar(cobro('1', 'a'));
+    await cola.encolar(cobro('2', 'b'));
     const resultado = await cola.sincronizar();
     assert.equal(resultado.rechazados, 1);
     assert.equal(resultado.sincronizados, 1);
 
-    const estado = await cola.estadoPorVisita();
-    assert.equal(estado.get('1')?.estado, 'rechazado');
-    assert.match(estado.get('1')?.motivo || '', /ya fue utilizado/);
+    const estado = await cola.estadoPorClave();
+    assert.equal(estado.get('cobro:1')?.estado, 'rechazado');
+    assert.match(estado.get('cobro:1')?.motivo || '', /ya fue utilizado/);
 
     // El transportista corrige y vuelve a cobrar: el intento rechazado se reemplaza.
     respuesta = async () => undefined;
-    await cola.encolar('1', cobro('c'));
-    assert.equal((await cola.listar()).filter((item) => item.visitaId === '1').length, 1);
+    await cola.encolar(cobro('1', 'c'));
+    assert.equal((await cola.listar()).filter((item) => item.tipo === 'cobro' && item.visitaId === '1').length, 1);
     assert.equal((await cola.sincronizar()).sincronizados, 1);
   });
 
-  it('con la sesión vencida se detiene y conserva los cobros para después del login', async () => {
+  it('distingue entregas por remito y cobros por visita', async () => {
+    await cola.encolar(entrega('10'));
+    await cola.encolar(cobro('1', 'a'));
+    const estado = await cola.estadoPorClave();
+    assert.deepEqual([...estado.keys()].sort(), ['cobro:1', 'entrega:10']);
+  });
+
+  it('con la sesión vencida se detiene y conserva las operaciones para después del login', async () => {
     respuesta = async () => { throw new ErrorApi('Sesión expirada', 401); };
-    await cola.encolar('1', cobro('a'));
+    await cola.encolar(cobro('1', 'a'));
     const resultado = await cola.sincronizar();
     assert.equal(resultado.sesionVencida, true);
     assert.equal(resultado.pendientes, 1);
   });
 
-  it('descarta los sincronizados de jornadas anteriores', async () => {
-    await cola.encolar('1', cobro('a', '2026-10-15T08:00:00.000Z'));
+  it('descarta las sincronizadas de jornadas anteriores', async () => {
+    await cola.encolar(cobro('1', 'a', '2026-10-15T08:00:00.000Z'));
+    await cola.encolar(entrega('10', '2026-10-15T07:00:00.000Z'));
     await cola.sincronizar();
-    await cola.encolar('2', cobro('b'), new Date('2026-10-19T08:00:00.000Z'));
+    await cola.encolar(cobro('2', 'b'), new Date('2026-10-19T08:00:00.000Z'));
     assert.deepEqual((await cola.listar()).map((item) => item.visitaId), ['2']);
   });
 });

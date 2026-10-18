@@ -283,6 +283,8 @@ CREATE TABLE visita (
     precision_metros    numeric(7,1),
     gps_disponible      boolean,
     observacion         text,
+    -- HU #25-#29: cuándo se registró el cobro. Independiente de estado, que lo cierra la entrega (HU #22).
+    cobrada_en          timestamptz,
     CONSTRAINT visita_estado_valido
         CHECK (estado IN ('pendiente','en_curso','completada','no_realizada')),
     CONSTRAINT visita_coords_completas

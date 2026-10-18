@@ -1,6 +1,7 @@
 # Épica 1.4 · Registro de cobro integrado en punto de entrega (app móvil)
 
 Historias de Taiga cubiertas: **#25, #26, #27, #28, #29**. Actor: Transportista.
+La app Expo también incluye la **HU #22** (confirmación individual de entrega de remitos), que implementó Florencia: ver *Integración con la HU #22*.
 Fuentes: HU de Taiga, *Visión y Alcance v2* (12/09) y *Requerimientos no funcionales*.
 
 ## Historias
@@ -15,12 +16,12 @@ Fuentes: HU de Taiga, *Visión y Alcance v2* (12/09) y *Requerimientos no funcio
 
 ## Decisiones tomadas
 
-- **D1 · Stack móvil:** Expo (React Native + TypeScript), carpeta `mobile/`. Consume la API de `backend/` bajo `/api/movil`.
+- **D1 · Stack móvil:** Expo (React Native + TypeScript), carpeta `mobile/`. Es una app que se instala en el celular y trabaja sin conexión. Consume la API de `backend/`: `/api/movil` para la hoja del día y el cobro, y `/api/transportista` para la entrega de remitos (HU #22).
 - **D2 · QR sin integración (cambio respecto de la HU #27).** El QR lo genera Mercado Pago por fuera de la app; la app solo registra que el pago fue por QR. Por eso **no aplican tal como están escritos** los escenarios de #27: E1 (consultar la API de la pasarela, mostrar el QR, asentar el ID de transacción) y E2 (timeout de 60 s). **Hay que actualizar la HU en Taiga.**
 - **D3 · Un envío por visita.** La app manda todos los pagos de la visita juntos (uno solo si el cobro es total, varios si es combinado). El backend valida todo y lo guarda en una única transacción.
 - **D4 · Idempotencia.** Cada pago lleva una `clave_idempotencia` (uuid) que genera el celular. Si se reenvía un cobro ya registrado, el backend devuelve el registro original sin duplicarlo: vale la primera sincronización (RNF).
-- **D5 · Qué pasa al liquidar.** La visita pasa a `completada` con la ubicación, la fecha y la hora del registro. Los cobros quedan en `pendiente` y la imputación a remitos la hace conciliación en el escritorio. Los remitos de la visita que no fueron rechazados pasan a `entregado`, para que aparezcan en la bandeja de conciliación.
-- **D6 · Ubicación.** Se toma del GPS del celular. Si no hay señal, se guarda `gps_disponible = false`, que es lo que pide el RNF de indicar "sin conexión GPS".
+- **D5 · Qué pasa al cobrar.** Se guarda `visita.cobrada_en` con la hora del registro. Los cobros quedan en `pendiente` y la imputación a remitos la hace conciliación en el escritorio. El cobro **no** cambia el estado de la visita ni el de los remitos: eso lo maneja la entrega (HU #22), que pasa cada remito a `entregado` y cierra la visita (`completada`) cuando todos llegan a un estado final.
+- **D6 · Ubicación.** El cobro guarda la ubicación del GPS si la hay, y si no se registra igual (RNF: "sin conexión GPS"). La entrega de remitos, en cambio, la exige (Regla 1 de la HU #22): sin GPS la app no la confirma.
 - **D7 · Auditoría.** Cada cobro se registra en la tabla `auditoria` con la acción `alta`.
 
 ## Supuestos (a confirmar)
@@ -31,6 +32,23 @@ Fuentes: HU de Taiga, *Visión y Alcance v2* (12/09) y *Requerimientos no funcio
 - **S4 · QR sin conexión.** Se mantiene la regla de #29 y del RNF: el medio QR se deshabilita sin conexión, aunque con D2 ya no haya pasarela.
 - **S5 · Sesión vencida al sincronizar.** La sesión expira a los 30 minutos sin actividad. Si la cola sin conexión encuentra la sesión vencida, los cobros quedan guardados en el celular y se sincronizan después de volver a iniciar sesión. El backend no se modifica.
 - **S6 · Monto mayor al exigido.** También se rechaza, porque #29 E3 exige igualdad exacta y #26 habla de "monto exacto".
+
+## Integración con la HU #22 (entrega de remitos)
+
+Florencia implementó la HU #22 en la rama `mobile` como una pantalla web dentro del frontend (`MobileDispatchView`). El equipo decidió que la parte móvil sea **una app instalable que trabaje sin conexión**, así que la HU #22 se llevó a la app Expo:
+
+- **Pantalla de visita** (`mobile/src/pantallas/VisitaPantalla.tsx`): arriba la entrega de remitos, uno por uno, y abajo el cobro. Si quedan varios remitos por entregar, hay un botón para confirmarlos todos juntos. Igual se envía una confirmación por remito, cada una con su hora y su GPS.
+- **Backend:** se reusa tal cual la API de Florencia, `POST /api/transportista/remitos/:id/confirmar`.
+- **Sin conexión:** la cola de la app (`mobile/src/sincronizacion/cola.ts`) guarda entregas y cobros y los envía en orden: la entrega llega antes que el cobro. La entrega conserva la hora en que se confirmó en el celular (HU #22 E2).
+- **Choque que se corrigió:** la HU #22 deja la visita en `completada` al entregar todos los remitos, y el cobro rechazaba las visitas `completada` como "ya cobrada". Ahora el cobro usa su propio dato, `visita.cobrada_en`.
+- `MobileDispatchView` (frontend web) **queda en el repo sin cambios**. Si se adopta la app, hay que decidir con el equipo si se saca.
+
+### Pendientes para el equipo (no son preguntas al cliente)
+
+1. **Seguridad de `/api/transportista`:** no exige sesión. Si no hay token usa por defecto al usuario 2, acepta `transportistaId` en el cuerpo y no verifica que el remito sea de la hoja del transportista. La app manda el token, pero conviene protegerla como `/api/movil`.
+2. **GPS obligatorio en la entrega (Regla 1 de la HU #22) contra el RNF**, que pide guardar la operación indicando "sin conexión GPS". Hoy, sin GPS no se puede confirmar la entrega.
+3. **¿Se puede cobrar antes de confirmar la entrega?** Ninguna HU lo prohíbe y hoy se permite.
+4. **Dos endpoints de hoja de ruta:** `/api/transportista/hoja-activa` (Florencia) y `/api/movil/hoja-de-ruta` (cobro, con importes por marca). La app usa el segundo. Se podrían unificar.
 
 ## Preguntas pendientes para la próxima entrevista con Martín
 
@@ -45,4 +63,7 @@ Fuentes: HU de Taiga, *Visión y Alcance v2* (12/09) y *Requerimientos no funcio
 Migración `backend/db/migrations/003_cobro_movil.sql` (también incorporada a `schema.sql`):
 
 - Agrega `cobro.referencia_transferencia` y la vuelve obligatoria para las transferencias.
-- Agrega un índice para buscar referencias por visita.
+- Agrega un índice para buscar referencias repetidas.
+- Agrega `visita.cobrada_en`: cuándo se registró el cobro, separado del estado de la entrega.
+
+Además, la HU #22 agregó en `schema.sql` las columnas `remito.entregado_por`, `remito.latitud` y `remito.longitud`. Una base creada antes de esa rama las tiene que agregar a mano: son `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`.

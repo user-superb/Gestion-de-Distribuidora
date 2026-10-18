@@ -1,14 +1,15 @@
 # App móvil del transportista · "Tutucas Reparto"
 
-Expo (React Native + TypeScript). Por ahora cubre la **Épica 1.4 · Registro de cobro en el punto de entrega**, HU #25 a #29.
+Expo (React Native + TypeScript). Es una app que se instala en el celular y trabaja sin conexión. Cubre la **HU #22** (entrega de remitos) y la **Épica 1.4 · Registro de cobro en el punto de entrega** (HU #25 a #29).
 Las reglas, decisiones y preguntas pendientes están en [`docs/requerimientos/epica-1.4-cobro-movil.md`](../docs/requerimientos/epica-1.4-cobro-movil.md).
 
 ## Qué hace
 
 1. **Login** con el mismo usuario del sistema (solo rol Transportista).
 2. **Hoja de ruta del día**: las visitas en orden, con el importe a cobrar de cada una. Se guarda en el celular para trabajar sin señal.
-3. **Cobro de una visita**: importe de solo lectura con el desglose por marca, y registro en efectivo, por transferencia (con referencia obligatoria), por QR, o combinando varios medios. La suma tiene que ser exacta.
-4. **Sin conexión**: el cobro se guarda en el celular y se envía solo cuando vuelve la señal. El QR se deshabilita sin conexión. Los reenvíos no duplican cobros, porque cada pago lleva una clave de idempotencia.
+3. **Entrega de remitos** (HU #22): cada remito se confirma por separado, con la hora y el GPS. Sin GPS no se puede confirmar.
+4. **Cobro de una visita**: importe de solo lectura con el desglose por marca, y registro en efectivo, por transferencia (con referencia obligatoria), por QR, o combinando varios medios. La suma tiene que ser exacta.
+5. **Sin conexión**: la entrega y el cobro se guardan en el celular y se envían solos cuando vuelve la señal. El QR se deshabilita sin conexión. Los reenvíos no duplican cobros, porque cada pago lleva una clave de idempotencia.
 
 Cobrar en efectivo por el total lleva 3 toques: abrir la visita → *Efectivo* (precarga el total) → *Confirmar*.
 
@@ -52,12 +53,12 @@ Los tests de la API están en `backend/src/__tests__/cobroMovil.test.ts` (`cd ba
 ## Estructura
 
 ```
-App.tsx                      navegación: login → hoja de ruta → cobro
-src/api.ts                   llamadas a /api/auth y /api/movil
+App.tsx                      navegación: login → hoja de ruta → visita
+src/api.ts                   llamadas a /api/auth, /api/movil y /api/transportista
 src/almacenamiento.ts        sesión, hoja guardada y cola (AsyncStorage)
 src/useJornada.ts            carga la hoja y sincroniza al abrir o al volver la señal
 src/ubicacion.ts             GPS del registro, con 4 s de espera máxima
 src/dominio/                 reglas puras (sin React): importes, validación de cobro, estado de visita
-src/sincronizacion/cola.ts   cola de cobros sin conexión
-src/pantallas/               Login, HojaDeRuta, Cobro
+src/sincronizacion/cola.ts   cola de entregas y cobros sin conexión
+src/pantallas/               Login, HojaDeRuta, Visita (entrega + cobro)
 ```
