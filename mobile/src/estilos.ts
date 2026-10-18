@@ -1,0 +1,66 @@
+// Estilos compartidos. Se trabaja de madrugada y en la calle: texto grande, alto contraste y botones amplios.
+import { StyleSheet } from 'react-native';
+
+export const colores = {
+  fondo: '#F4F6F8',
+  tarjeta: '#FFFFFF',
+  texto: '#0F172A',
+  textoSuave: '#475569',
+  borde: '#CBD5E1',
+  primario: '#0B5CAD',
+  primarioTexto: '#FFFFFF',
+  ok: '#15803D',
+  okFondo: '#DCFCE7',
+  alerta: '#B45309',
+  alertaFondo: '#FEF3C7',
+  error: '#B91C1C',
+  errorFondo: '#FEE2E2',
+  deshabilitado: '#94A3B8',
+};
+
+export const estilos = StyleSheet.create({
+  pantalla: { flex: 1, backgroundColor: colores.fondo },
+  contenido: { padding: 16, gap: 12 },
+  titulo: { fontSize: 24, fontWeight: '700', color: colores.texto },
+  subtitulo: { fontSize: 16, color: colores.textoSuave },
+  texto: { fontSize: 17, color: colores.texto },
+  textoSuave: { fontSize: 15, color: colores.textoSuave },
+  tarjeta: {
+    backgroundColor: colores.tarjeta,
+    borderRadius: 10,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colores.borde,
+    gap: 6,
+  },
+  input: {
+    backgroundColor: colores.tarjeta,
+    borderWidth: 1,
+    borderColor: colores.borde,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 18,
+    color: colores.texto,
+  },
+  boton: {
+    backgroundColor: colores.primario,
+    borderRadius: 10,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  botonDeshabilitado: { backgroundColor: colores.deshabilitado },
+  botonTexto: { color: colores.primarioTexto, fontSize: 18, fontWeight: '700' },
+  botonSecundario: {
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: colores.primario,
+    backgroundColor: colores.tarjeta,
+  },
+  botonSecundarioTexto: { color: colores.primario, fontSize: 17, fontWeight: '700' },
+  aviso: { borderRadius: 8, padding: 12 },
+  avisoTexto: { fontSize: 15, fontWeight: '600' },
+  fila: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+});

@@ -221,10 +221,6 @@ CREATE TRIGGER remito_entrega_fecha
     BEFORE INSERT OR UPDATE ON remito
     FOR EACH ROW EXECUTE FUNCTION registrar_entrega_remito();
 
-UPDATE remito r
-SET entregado_en = COALESCE((SELECT v.registrada_en FROM visita v WHERE v.id = r.visita_id), r.actualizado_en, now())
-WHERE r.estado = 'entregado' AND r.entregado_en IS NULL;
-
 CREATE INDEX remito_comercio_idx ON remito (comercio_id);
 CREATE INDEX remito_marca_idx    ON remito (marca_id);
 CREATE INDEX remito_estado_idx   ON remito (estado) WHERE estado IN ('pendiente','en_ruta');
@@ -300,6 +296,11 @@ ALTER TABLE remito
     ADD COLUMN visita_id bigint REFERENCES visita(id) ON DELETE SET NULL;
 
 CREATE INDEX remito_visita_idx ON remito (visita_id);
+
+-- Va después de crear visita y remito.visita_id: antes fallaba en una base nueva.
+UPDATE remito r
+SET entregado_en = COALESCE((SELECT v.registrada_en FROM visita v WHERE v.id = r.visita_id), r.actualizado_en, now())
+WHERE r.estado = 'entregado' AND r.entregado_en IS NULL;
 
 
 -- =====================================================================
@@ -387,6 +388,8 @@ CREATE TABLE cobro (
     movimiento_bancario_id  bigint      REFERENCES movimiento_bancario(id),
     -- Para efectivo: la rendición física en la que entra.
     rendicion_id            bigint      REFERENCES rendicion_efectivo(id),
+    -- HU #28: referencia del comprobante que informa el transportista.
+    referencia_transferencia text,
     estado                  text        NOT NULL DEFAULT 'pendiente',
     -- Idempotencia de la sincronización offline: el móvil genera esta
     -- clave y un reenvío tras una caída de red no duplica el cobro.
@@ -405,10 +408,17 @@ CREATE TABLE cobro (
     CONSTRAINT cobro_respaldo_coherente CHECK (
         (medio_pago = 'efectivo'  AND movimiento_bancario_id IS NULL)
      OR (medio_pago <> 'efectivo' AND rendicion_id IS NULL)
+    ),
+    CONSTRAINT cobro_referencia_si_transferencia CHECK (
+        medio_pago <> 'transferencia'
+        OR (referencia_transferencia IS NOT NULL AND length(trim(referencia_transferencia)) > 0)
     )
 );
 
 CREATE INDEX cobro_visita_idx      ON cobro (visita_id);
+-- La API guarda la referencia normalizada: sin espacios y en mayúsculas.
+CREATE INDEX cobro_referencia_idx  ON cobro (referencia_transferencia)
+    WHERE referencia_transferencia IS NOT NULL;
 CREATE INDEX cobro_movimiento_idx  ON cobro (movimiento_bancario_id);
 CREATE INDEX cobro_rendicion_idx   ON cobro (rendicion_id);
 
