@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const targetUrl =
-  process.env.DATABASE_URL || 'postgresql://postgres:tutucas@localhost:5432/tutucas_db';
+  process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tutucas_db';
 
 async function initDb() {
   const parsed = new URL(targetUrl);
@@ -52,8 +52,12 @@ async function initDb() {
     const client = await targetPool.connect();
     console.log(`✅ Conectado a '${targetDbName}'.`);
 
-    const schemaPath = path.resolve(process.cwd(), 'db', 'schema.sql');
-    const seedPath = path.resolve(process.cwd(), 'db', 'seed.sql');
+    const schemaPath = fs.existsSync(path.resolve(process.cwd(), 'db', 'schema.sql'))
+      ? path.resolve(process.cwd(), 'db', 'schema.sql')
+      : path.resolve(process.cwd(), 'backend', 'db', 'schema.sql');
+    const seedPath = fs.existsSync(path.resolve(process.cwd(), 'db', 'seed.sql'))
+      ? path.resolve(process.cwd(), 'db', 'seed.sql')
+      : path.resolve(process.cwd(), 'backend', 'db', 'seed.sql');
 
     console.log(`📄 Aplicando esquema DDL: ${schemaPath}...`);
     const schemaSql = fs.readFileSync(schemaPath, 'utf-8');
