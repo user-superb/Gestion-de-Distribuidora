@@ -99,6 +99,10 @@ function setupMemoryDb() {
       cuit char(11),
       domicilio text NOT NULL,
       localidad text,
+      latitud numeric,
+      longitud numeric,
+      ventana_desde time,
+      ventana_hasta time,
       contacto text,
       telefono text,
       activo boolean NOT NULL DEFAULT true,
@@ -108,18 +112,8 @@ function setupMemoryDb() {
     CREATE TABLE IF NOT EXISTS hoja_de_ruta (
       id serial PRIMARY KEY,
       sucursal_id bigint NOT NULL DEFAULT 1,
-      transportista_id bigint,
-      fecha_reparto date NOT NULL DEFAULT CURRENT_DATE,
-      patente text,
-      estado text NOT NULL DEFAULT 'borrador',
-      creado_en timestamp DEFAULT now()
-    );
-
-    CREATE TABLE IF NOT EXISTS hoja_de_ruta (
-      id serial PRIMARY KEY,
-      sucursal_id bigint,
       transportista_id bigint NOT NULL,
-      fecha_reparto date NOT NULL,
+      fecha_reparto date NOT NULL DEFAULT CURRENT_DATE,
       patente text,
       estado text NOT NULL DEFAULT 'borrador',
       armada_por bigint,
@@ -136,7 +130,10 @@ function setupMemoryDb() {
       estado text NOT NULL DEFAULT 'pendiente',
       registrada_en timestamp,
       latitud numeric,
-      longitud numeric
+      longitud numeric,
+      precision_metros numeric,
+      gps_disponible boolean,
+      cobrada_en timestamp
     );
 
     CREATE TABLE IF NOT EXISTS remito (
@@ -151,8 +148,96 @@ function setupMemoryDb() {
       entregado_en timestamp,
       entregado_por bigint,
       latitud numeric,
-      longitud numeric
+      longitud numeric,
+      actualizado_en timestamp DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS cobro (
+      id serial PRIMARY KEY,
+      visita_id bigint NOT NULL,
+      medio_pago text NOT NULL,
+      importe_centavos bigint NOT NULL,
+      registrado_en timestamp NOT NULL,
+      latitud numeric,
+      longitud numeric,
+      registrado_por bigint NOT NULL,
+      movimiento_bancario_id bigint,
+      rendicion_id bigint,
+      referencia_transferencia text,
+      estado text NOT NULL DEFAULT 'pendiente',
+      clave_idempotencia text NOT NULL UNIQUE,
+      sincronizado_en timestamp,
+      creado_en timestamp DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS auditoria (
+      id serial PRIMARY KEY,
+      entidad text NOT NULL,
+      entidad_id bigint NOT NULL,
+      accion text NOT NULL,
+      usuario_id bigint NOT NULL,
+      ocurrido_en timestamp DEFAULT now(),
+      ip_origen text,
+      valores_antes jsonb,
+      valores_despues jsonb,
+      observacion text
+    );
+
+    CREATE TABLE IF NOT EXISTS movimiento_bancario (
+      id serial PRIMARY KEY,
+      cuenta_id bigint NOT NULL,
+      fecha_hora timestamp DEFAULT now(),
+      ordenante text NOT NULL,
+      ordenante_cuit char(11),
+      referencia_externa text,
+      importe_centavos bigint NOT NULL,
+      estado text NOT NULL DEFAULT 'sin_imputar',
+      creado_en timestamp DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS imputacion (
+      id serial PRIMARY KEY,
+      movimiento_bancario_id bigint,
+      cobro_id bigint,
+      remito_id bigint NOT NULL,
+      importe_centavos bigint NOT NULL,
+      imputado_por bigint NOT NULL,
+      imputado_en timestamp DEFAULT now(),
+      anulado boolean NOT NULL DEFAULT false,
+      anulado_por bigint,
+      anulado_en timestamp,
+      motivo_anulacion text
+    );
+
+    CREATE TABLE IF NOT EXISTS discrepancia_conciliacion (
+      id serial PRIMARY KEY,
+      movimiento_id bigint,
+      movimiento_ids bigint[] DEFAULT '{}',
+      remito_ids bigint[] NOT NULL,
+      importe_movimiento bigint NOT NULL,
+      importe_seleccionado bigint NOT NULL,
+      diferencia_centavos bigint NOT NULL,
+      nota text NOT NULL,
+      estado text NOT NULL DEFAULT 'pendiente',
+      creada_por bigint NOT NULL,
+      creada_en timestamp DEFAULT now()
+    );
+
+    CREATE VIEW remito_saldo AS
+    SELECT  r.id AS remito_id,
+            r.comercio_id,
+            r.marca_id,
+            r.importe_centavos,
+            COALESCE(SUM(i.importe_centavos), 0) AS imputado_centavos,
+            r.importe_centavos - COALESCE(SUM(i.importe_centavos), 0) AS saldo_centavos,
+            CASE
+                WHEN r.importe_centavos = COALESCE(SUM(i.importe_centavos), 0) THEN 'saldado'
+                WHEN COALESCE(SUM(i.importe_centavos), 0) > 0 THEN 'parcial'
+                ELSE 'pendiente'
+            END AS estado_pago
+    FROM remito r
+    LEFT JOIN imputacion i ON i.remito_id = r.id AND i.anulado = false
+    GROUP BY r.id, r.comercio_id, r.marca_id, r.importe_centavos;
   `);
 
   // Seeds iniciales
@@ -175,19 +260,19 @@ function setupMemoryDb() {
       ('reporte.ver', 'Consultar reportes e indicadores'),
       ('usuario.administrar', 'Administrar usuarios y permisos');
 
-    INSERT INTO sucursal (id, nombre, domicilio) VALUES
-      (1, 'Sucursal Central - La Plata', 'Calle 12 N° 500, La Plata'),
-      (2, 'Depósito Sur - Berisso', 'Av. Río de la Plata 1240, Berisso'),
-      (3, 'Hub Central - Distribución', 'Ruta 2 Km 45, La Plata'),
-      (4, 'Sede Administrativa Central', 'Calle 7 N° 850, La Plata')
+    INSERT INTO sucursal (nombre, domicilio) VALUES
+      ('Sucursal Central - La Plata', 'Calle 12 N° 500, La Plata'),
+      ('Depósito Sur - Berisso', 'Av. Río de la Plata 1240, Berisso'),
+      ('Hub Central - Distribución', 'Ruta 2 Km 45, La Plata'),
+      ('Sede Administrativa Central', 'Calle 7 N° 850, La Plata')
     ON CONFLICT (nombre) DO NOTHING;
 
-    INSERT INTO usuario (id, usuario, nombre, email, password_hash, rol, es_transportista, activo) VALUES
-      (1, 'admin', 'Martín Jirafales Coordinador', 'admin@tutucas.com.ar', '${hash}', 'Administrativo', false, true),
-      (2, 'chofer', 'Carlos Repartidor', 'chofer@tutucas.com.ar', '${hash}', 'Transportista', true, true),
-      (3, 'supervisor', 'Valeria Logística', 'supervisor@tutucas.com.ar', '${hash}', 'Supervisor', false, true),
-      (4, 'gerencia', 'Roberto Gerente', 'gerencia@tutucas.com.ar', '${hash}', 'Gerente', false, true),
-      (5, 'admin_sistema', 'Administrador del Sistema', 'admin.sistema@tutucas.com.ar', '${hash}', 'Administrador del sistema', false, true)
+    INSERT INTO usuario (usuario, nombre, email, password_hash, rol, es_transportista, activo) VALUES
+      ('admin', 'Martín Jirafales Coordinador', 'admin@tutucas.com.ar', '${hash}', 'Administrativo', false, true),
+      ('chofer', 'Carlos Repartidor', 'chofer@tutucas.com.ar', '${hash}', 'Transportista', true, true),
+      ('supervisor', 'Valeria Logística', 'supervisor@tutucas.com.ar', '${hash}', 'Supervisor', false, true),
+      ('gerencia', 'Roberto Gerente', 'gerencia@tutucas.com.ar', '${hash}', 'Gerente', false, true),
+      ('admin_sistema', 'Administrador del Sistema', 'admin.sistema@tutucas.com.ar', '${hash}', 'Administrador del sistema', false, true)
     ON CONFLICT (usuario) DO NOTHING;
 
     INSERT INTO usuario_sucursal (usuario_id, sucursal_id) VALUES
@@ -202,44 +287,42 @@ function setupMemoryDb() {
     SELECT id, 'Cuenta operativa demo', 'Banco Demo' FROM sucursal WHERE nombre = 'Sucursal Central - La Plata'
     ON CONFLICT (sucursal_id, alias) DO NOTHING;
 
-    INSERT INTO hoja_de_ruta (id, sucursal_id, transportista_id, estado) VALUES
-      (1, 1, 2, 'borrador')
-    ON CONFLICT DO NOTHING;
-
-    INSERT INTO marca (id, nombre) VALUES
-      (1, 'Lácteos del Sur'),
-      (2, 'Bebidas Nacionales'),
-      (3, 'Alimentos Río de la Plata')
+    INSERT INTO marca (nombre) VALUES
+      ('Lácteos del Sur'),
+      ('Bebidas Nacionales'),
+      ('Alimentos Río de la Plata')
     ON CONFLICT (nombre) DO NOTHING;
 
-    INSERT INTO comercio (id, razon_social, domicilio, localidad) VALUES
-      (1, 'Mayorista El Sol S.R.L.', 'Av. Hipólito Yrigoyen 4500, Lanús', 'Lanús'),
-      (2, 'Autoservicio Luna', 'Belgrano 1230, Avellaneda', 'Avellaneda'),
-      (3, 'Distribuidora Los Andes', 'Camino Gral. Belgrano 1800, Gerli', 'Gerli');
+    INSERT INTO comercio (razon_social, domicilio, localidad) VALUES
+      ('Mayorista El Sol S.R.L.', 'Av. Hipólito Yrigoyen 4500, Lanús', 'Lanús'),
+      ('Autoservicio Luna', 'Belgrano 1230, Avellaneda', 'Avellaneda'),
+      ('Distribuidora Los Andes', 'Camino Gral. Belgrano 1800, Gerli', 'Gerli');
 
-    INSERT INTO remito (id, numero, marca_id, comercio_id, sucursal_id, importe_centavos, estado) VALUES
-      (1, 'R-0001-45120', 1, 1, 1, 15000000, 'pendiente'),
-      (2, 'R-0002-89310', 2, 1, 1, 700000, 'pendiente'),
-      (3, 'R-0001-45121', 1, 2, 1, 6200000, 'pendiente'),
-      (4, 'R-0003-11200', 3, 2, 1, 11000000, 'pendiente'),
-      (5, 'R-0002-89315', 2, 3, 1, 9400000, 'pendiente');
+    INSERT INTO remito (numero, marca_id, comercio_id, sucursal_id, importe_centavos, estado) VALUES
+      ('R-0001-45120', 1, 1, 1, 15000000, 'pendiente'),
+      ('R-0002-89310', 2, 1, 1, 700000, 'pendiente'),
+      ('R-0001-45121', 1, 2, 1, 6200000, 'pendiente'),
+      ('R-0003-11200', 3, 2, 1, 11000000, 'pendiente'),
+      ('R-0002-89315', 2, 3, 1, 9400000, 'pendiente');
 
     -- Hoja de ruta activa asignada al chofer Carlos Repartidor (id: 2)
-    INSERT INTO hoja_de_ruta (id, sucursal_id, transportista_id, fecha_reparto, patente, estado) VALUES
-      (1, 1, 2, CURRENT_DATE, 'AF-321-JK', 'en_curso');
+    INSERT INTO hoja_de_ruta (sucursal_id, transportista_id, fecha_reparto, patente, estado) VALUES
+      (1, 2, CURRENT_DATE, 'AF-321-JK', 'en_curso')
+    ON CONFLICT DO NOTHING;
 
     -- Parada 1: Mayorista El Sol S.R.L. (Visita con 2 remitos para validar Regla 3)
-    INSERT INTO visita (id, comercio_id, hoja_de_ruta_id, orden, estado) VALUES
-      (1, 1, 1, 1, 'en_curso'),
-      (2, 2, 1, 2, 'pendiente');
+    INSERT INTO visita (comercio_id, hoja_de_ruta_id, orden, estado) VALUES
+      (1, 1, 1, 'en_curso'),
+      (2, 1, 2, 'pendiente')
+    ON CONFLICT DO NOTHING;
 
     -- Remitos asignados a la ruta del transportista:
     -- Remitos 6 y 7 en Visita 1 (Mayorista El Sol)
     -- Remito 8 en Visita 2 (Autoservicio Luna)
-    INSERT INTO remito (id, numero, marca_id, comercio_id, sucursal_id, importe_centavos, estado, visita_id) VALUES
-      (6, 'R-0004-90001', 1, 1, 1, 12500000, 'pendiente', 1),
-      (7, 'R-0004-90002', 2, 1, 1, 4500000, 'pendiente', 1),
-      (8, 'R-0004-90003', 3, 2, 1, 8200000, 'pendiente', 2);
+    INSERT INTO remito (numero, marca_id, comercio_id, sucursal_id, importe_centavos, estado, visita_id) VALUES
+      ('R-0004-90001', 1, 1, 1, 12500000, 'pendiente', 1),
+      ('R-0004-90002', 2, 1, 1, 4500000, 'pendiente', 1),
+      ('R-0004-90003', 3, 2, 1, 8200000, 'pendiente', 2);
   `);
 
   memDbInstance = mem.adapters.createPg().Pool;
