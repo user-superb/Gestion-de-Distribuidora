@@ -27,7 +27,8 @@
         {
           "locationWhenInUsePermission": "Se registra la ubicación de cada entrega y cobro."
         }
-      ]
+      ],
+      "expo-status-bar"
     ]
   }
 }

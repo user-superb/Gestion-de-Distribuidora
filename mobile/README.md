@@ -1,6 +1,7 @@
 # App móvil del transportista · "Tutucas Reparto"
 
 Expo (React Native + TypeScript). Es una app que se instala en el celular y trabaja sin conexión. Cubre la **HU #22** (entrega de remitos) y la **Épica 1.4 · Registro de cobro en el punto de entrega** (HU #25 a #29).
+Usa **Expo SDK 57**: el Expo Go de Play Store todavía no soporta la SDK 58, que salió el 15/10/2026. Cuando la soporte, se puede actualizar con `npx expo install expo@latest --fix`.
 Las reglas, decisiones y preguntas pendientes están en [`docs/requerimientos/epica-1.4-cobro-movil.md`](../docs/requerimientos/epica-1.4-cobro-movil.md).
 
 ## Qué hace
