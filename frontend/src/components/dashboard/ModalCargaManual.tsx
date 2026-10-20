@@ -1,5 +1,5 @@
 // src/components/dashboard/ModalCargaManual.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Building2, Store, PackagePlus, AlertCircle } from 'lucide-react';
 import { Comercio, Marca, CargaEntregaManualDto, Remito } from '../../types/domain';
 import { remitoService } from '../../services/remitoService';
@@ -40,6 +40,23 @@ export const ModalCargaManual: React.FC<ModalCargaManualProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Sincronizar selección inicial cuando se abre el modal o se cargan comercios/marcas
+  useEffect(() => {
+    if (isOpen) {
+      if (!comercioId || !comercios.some((c) => c.id === comercioId)) {
+        if (comercios.length > 0) {
+          setComercioId(comercios[0].id);
+        }
+      }
+      if (!marcaId || !marcas.some((m) => m.id === marcaId)) {
+        if (marcas.length > 0) {
+          setMarcaId(marcas[0].id);
+        }
+      }
+      setError(null);
+    }
+  }, [isOpen, comercios, marcas]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -52,24 +69,26 @@ export const ModalCargaManual: React.FC<ModalCargaManualProps> = ({
       return;
     }
 
-    if (!marcaId) {
+    const finalMarcaId = marcaId || marcas[0]?.id;
+    if (!finalMarcaId) {
       setError('Debés seleccionar una marca proveedora para la entrega.');
       return;
     }
 
     const payload: CargaEntregaManualDto = {
-      marcaId,
+      marcaId: finalMarcaId,
       importe: importeNum,
       numeroRemito: numeroRemito.trim() || undefined,
       fechaEmision: fechaEmision || undefined,
     };
 
     if (modo === 'registrado') {
-      if (!comercioId) {
+      const finalComercioId = comercioId || comercios[0]?.id;
+      if (!finalComercioId) {
         setError('Debés seleccionar un comercio destinatario registrado.');
         return;
       }
-      payload.comercioId = comercioId;
+      payload.comercioId = finalComercioId;
     } else {
       if (!razonSocial.trim()) {
         setError('La Razón Social del nuevo comercio es obligatoria.');
@@ -95,7 +114,7 @@ export const ModalCargaManual: React.FC<ModalCargaManualProps> = ({
         const destino =
           result.comercio?.razonSocial ||
           (modo === 'registrado'
-            ? comercios.find((c) => c.id === comercioId)?.razonSocial
+            ? comercios.find((c) => c.id === (payload.comercioId || comercioId))?.razonSocial
             : razonSocial);
 
         const mensaje = `Carga manual exitosa: Se generó el remito interno ${result.remito.numeroRemito} (${destino}) disponible para asignar.`;
@@ -111,7 +130,10 @@ export const ModalCargaManual: React.FC<ModalCargaManualProps> = ({
     }
   };
 
-  const comercioSeleccionado = comercios.find((c) => c.id === comercioId);
+  const selectedComercioId = comercioId || comercios[0]?.id || '';
+  const selectedMarcaId = marcaId || marcas[0]?.id || '';
+  const comercioSeleccionado =
+    comercios.find((c) => c.id === selectedComercioId) || comercios[0];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
@@ -132,7 +154,7 @@ export const ModalCargaManual: React.FC<ModalCargaManualProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-100 transition-colors"
+            className="text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-100 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -159,7 +181,7 @@ export const ModalCargaManual: React.FC<ModalCargaManualProps> = ({
                   setModo('registrado');
                   setError(null);
                 }}
-                className={`flex items-center justify-center gap-2 py-2 px-3 rounded-md border text-xs font-medium transition-all ${
+                className={`flex items-center justify-center gap-2 py-2 px-3 rounded-md border text-xs font-medium transition-all cursor-pointer ${
                   modo === 'registrado'
                     ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500/30'
                     : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -175,7 +197,7 @@ export const ModalCargaManual: React.FC<ModalCargaManualProps> = ({
                   setModo('no_registrado');
                   setError(null);
                 }}
-                className={`flex items-center justify-center gap-2 py-2 px-3 rounded-md border text-xs font-medium transition-all ${
+                className={`flex items-center justify-center gap-2 py-2 px-3 rounded-md border text-xs font-medium transition-all cursor-pointer ${
                   modo === 'no_registrado'
                     ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500/30'
                     : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -194,9 +216,9 @@ export const ModalCargaManual: React.FC<ModalCargaManualProps> = ({
                 Seleccionar Comercio Registrado <span className="text-red-500">*</span>
               </label>
               <select
-                value={comercioId}
+                value={selectedComercioId}
                 onChange={(e) => setComercioId(e.target.value)}
-                className="w-full py-1.5 px-2.5 text-xs bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full py-1.5 px-2.5 text-xs bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
                 required
               >
                 {comercios.map((c) => (
@@ -289,9 +311,9 @@ export const ModalCargaManual: React.FC<ModalCargaManualProps> = ({
                   Marca Proveedora <span className="text-red-500">*</span>
                 </label>
                 <select
-                  value={marcaId}
+                  value={selectedMarcaId}
                   onChange={(e) => setMarcaId(e.target.value)}
-                  className="w-full py-1.5 px-2.5 text-xs bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full py-1.5 px-2.5 text-xs bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
                   required
                 >
                   {marcas.map((m) => (
