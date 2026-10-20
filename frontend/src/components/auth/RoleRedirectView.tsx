@@ -5,8 +5,6 @@ import {
   Building2,
   ShieldCheck,
   BarChart3,
-  Key,
-  Clock,
   Smartphone,
   Package,
   Route,
@@ -188,7 +186,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
             <span className="text-sm font-semibold tracking-wide">
-              Gestión de Distribuidora - Tutucas
+              Gestión de Distribuidora
             </span>
           </div>
           <ProfileMenu session={session} onLogout={onLogout} />
@@ -235,27 +233,10 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
                 <span>Vista Informativa: Acceso Móvil Transportistas</span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Has iniciado sesión con el perfil de <strong>Transportista</strong>. En el flujo
-                real de campo de Tutucas, esta pantalla sincroniza la planilla de carga vehicular
-                con el dispositivo del chofer y habilita la firma digital sin conexión.
+                Has iniciado sesión con el perfil de <strong>Transportista</strong>. En el flujo de campo, esta pantalla sincroniza la planilla de carga vehicular con el dispositivo del chofer y habilita la firma digital.
               </p>
             </div>
           )}
-
-          {/* Detalle Técnico de Sesión Guardada */}
-          <div className="border border-slate-200 rounded-md p-4 bg-slate-900 text-slate-100 font-mono text-xs space-y-2">
-            <div className="flex items-center justify-between text-slate-400 text-[11px] pb-1 border-b border-slate-800">
-              <div className="flex items-center gap-1.5">
-                <Key className="w-3.5 h-3.5 text-amber-400" />
-                <span>TOKEN DE SESIÓN GUARDADO (sessionStorage)</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5 text-slate-400" />
-                <span>{session.authenticatedAt}</span>
-              </div>
-            </div>
-            <div className="truncate text-slate-300 text-[11px]">{session.token}</div>
-          </div>
         </div>
 
         {/* Footer */}
@@ -267,7 +248,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
             onClick={onLogout}
             className="text-slate-900 font-medium hover:underline flex items-center gap-1"
           >
-            Volver al Login y probar otro usuario
+            Cerrar sesión
           </button>
         </div>
       </div>

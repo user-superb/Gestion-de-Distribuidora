@@ -101,19 +101,11 @@ export const App: React.FC = () => {
   // Si el usuario está autenticado, mostrar la vista con información operativa y módulo administrativo
   if (currentSession) {
     return (
-      <>
-        <RoleRedirectView
-          session={currentSession}
-          redirectUrl={redirectUrl}
-          onLogout={handleLogout}
-        />
-        <DevTestingDrawer
-          onSelectCredentials={(creds) => setPrefillCredentials(creds)}
-          onResetLockout={handleResetLockout}
-          onSimulateInactivity={triggerTimeoutNow}
-          isAuthenticated={true}
-        />
-      </>
+      <RoleRedirectView
+        session={currentSession}
+        redirectUrl={redirectUrl}
+        onLogout={handleLogout}
+      />
     );
   }
 

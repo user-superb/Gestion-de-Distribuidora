@@ -106,11 +106,11 @@ export const DevTestingDrawer: React.FC<DevTestingDrawerProps> = ({
       >
         <div className="flex items-center gap-2 text-xs font-mono">
           <Terminal className="w-3.5 h-3.5 text-sky-400" />
-          <span className="font-semibold text-white">PANEL DE TESTING QA (POSTGRESQL + LOGOUT)</span>
+          <span className="font-semibold text-white">PANEL DE TESTING QA</span>
           <span className="text-slate-400 hidden sm:inline">|</span>
           <span className="text-slate-400 hidden sm:inline flex items-center gap-1">
             <Database className="w-3 h-3 text-emerald-400 inline" />
-            <span>PostgreSQL Backend Activo</span>
+            <span>Entorno de Pruebas</span>
           </span>
           {lockoutStatus.isLocked && (
             <span className="px-1.5 py-0.5 rounded bg-red-950 border border-red-800 text-red-300 text-[10px] uppercase font-bold">

@@ -1,7 +1,7 @@
 // frontend/src/components/auth/ProfileMenu.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import { UserSession } from '../../types/auth';
-import { LogOut, ChevronDown, ShieldCheck, Building, Key } from 'lucide-react';
+import { LogOut, ChevronDown, Building } from 'lucide-react';
 
 interface ProfileMenuProps {
   session: UserSession;
@@ -66,18 +66,6 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ session, onLogout }) =
             <div className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-600 bg-slate-50 p-1.5 rounded border border-slate-100">
               <Building className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
               <span className="truncate">{session.branch}</span>
-            </div>
-          </div>
-
-          {/* Información de seguridad */}
-          <div className="px-3.5 py-2 text-[11px] text-slate-500 space-y-1">
-            <div className="flex items-center gap-1.5 text-emerald-700">
-              <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0" />
-              <span className="font-medium">Sesión activa y auditada</span>
-            </div>
-            <div className="flex items-center gap-1 text-[10px] text-slate-400">
-              <Key className="w-3 h-3" />
-              <span>Token activo en PostgreSQL</span>
             </div>
           </div>
 

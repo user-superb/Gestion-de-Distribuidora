@@ -46,7 +46,7 @@ export const LockoutAlert: React.FC<LockoutAlertProps> = ({ onRecoveryClick }) =
 
           <div className="flex items-center gap-2 pt-2 text-[11px] text-amber-700">
             <Mail className="w-3.5 h-3.5" />
-            <span>Mesa de ayuda: soporte@tutucas.com.ar | Int. 104</span>
+            <span>Mesa de ayuda: soporte@distribuidora.com.ar | Int. 104</span>
           </div>
         </div>
       </div>

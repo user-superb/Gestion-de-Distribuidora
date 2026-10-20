@@ -106,7 +106,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
       <div className="space-y-1.5">
         <div className="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide uppercase text-slate-500">
           <span className="w-2 h-2 rounded-full bg-slate-900 inline-block"></span>
-          Gestión de Distribuidora - Tutucas
+          Sistema de Gestión de Distribución
         </div>
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
           Iniciar sesión en la plataforma
@@ -244,7 +244,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
       {/* Pie institucional / Aviso de auditoría */}
       <div className="pt-4 border-t border-slate-200 text-center">
         <p className="text-[11px] text-slate-400">
-          Sistema de uso exclusivo para personal autorizado de Tutucas. Todas las sesiones son monitoreadas y registradas para auditoría interna.
+          Sistema de uso exclusivo para personal autorizado de distribución y logística. Todas las sesiones son monitoreadas y registradas para auditoría interna.
         </p>
       </div>
 
@@ -260,7 +260,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
               Por políticas de seguridad en logística de mercaderías, los restablecimientos de contraseña se gestionan mediante el Administrador de sucursal o contactando al Centro de Cómputos:
             </p>
             <div className="bg-slate-50 p-2.5 rounded border border-slate-200 text-xs font-mono text-slate-700 space-y-1">
-              <div>Email: <strong>soporte@tutucas.com.ar</strong></div>
+              <div>Email: <strong>soporte@distribuidora.com.ar</strong></div>
               <div>Tel: <strong>+54 (221) 456-7890</strong></div>
             </div>
             <div className="flex justify-end pt-2">
