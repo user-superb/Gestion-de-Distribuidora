@@ -42,6 +42,24 @@ export interface HojaDeRuta {
   visitas?: Visita[];
 }
 
+export interface NuevoComercioDto {
+  razonSocial: string;
+  domicilio: string;
+  localidad?: string;
+  telefono?: string;
+  cuit?: string;
+}
+
+export interface CargaEntregaManualDto {
+  comercioId?: string;
+  nuevoComercio?: NuevoComercioDto;
+  marcaId: string;
+  importe: number;
+  numeroRemito?: string;
+  fechaEmision?: string;
+  sucursalId?: string;
+}
+
 export const remitoService = {
   async getComercios(): Promise<Comercio[]> {
     const res = await db.query(
@@ -59,7 +77,7 @@ export const remitoService = {
     const res = await db.query(
       `SELECT id::text as id, numero as "numeroRemito", comercio_id::text as "comercioId",
               marca_id::text as "marcaId",
-              (CASE WHEN importe_centavos > 1000000 THEN importe_centavos / 100 ELSE importe_centavos END)::int as importe,
+              (CASE WHEN importe_centavos >= 100 THEN importe_centavos / 100 ELSE importe_centavos END)::int as importe,
               'PENDIENTE' as estado, visita_id::text as "visitaId"
        FROM remito
        WHERE visita_id IS NULL AND estado = 'pendiente'
@@ -72,7 +90,7 @@ export const remitoService = {
     const res = await db.query(
       `SELECT id::text as id, numero as "numeroRemito", comercio_id::text as "comercioId",
               marca_id::text as "marcaId",
-              (CASE WHEN importe_centavos > 1000000 THEN importe_centavos / 100 ELSE importe_centavos END)::int as importe,
+              (CASE WHEN importe_centavos >= 100 THEN importe_centavos / 100 ELSE importe_centavos END)::int as importe,
               (CASE WHEN visita_id IS NOT NULL THEN 'AGRUPADO' ELSE 'PENDIENTE' END) as estado,
               visita_id::text as "visitaId"
        FROM remito
@@ -95,7 +113,7 @@ export const remitoService = {
       const remitosRes = await db.query(
         `SELECT id::text as id, numero as "numeroRemito", comercio_id::text as "comercioId",
                 marca_id::text as "marcaId",
-                (CASE WHEN importe_centavos > 1000000 THEN importe_centavos / 100 ELSE importe_centavos END)::int as importe,
+                (CASE WHEN importe_centavos >= 100 THEN importe_centavos / 100 ELSE importe_centavos END)::int as importe,
                 'AGRUPADO' as estado, visita_id::text as "visitaId"
          FROM remito
          WHERE visita_id::text = $1
@@ -120,6 +138,153 @@ export const remitoService = {
     return visitas;
   },
 
+  async crearEntregaManual(
+    dto: CargaEntregaManualDto
+  ): Promise<{
+    success: boolean;
+    remito?: Remito;
+    comercio?: Comercio;
+    error?: string;
+    status?: number;
+    esNuevoComercio?: boolean;
+  }> {
+    // 1. Validar importe
+    const importeNum = Number(dto.importe);
+    if (!dto.importe || isNaN(importeNum) || importeNum <= 0) {
+      return {
+        success: false,
+        error: 'El importe de la entrega debe ser un valor numérico positivo mayor a 0.',
+        status: 400,
+      };
+    }
+
+    // 2. Validar marca
+    if (!dto.marcaId) {
+      return {
+        success: false,
+        error: 'Debe seleccionar una marca proveedora para la entrega.',
+        status: 400,
+      };
+    }
+
+    const marcaCheck = await db.query('SELECT id::text as id, nombre FROM marca WHERE id::text = $1', [
+      String(dto.marcaId),
+    ]);
+    if (marcaCheck.rows.length === 0) {
+      return {
+        success: false,
+        error: 'La marca seleccionada no existe en el sistema.',
+        status: 404,
+      };
+    }
+
+    // 3. Resolver comercio destinatario (Escenario 1 vs Escenario 2)
+    let comercioId = dto.comercioId ? String(dto.comercioId).trim() : '';
+    let comercioObj: Comercio | undefined;
+    let esNuevoComercio = false;
+
+    if (!comercioId) {
+      // Escenario 2: Comercio no registrado -> Carga básica de datos
+      const nuevo = dto.nuevoComercio;
+      if (!nuevo || !nuevo.razonSocial?.trim() || !nuevo.domicilio?.trim()) {
+        return {
+          success: false,
+          error:
+            'Debe asociar la entrega a un comercio registrado o ingresar los datos básicos del destinatario (Razón social y Domicilio).',
+          status: 400,
+        };
+      }
+
+      const insertComRes = await db.query(
+        `INSERT INTO comercio (razon_social, domicilio, localidad, telefono, cuit, activo)
+         VALUES ($1, $2, $3, $4, $5, true)
+         RETURNING id::text as id, razon_social as "razonSocial", domicilio`,
+        [
+          nuevo.razonSocial.trim(),
+          nuevo.domicilio.trim(),
+          nuevo.localidad?.trim() || null,
+          nuevo.telefono?.trim() || null,
+          nuevo.cuit?.trim() || null,
+        ]
+      );
+      comercioObj = insertComRes.rows[0];
+      comercioId = comercioObj!.id;
+      esNuevoComercio = true;
+    } else {
+      // Escenario 1: Comercio ya registrado
+      const comRes = await db.query(
+        'SELECT id::text as id, razon_social as "razonSocial", domicilio FROM comercio WHERE id::text = $1',
+        [comercioId]
+      );
+      if (comRes.rows.length === 0) {
+        return {
+          success: false,
+          error: 'El comercio seleccionado no existe en el sistema.',
+          status: 404,
+        };
+      }
+      comercioObj = comRes.rows[0];
+    }
+
+    // 4. Validar o auto-generar número de remito interno
+    let numero = dto.numeroRemito?.trim();
+    if (numero) {
+      const dupCheck = await db.query(
+        'SELECT id FROM remito WHERE marca_id::text = $1 AND numero = $2',
+        [String(dto.marcaId), numero]
+      );
+      if (dupCheck.rows.length > 0) {
+        return {
+          success: false,
+          error: `Ya existe un remito con el número ${numero} para esta marca.`,
+          status: 409,
+        };
+      }
+    } else {
+      // Generar número interno único
+      const randSuffix = Math.floor(100000 + Math.random() * 900000);
+      numero = `REM-MAN-${randSuffix}`;
+    }
+
+    // 5. Insertar remito en estado 'pendiente' y archivo_id = NULL
+    const sucursalId = dto.sucursalId ? String(dto.sucursalId) : '1';
+    const importeCentavos = Math.round(importeNum * 100);
+
+    let nuevoRemito: Remito;
+    try {
+      const remitoRes = await db.query(
+        `INSERT INTO remito (numero, marca_id, comercio_id, sucursal_id, importe_centavos, estado, visita_id)
+         VALUES ($1, $2::bigint, $3::bigint, $4::bigint, $5::bigint, 'pendiente', NULL)
+         RETURNING id::text as id, numero as "numeroRemito", comercio_id::text as "comercioId",
+                   marca_id::text as "marcaId", (CASE WHEN importe_centavos >= 100 THEN importe_centavos / 100 ELSE importe_centavos END)::int as importe,
+                   'PENDIENTE' as estado, visita_id::text as "visitaId"`,
+        [numero, dto.marcaId, comercioId, sucursalId, importeCentavos]
+      );
+      nuevoRemito = remitoRes.rows[0];
+    } catch (err: any) {
+      if (err.message?.includes('sucursal_id')) {
+        const remitoRes = await db.query(
+          `INSERT INTO remito (numero, marca_id, comercio_id, importe_centavos, estado, visita_id)
+           VALUES ($1, $2::bigint, $3::bigint, $4::bigint, 'pendiente', NULL)
+           RETURNING id::text as id, numero as "numeroRemito", comercio_id::text as "comercioId",
+                     marca_id::text as "marcaId", (CASE WHEN importe_centavos >= 100 THEN importe_centavos / 100 ELSE importe_centavos END)::int as importe,
+                     'PENDIENTE' as estado, visita_id::text as "visitaId"`,
+          [numero, dto.marcaId, comercioId, importeCentavos]
+        );
+        nuevoRemito = remitoRes.rows[0];
+      } else {
+        throw err;
+      }
+    }
+
+    return {
+      success: true,
+      remito: nuevoRemito,
+      comercio: comercioObj,
+      esNuevoComercio,
+    };
+  },
+
   async asignarComercioARemito(remitoId: string, nuevoComercioId: string): Promise<void> {
     await db.query('UPDATE remito SET comercio_id = $1::bigint WHERE id::text = $2', [
       nuevoComercioId,
@@ -138,7 +303,7 @@ export const remitoService = {
     const res = await db.query(
       `SELECT id::text as id, numero as "numeroRemito", comercio_id::text as "comercioId",
               marca_id::text as "marcaId",
-              (CASE WHEN importe_centavos > 1000000 THEN importe_centavos / 100 ELSE importe_centavos END)::int as importe,
+              (CASE WHEN importe_centavos >= 100 THEN importe_centavos / 100 ELSE importe_centavos END)::int as importe,
               estado, visita_id::text as "visitaId"
        FROM remito
        WHERE id::text = ANY($1) AND visita_id IS NULL`,
@@ -203,7 +368,7 @@ export const remitoService = {
     const remitosConsolidadosRes = await db.query(
       `SELECT id::text as id, numero as "numeroRemito", comercio_id::text as "comercioId",
               marca_id::text as "marcaId",
-              (CASE WHEN importe_centavos > 1000000 THEN importe_centavos / 100 ELSE importe_centavos END)::int as importe,
+              (CASE WHEN importe_centavos >= 100 THEN importe_centavos / 100 ELSE importe_centavos END)::int as importe,
               'AGRUPADO' as estado, visita_id::text as "visitaId"
        FROM remito
        WHERE visita_id::text = $1
@@ -264,9 +429,6 @@ export const remitoService = {
       return { success: false, error: 'Debe especificar la lista de visitas a ordenar.', status: 400 };
     }
 
-    // Criterio de Aceptación ESCENARIO 2:
-    // "El administrativo intenta reordenar una hoja de ruta que ya fue despachada.
-    // El sistema bloquea el cambio por encontrarse en ejecución."
     let targetHojaId = hojaDeRutaId;
     if (!targetHojaId) {
       const checkHoja = await db.query(
@@ -292,14 +454,10 @@ export const remitoService = {
       }
     }
 
-    // Criterio de Aceptación ESCENARIO 1:
-    // "El administrativo arrastra una visita a la primera posición. El sistema actualiza la secuencia numérica de toda la ruta."
-    // Fase 1: valores temporales negativos para no colisionar con restricción UNIQUE (hoja_de_ruta_id, orden)
     for (let i = 0; i < visitaIds.length; i++) {
       await db.query('UPDATE visita SET orden = $1 WHERE id::text = $2', [-(i + 1), visitaIds[i]]);
     }
 
-    // Fase 2: asignar orden 1, 2, 3...
     for (let i = 0; i < visitaIds.length; i++) {
       await db.query('UPDATE visita SET orden = $1 WHERE id::text = $2', [i + 1, visitaIds[i]]);
     }

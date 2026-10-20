@@ -18,9 +18,11 @@ import {
   ArrowUp,
   ArrowDown,
   Truck,
+  Plus,
 } from 'lucide-react';
 import { Remito, Visita, Comercio, Marca, HojaDeRuta } from '../../types/domain';
 import { remitoService } from '../../services/remitoService';
+import { ModalCargaManual } from './ModalCargaManual';
 
 export const AgrupadorRemitos: React.FC = () => {
   const [pendientes, setPendientes] = useState<Remito[]>([]);
@@ -34,6 +36,7 @@ export const AgrupadorRemitos: React.FC = () => {
   const [ultimaVisitaId, setUltimaVisitaId] = useState<string | null>(null);
   const [mensaje, setMensaje] = useState<{ tipo: 'error' | 'exito'; texto: string } | null>(null);
   const [backendConectado, setBackendConectado] = useState<boolean>(false);
+  const [modalCargaManualAbierto, setModalCargaManualAbierto] = useState<boolean>(false);
 
   const getComercio = (id: string) =>
     comercios.find((c) => c.id === id) || remitoService.getComercioById(id);
@@ -114,6 +117,11 @@ export const AgrupadorRemitos: React.FC = () => {
       tipo: 'exito',
       texto: 'La visita fue desagrupada y sus remitos volvieron a la bandeja de pendientes.',
     });
+  };
+
+  const handleCargaManualExitosa = async (_remito: Remito, textoExito: string) => {
+    await recargarDatos();
+    setMensaje({ tipo: 'exito', texto: textoExito });
   };
 
   const handleResetDemo = async () => {
@@ -326,9 +334,17 @@ export const AgrupadorRemitos: React.FC = () => {
                 1. Remitos Pendientes de Agrupar ({pendientes.length})
               </h3>
             </div>
-            <span className="text-[11px] text-slate-500">
-              Seleccioná remitos del mismo comercio
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setModalCargaManualAbierto(true)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors shadow-2xs cursor-pointer"
+                title="Cargar manualmente entregas no contempladas en la importación"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Cargar Entrega Manual</span>
+              </button>
+            </div>
           </div>
 
           {/* Barra de Búsqueda Rápida y Filtros */}
@@ -746,6 +762,15 @@ export const AgrupadorRemitos: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Modal para Carga Manual de Entregas (Escenario 1 y Escenario 2) */}
+      <ModalCargaManual
+        isOpen={modalCargaManualAbierto}
+        onClose={() => setModalCargaManualAbierto(false)}
+        comercios={comercios}
+        marcas={marcas}
+        onSuccess={handleCargaManualExitosa}
+      />
     </div>
   );
 };

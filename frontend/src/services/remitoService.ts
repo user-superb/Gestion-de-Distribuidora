@@ -1,4 +1,4 @@
-import { Remito, Visita, Comercio, Marca, HojaDeRuta } from '../types/domain';
+import { Remito, Visita, Comercio, Marca, HojaDeRuta, CargaEntregaManualDto } from '../types/domain';
 
 export const MOCK_COMERCIOS: Comercio[] = [
   { id: 'com-101', razonSocial: 'Mayorista El Sol S.R.L.', domicilio: 'Av. Hipólito Yrigoyen 4500, Lanús' },
@@ -47,6 +47,73 @@ export const remitoService = {
     mockRemitos = mockRemitos.map((r) =>
       r.id === remitoId ? { ...r, comercioId: nuevoComercioId } : r
     );
+  },
+
+  crearEntregaManual: (
+    dto: CargaEntregaManualDto
+  ): { success: boolean; remito?: Remito; comercio?: Comercio; error?: string } => {
+    // 1. Validar importe
+    const importeNum = Number(dto.importe);
+    if (!dto.importe || isNaN(importeNum) || importeNum <= 0) {
+      return { success: false, error: 'El importe de la entrega debe ser un valor numérico positivo mayor a 0.' };
+    }
+
+    // 2. Validar marca
+    if (!dto.marcaId) {
+      return { success: false, error: 'Debe seleccionar una marca proveedora para la entrega.' };
+    }
+
+    // 3. Resolver comercio destinatario
+    let comercioId = dto.comercioId ? String(dto.comercioId).trim() : '';
+    let comercioObj: Comercio | undefined;
+
+    if (!comercioId) {
+      // Escenario 2: Comercio no registrado
+      const nuevo = dto.nuevoComercio;
+      if (!nuevo || !nuevo.razonSocial?.trim() || !nuevo.domicilio?.trim()) {
+        return {
+          success: false,
+          error:
+            'Debe asociar la entrega a un comercio registrado o ingresar los datos básicos del destinatario (Razón social y Domicilio).',
+        };
+      }
+      comercioId = `com-${Date.now().toString().slice(-4)}`;
+      comercioObj = {
+        id: comercioId,
+        razonSocial: nuevo.razonSocial.trim(),
+        domicilio: nuevo.domicilio.trim(),
+      };
+      cachedComercios.push(comercioObj);
+    } else {
+      // Escenario 1: Comercio ya registrado
+      comercioObj = cachedComercios.find((c) => c.id === comercioId);
+      if (!comercioObj) {
+        return { success: false, error: 'El comercio seleccionado no existe en el sistema.' };
+      }
+    }
+
+    // 4. Resolver o auto-generar número de remito interno
+    let numero = dto.numeroRemito?.trim();
+    if (numero) {
+      const existe = mockRemitos.some((r) => r.marcaId === dto.marcaId && r.numeroRemito === numero);
+      if (existe) {
+        return { success: false, error: `Ya existe un remito con el número ${numero} para esta marca.` };
+      }
+    } else {
+      numero = `REM-MAN-${Math.floor(100000 + Math.random() * 900000)}`;
+    }
+
+    const nuevoRemito: Remito = {
+      id: `rem-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 1000)}`,
+      numeroRemito: numero,
+      comercioId,
+      marcaId: dto.marcaId,
+      importe: importeNum,
+      estado: 'PENDIENTE',
+    };
+
+    mockRemitos.push(nuevoRemito);
+    return { success: true, remito: nuevoRemito, comercio: comercioObj };
   },
 
   agruparEnVisita: (remitosIds: string[]): { success: boolean; visita?: Visita; error?: string } => {
@@ -102,24 +169,26 @@ export const remitoService = {
       estado: 'pendiente',
     };
 
-    mockVisitas = [nuevaVisita, ...mockVisitas];
+    mockVisitas.push(nuevaVisita);
     return { success: true, visita: nuevaVisita };
   },
 
-  getHojaDeRutaActiva: (): HojaDeRuta => ({ ...mockHojaDeRuta }),
+  getHojaDeRutaActiva: (): HojaDeRuta | null => {
+    return { ...mockHojaDeRuta, visitas: [...mockVisitas] };
+  },
 
-  cambiarEstadoHojaDeRuta: (nuevoEstado: HojaDeRuta['estado']): void => {
-    mockHojaDeRuta.estado = nuevoEstado;
+  cambiarEstadoHojaDeRuta: (nuevoEstado: 'borrador' | 'en_curso'): void => {
+    mockHojaDeRuta = { ...mockHojaDeRuta, estado: nuevoEstado };
   },
 
   reordenarVisitas: (
     visitaIds: string[]
   ): { success: boolean; visitas?: Visita[]; error?: string; status?: number } => {
-    if (!visitaIds || visitaIds.length === 0) {
+    if (!Array.isArray(visitaIds) || visitaIds.length === 0) {
       return { success: false, error: 'Debe especificar la lista de visitas a ordenar.', status: 400 };
     }
 
-    if (mockHojaDeRuta.estado === 'en_curso' || mockHojaDeRuta.estado === 'cerrada') {
+    if (mockHojaDeRuta.estado === 'en_curso' || mockHojaDeRuta.estado === 'cerrada' || mockHojaDeRuta.estado === 'anulada') {
       return {
         success: false,
         error: 'No se puede modificar el orden: la hoja de ruta ya fue despachada y se encuentra en ejecución.',
@@ -160,6 +229,8 @@ export const remitoService = {
       fechaReparto: new Date().toISOString().split('T')[0],
       estado: 'borrador',
     };
+    cachedComercios = [...MOCK_COMERCIOS];
+    cachedMarcas = [...MOCK_MARCAS];
   },
 
   // -------------------------------------------------------------
@@ -200,6 +271,30 @@ export const remitoService = {
       // Fallback
     }
     return remitoService.getMarcas();
+  },
+
+  async crearEntregaManualAsync(
+    dto: CargaEntregaManualDto
+  ): Promise<{ success: boolean; remito?: Remito; comercio?: Comercio; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/remitos/manual`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dto),
+        signal: AbortSignal.timeout(3000),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (data.comercio && !cachedComercios.some((c) => c.id === data.comercio.id)) {
+          cachedComercios.push(data.comercio);
+        }
+        return data;
+      }
+      return { success: false, error: data.error || 'Error al procesar la entrega manual.' };
+    } catch {
+      // Fallback a lógica en memoria
+    }
+    return remitoService.crearEntregaManual(dto);
   },
 
   async asignarComercioARemitoAsync(remitoId: string, nuevoComercioId: string): Promise<void> {

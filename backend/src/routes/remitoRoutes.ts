@@ -49,6 +49,18 @@ remitoRouter.get('/visitas', async (_req, res) => {
   }
 });
 
+remitoRouter.post('/remitos/manual', async (req, res) => {
+  try {
+    const result = await remitoService.crearEntregaManual(req.body);
+    if (!result.success) {
+      return res.status(result.status || 400).json(result);
+    }
+    res.status(201).json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 remitoRouter.post('/remitos/asignar-comercio', async (req, res) => {
   try {
     const { remitoId, nuevoComercioId } = req.body;
@@ -126,4 +138,3 @@ remitoRouter.put('/visitas/reordenar', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-

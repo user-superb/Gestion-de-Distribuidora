@@ -158,3 +158,106 @@ describe('Historia de Usuario #13 - Ordenar Secuencias de Visitas', () => {
     expect(resultado.error).toMatch(/despachada.*en ejecución|en ejecución/i);
   });
 });
+
+describe('Historia de Usuario: Carga Manual de Entregas', () => {
+  beforeEach(() => {
+    remitoService.resetearDatosMock();
+  });
+
+  it('ESCENARIO 1: Carga manual exitosa de comercio registrado: Se ingresan los datos de una nueva entrega para un comercio ya registrado. El sistema genera un remito interno disponible para asignar.', () => {
+    const totalInicial = remitoService.getRemitosPendientes().length;
+
+    const res = remitoService.crearEntregaManual({
+      comercioId: 'com-101',
+      marcaId: 'marca-A',
+      importe: 55000,
+      numeroRemito: 'MAN-REG-99',
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.remito).toBeDefined();
+    expect(res.remito?.comercioId).toBe('com-101');
+    expect(res.remito?.marcaId).toBe('marca-A');
+    expect(res.remito?.importe).toBe(55000);
+    expect(res.remito?.estado).toBe('PENDIENTE');
+
+    // Debe incrementar la cantidad de pendientes
+    const pendientes = remitoService.getRemitosPendientes();
+    expect(pendientes.length).toBe(totalInicial + 1);
+
+    // El nuevo remito debe estar disponible para agrupar
+    const agruparRes = remitoService.agruparEnVisita([res.remito!.id]);
+    expect(agruparRes.success).toBe(true);
+    expect(agruparRes.visita?.comercioId).toBe('com-101');
+  });
+
+  it('ESCENARIO 2: Carga manual exitosa de comercio no registrado: Se ingresan los datos de una nueva entrega para un comercio no registrado. Se ingresan los datos básicos del comercio. El sistema genera un remito interno disponible para asignar.', () => {
+    const comerciosIniciales = remitoService.getComercios().length;
+
+    const res = remitoService.crearEntregaManual({
+      nuevoComercio: {
+        razonSocial: 'Supermercado Central',
+        domicilio: 'Av. 7 N° 850',
+      },
+      marcaId: 'marca-B',
+      importe: 42000,
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.remito).toBeDefined();
+    expect(res.comercio).toBeDefined();
+    expect(res.comercio?.razonSocial).toBe('Supermercado Central');
+    expect(res.comercio?.domicilio).toBe('Av. 7 N° 850');
+
+    // Debe asociar el remito al nuevo comercio
+    expect(res.remito?.comercioId).toBe(res.comercio?.id);
+    expect(res.remito?.estado).toBe('PENDIENTE');
+    expect(res.remito?.numeroRemito).toMatch(/^REM-MAN-\d+$/);
+
+    // El nuevo comercio debe haberse agregado al listado
+    expect(remitoService.getComercios().length).toBe(comerciosIniciales + 1);
+
+    // El remito debe estar disponible para agrupar
+    const agruparRes = remitoService.agruparEnVisita([res.remito!.id]);
+    expect(agruparRes.success).toBe(true);
+    expect(agruparRes.visita?.comercioId).toBe(res.comercio?.id);
+  });
+
+  it('VALIDACIONES: Rechaza entrega si no hay comercio ni datos básicos', () => {
+    const res = remitoService.crearEntregaManual({
+      marcaId: 'marca-A',
+      importe: 10000,
+    });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/comercio registrado|datos básicos/);
+  });
+
+  it('VALIDACIONES: Rechaza importe menor o igual a cero', () => {
+    const res = remitoService.crearEntregaManual({
+      comercioId: 'com-101',
+      marcaId: 'marca-A',
+      importe: 0,
+    });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/positivo/);
+  });
+
+  it('VALIDACIONES: Rechaza número de remito duplicado para la misma marca', () => {
+    remitoService.crearEntregaManual({
+      comercioId: 'com-101',
+      marcaId: 'marca-A',
+      importe: 12000,
+      numeroRemito: 'R-DUP-1',
+    });
+
+    const dup = remitoService.crearEntregaManual({
+      comercioId: 'com-102',
+      marcaId: 'marca-A',
+      importe: 18000,
+      numeroRemito: 'R-DUP-1',
+    });
+
+    expect(dup.success).toBe(false);
+    expect(dup.error).toMatch(/R-DUP-1/);
+  });
+});

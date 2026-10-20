@@ -39,3 +39,21 @@ export interface HojaDeRuta {
   estado: 'borrador' | 'publicada' | 'en_curso' | 'cerrada' | 'anulada';
   visitas?: Visita[];
 }
+
+export interface NuevoComercioDto {
+  razonSocial: string;
+  domicilio: string;
+  localidad?: string;
+  telefono?: string;
+  cuit?: string;
+}
+
+export interface CargaEntregaManualDto {
+  comercioId?: string;
+  nuevoComercio?: NuevoComercioDto;
+  marcaId: string;
+  importe: number;
+  numeroRemito?: string;
+  fechaEmision?: string;
+  sucursalId?: string;
+}
