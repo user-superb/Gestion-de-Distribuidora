@@ -1,5 +1,6 @@
 BEGIN;
 
+ALTER TABLE usuario ADD COLUMN IF NOT EXISTS rol text NOT NULL DEFAULT 'Administrativo';
 ALTER TABLE usuario DROP CONSTRAINT IF EXISTS usuario_rol_check;
 ALTER TABLE usuario ADD CONSTRAINT usuario_rol_check
   CHECK (rol IN ('Administrador del sistema', 'Administrativo', 'Transportista', 'Supervisor', 'Gerente'));
@@ -9,6 +10,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS usuario_email_login_unico ON usuario (lower(em
 UPDATE usuario
 SET rol = 'Administrativo', actualizado_en = now()
 WHERE usuario = 'admin' AND email = 'admin@tutucas.com.ar';
+
+UPDATE usuario SET rol = 'Transportista' WHERE usuario = 'chofer';
+UPDATE usuario SET rol = 'Supervisor' WHERE usuario = 'supervisor';
+UPDATE usuario SET rol = 'Gerente' WHERE usuario = 'gerencia';
 
 INSERT INTO usuario (usuario, nombre, email, password_hash, rol, es_transportista, activo)
 VALUES (

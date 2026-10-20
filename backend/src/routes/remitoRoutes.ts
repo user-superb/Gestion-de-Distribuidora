@@ -97,6 +97,25 @@ remitoRouter.get('/hoja-de-ruta/activa', async (_req, res) => {
   }
 });
 
+remitoRouter.get('/hojas-de-ruta', async (_req, res) => {
+  try {
+    const hojas = await remitoService.getHojasDeRuta();
+    res.json(hojas);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+remitoRouter.delete('/hojas-de-ruta/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await remitoService.eliminarHojaDeRuta(id);
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 remitoRouter.patch('/hoja-de-ruta/:id/estado', async (req, res) => {
   try {
     const { id } = req.params;
@@ -108,6 +127,34 @@ remitoRouter.patch('/hoja-de-ruta/:id/estado', async (req, res) => {
     res.json({ success: true, id, estado });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+remitoRouter.patch('/hoja-de-ruta/:id/fecha', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const fechaReparto = req.body?.fechaReparto ?? req.body?.fecha;
+    const result = await remitoService.asignarFechaHojaDeRuta(fechaReparto, id);
+    if (!result.success) {
+      return res.status(result.status || 422).json(result);
+    }
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+remitoRouter.patch('/hoja-de-ruta/fecha', async (req, res) => {
+  try {
+    const fechaReparto = req.body?.fechaReparto ?? req.body?.fecha;
+    const hojaDeRutaId = req.body?.hojaDeRutaId;
+    const result = await remitoService.asignarFechaHojaDeRuta(fechaReparto, hojaDeRutaId);
+    if (!result.success) {
+      return res.status(result.status || 422).json(result);
+    }
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -126,4 +173,3 @@ remitoRouter.put('/visitas/reordenar', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-

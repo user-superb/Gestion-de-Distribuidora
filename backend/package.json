@@ -7,8 +7,9 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "tsx --test src/__tests__/remitoApi.test.ts src/__tests__/authApi.test.ts src/__tests__/usuarioApi.test.ts src/__tests__/secuenciaVisitas.test.ts",
+    "test": "tsx --test src/__tests__/remitoApi.test.ts src/__tests__/authApi.test.ts src/__tests__/usuarioApi.test.ts src/__tests__/secuenciaVisitas.test.ts src/__tests__/fechaHojaRuta.test.ts",
     "db:init": "tsx src/scripts/initDb.ts",
+    "db:migrate": "tsx src/scripts/migrateAll.ts",
     "db:migrate-admin": "tsx src/scripts/migrateAdminRole.ts",
     "db:migrate-permissions": "tsx src/scripts/migratePermissions.ts",
     "db:query": "tsx src/scripts/queryDb.ts"

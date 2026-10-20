@@ -19,7 +19,14 @@ INSERT INTO usuario (usuario, nombre, email, password_hash, rol, es_transportist
   ('chofer', 'Carlos Repartidor', 'chofer@tutucas.com.ar', '$2b$10$e3NYwqO7uVTBhE56XYXR3uKzT9pm6IVV/LnAfghzSx50r1FgP5HuO', 'Transportista', true, true),
   ('supervisor', 'Valeria Logística', 'supervisor@tutucas.com.ar', '$2b$10$e3NYwqO7uVTBhE56XYXR3uKzT9pm6IVV/LnAfghzSx50r1FgP5HuO', 'Supervisor', false, true),
   ('gerencia', 'Roberto Gerente', 'gerencia@tutucas.com.ar', '$2b$10$e3NYwqO7uVTBhE56XYXR3uKzT9pm6IVV/LnAfghzSx50r1FgP5HuO', 'Gerente', false, true)
-ON CONFLICT (usuario) DO NOTHING;
+ON CONFLICT (usuario) DO UPDATE SET
+  nombre = EXCLUDED.nombre,
+  email = EXCLUDED.email,
+  password_hash = EXCLUDED.password_hash,
+  rol = EXCLUDED.rol,
+  es_transportista = EXCLUDED.es_transportista,
+  activo = EXCLUDED.activo,
+  actualizado_en = now();
 
 -- Corrige la cuenta demo existente si se ejecutó una migración anterior que la elevaba.
 UPDATE usuario
@@ -48,12 +55,25 @@ INSERT INTO marca (nombre, activa) VALUES
 ON CONFLICT (nombre) DO NOTHING;
 
 -- 4. Comercios
-INSERT INTO comercio (razon_social, domicilio, localidad, activo) VALUES
+INSERT INTO comercio (razon_social, domicilio, localidad, activo)
+SELECT v.razon_social, v.domicilio, v.localidad, v.activo
+FROM (VALUES
   ('Mayorista El Sol S.R.L.', 'Av. Hipólito Yrigoyen 4500, Lanús', 'Lanús', true),
   ('Autoservicio Luna', 'Belgrano 1230, Avellaneda', 'Avellaneda', true),
-  ('Distribuidora Los Andes', 'Camino Gral. Belgrano 1800, Gerli', 'Gerli', true);
+  ('Distribuidora Los Andes', 'Camino Gral. Belgrano 1800, Gerli', 'Gerli', true)
+) AS v(razon_social, domicilio, localidad, activo)
+WHERE NOT EXISTS (
+  SELECT 1 FROM comercio c WHERE c.razon_social = v.razon_social
+);
 
--- 5. Remitos de Prueba (Importes en centavos)
+-- 5. Hoja de Ruta Inicial de Prueba (en estado borrador)
+INSERT INTO hoja_de_ruta (sucursal_id, transportista_id, fecha_reparto, estado)
+SELECT s.id, NULL, CURRENT_DATE, 'borrador'
+FROM sucursal s
+WHERE s.nombre = 'Sucursal Central - La Plata'
+  AND NOT EXISTS (SELECT 1 FROM hoja_de_ruta);
+
+-- 6. Remitos de Prueba (Importes en centavos)
 -- Nota: Asociamos a sucursal 1 y a los IDs de marca y comercio generados
 INSERT INTO remito (marca_id, comercio_id, sucursal_id, numero, importe_centavos, estado)
 SELECT m.id, c.id, s.id, r.numero, r.importe_centavos, 'pendiente'
@@ -75,7 +95,7 @@ ON CONFLICT (marca_id, numero) DO NOTHING;
 UPDATE remito SET estado = 'entregado', entregado_en = now() - interval '12 days'
 WHERE numero IN ('R-0001-45120', 'R-0002-89310', 'R-0001-45122', 'R-0002-89311');
 
--- 6. Movimientos bancarios de ejemplo para probar E5-04
+-- 7. Movimientos bancarios de ejemplo para probar E5-04
 INSERT INTO cuenta_recepcion (sucursal_id, alias, banco)
 SELECT id, 'Cuenta operativa demo', 'Banco Demo'
 FROM sucursal

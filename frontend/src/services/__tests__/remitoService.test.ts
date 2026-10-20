@@ -158,3 +158,72 @@ describe('Historia de Usuario #13 - Ordenar Secuencias de Visitas', () => {
     expect(resultado.error).toMatch(/despachada.*en ejecución|en ejecución/i);
   });
 });
+
+
+describe('Historia de Usuario #15 - Asignar Fecha a la Hoja de Ruta', () => {
+  beforeEach(() => {
+    remitoService.resetearDatosMock();
+  });
+
+  it('ESCENARIO 1: Programación exitosa: Se define la fecha (en el día o a futuro) y la ruta queda en estado "Pendiente de Despacho"', () => {
+    const hojaInicial = remitoService.getHojaDeRutaActiva();
+    expect(hojaInicial.estado).toBe('borrador');
+
+    const resultado = remitoService.asignarFechaHojaDeRuta('2026-10-25', '2026-10-20');
+    expect(resultado.success).toBe(true);
+    expect(resultado.hojaDeRuta).toBeDefined();
+    expect(resultado.hojaDeRuta?.fechaReparto).toBe('2026-10-25');
+    expect(resultado.hojaDeRuta?.estado).toBe('pendiente_de_despacho');
+
+    // También debe permitir programar en el mismo día actual
+    const resultadoHoy = remitoService.asignarFechaHojaDeRuta('2026-10-20', '2026-10-20');
+    expect(resultadoHoy.success).toBe(true);
+    expect(resultadoHoy.hojaDeRuta?.fechaReparto).toBe('2026-10-20');
+    expect(resultadoHoy.hojaDeRuta?.estado).toBe('pendiente_de_despacho');
+  });
+
+  it('ESCENARIO 2: Fallo por fecha pretérita: El administrativo intenta ingresar una fecha anterior a la actual. El sistema rechaza la programación.', () => {
+    const hojaInicial = remitoService.getHojaDeRutaActiva();
+
+    const resultado = remitoService.asignarFechaHojaDeRuta('2026-10-19', '2026-10-20');
+    expect(resultado.success).toBe(false);
+    expect(resultado.status).toBe(422);
+    expect(resultado.error).toMatch(/fecha anterior a la actual|en el día o a futuro/i);
+
+    // El estado debe mantenerse en borrador sin alterar la fecha previa
+    const hojaPosterior = remitoService.getHojaDeRutaActiva();
+    expect(hojaPosterior.estado).toBe('borrador');
+    expect(hojaPosterior.fechaReparto).toBe(hojaInicial.fechaReparto);
+  });
+
+  it('FLUJO MULTI-HOJA DE RUTA: Las visitas programadas pasan a la pestaña 3 y solo regresan a la pestaña 2 al eliminar la hoja de ruta', () => {
+    // Armamos primera visita en pestaña 2
+    const v1 = remitoService.agruparEnVisita(['rem-1', 'rem-2']);
+    expect(v1.visita?.hojaDeRutaId).toBeNull();
+
+    // Programamos la primera Hoja de Ruta
+    const prog1 = remitoService.asignarFechaHojaDeRuta('2026-10-25', '2026-10-20');
+    expect(prog1.success).toBe(true);
+    const hoja1Id = prog1.hojaDeRuta!.id;
+
+    // La visita ya no está en armado (pestaña 2)
+    expect(remitoService.getVisitas().filter((v) => !v.hojaDeRutaId).length).toBe(0);
+    expect(remitoService.getVisitas().filter((v) => v.hojaDeRutaId === hoja1Id).length).toBe(1);
+
+    // Armamos segunda visita en pestaña 2 y programamos una segunda Hoja de Ruta
+    const v2 = remitoService.agruparEnVisita(['rem-3', 'rem-4']);
+    expect(v2.visita?.hojaDeRutaId).toBeNull();
+    const prog2 = remitoService.asignarFechaHojaDeRuta('2026-10-26', '2026-10-20');
+    expect(prog2.success).toBe(true);
+    const hoja2Id = prog2.hojaDeRuta!.id;
+
+    expect(remitoService.getHojasDeRuta().length).toBe(2);
+
+    // Eliminamos la primera Hoja de Ruta en pestaña 3: su visita vuelve a pestaña 2 (hojaDeRutaId: null)
+    const del1 = remitoService.eliminarHojaDeRuta(hoja1Id);
+    expect(del1.success).toBe(true);
+    expect(remitoService.getHojasDeRuta().length).toBe(1);
+    expect(remitoService.getVisitas().filter((v) => !v.hojaDeRutaId).length).toBe(1);
+    expect(remitoService.getVisitas().filter((v) => v.hojaDeRutaId === hoja2Id).length).toBe(1);
+  });
+});
