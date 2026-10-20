@@ -73,6 +73,35 @@ transportistaRouter.post('/remitos/:id/confirmar', async (req: Request, res: Res
 });
 
 /**
+ * POST /api/transportista/visitas/:id/confirmar-todo
+ * HU #23: Confirmar la entrega masiva de remitos multimarca de toda la visita
+ */
+transportistaRouter.post('/visitas/:id/confirmar-todo', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const { timestamp, transportistaId, latitud, longitud, entregas } = req.body;
+
+    const resolvedTransportistaId = transportistaId || (await resolverTransportistaId(req));
+
+    const resultado = await transportistaService.confirmarTodaLaVisita(id, {
+      timestamp: timestamp || new Date().toISOString(),
+      transportistaId: resolvedTransportistaId,
+      latitud: Number(latitud),
+      longitud: Number(longitud),
+      entregas,
+    });
+
+    if (!resultado.success) {
+      return res.status(422).json(resultado);
+    }
+
+    return res.status(200).json(resultado);
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * POST /api/transportista/sincronizar
  * Sincronización en lote de entregas registradas sin conexión (Escenario 2)
  */

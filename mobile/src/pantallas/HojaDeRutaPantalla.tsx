@@ -2,7 +2,7 @@ import { FlatList, Pressable, RefreshControl, Text, View } from 'react-native';
 import type { HojaGuardada } from '../almacenamiento';
 import { Aviso } from '../componentes/Aviso';
 import { formatearPesos } from '../dominio/dinero';
-import { ColaPorClave, estadoCobro, ETIQUETA_COBRO, EstadoLocal, resumenEntregas } from '../dominio/estadoVisita';
+import { ColaPorClave, estadoCobro, ETIQUETA_COBRO, EstadoLocal, resumenEntregas, resumenVisitaEntrega } from '../dominio/estadoVisita';
 import { colores, estilos } from '../estilos';
 import type { Visita } from '../tipos';
 
@@ -66,12 +66,13 @@ export function HojaDeRutaPantalla({ guardada, cola, error, cargando, enLinea, m
       renderItem={({ item: visita }) => {
         const estado = estadoCobro(visita, cola);
         const entregas = resumenEntregas(visita, cola);
+        const resumenEntrega = resumenVisitaEntrega(visita, cola);
         return (
           <Pressable
             style={estilos.tarjeta}
             onPress={() => onAbrirVisita(visita)}
             accessibilityRole="button"
-            accessibilityLabel={`Visita ${visita.orden ?? ''} ${visita.comercio.razonSocial}, ${entregas.confirmados} de ${entregas.total} entregados, ${ETIQUETA_COBRO[estado]}`}
+            accessibilityLabel={`Visita ${visita.orden ?? ''} ${visita.comercio.razonSocial}, ${resumenEntrega.etiqueta}, ${ETIQUETA_COBRO[estado]}`}
           >
             <View style={estilos.fila}>
               <Text style={[estilos.texto, { fontWeight: '700', flex: 1 }]}>
@@ -87,8 +88,17 @@ export function HojaDeRutaPantalla({ guardada, cola, error, cargando, enLinea, m
               <Text style={[estilos.texto, { fontWeight: '700' }]}>
                 {visita.importe.sinCobroEnDestino ? 'Sin cobro en destino' : formatearPesos(visita.importe.totalCentavos)}
               </Text>
-              <Text style={{ color: entregas.confirmados === entregas.total ? colores.ok : colores.textoSuave, fontWeight: '700' }}>
-                {entregas.confirmados}/{entregas.total} entregados
+              <Text
+                style={{
+                  color: resumenEntrega.conExcepciones
+                    ? colores.alerta
+                    : resumenEntrega.completada
+                    ? colores.ok
+                    : colores.textoSuave,
+                  fontWeight: '700',
+                }}
+              >
+                {resumenEntrega.etiqueta}
               </Text>
             </View>
           </Pressable>

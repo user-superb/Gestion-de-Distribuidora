@@ -1,5 +1,5 @@
 /// <reference types="node" />
-// Cola de sincronización sin conexión: entregas (HU #22 E2) y cobros (HU #26 E2, #29 E2), con idempotencia.
+// Cola de sincronización sin conexión: entregas (HU #22 E2), entregas multimarca en lote (HU #23 E3) y cobros (HU #26 E2, #29 E2), con idempotencia.
 import { beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { ErrorApi, ErrorRed } from '../errores';
@@ -24,6 +24,16 @@ function cobro(visitaId: string, clave: string, registradoEn?: string): Operacio
 
 function entrega(remitoId: string, timestamp = '2026-10-19T07:55:00.000Z'): Operacion {
   return { tipo: 'entrega', visitaId: '1', remitoId, cuerpo: { timestamp, latitud: -34.92, longitud: -57.95 } };
+}
+
+function entregaLote(visitaId: string, remitoIds: string[], timestamp = '2026-10-19T07:55:00.000Z'): Operacion {
+  const base = { timestamp, latitud: -34.92, longitud: -57.95 };
+  return {
+    tipo: 'entrega_lote',
+    visitaId,
+    cuerpoGeneral: base,
+    entregas: remitoIds.map((remitoId) => ({ remitoId, cuerpo: { ...base } })),
+  };
 }
 
 describe('Cola de operaciones sin conexión', () => {
@@ -135,5 +145,63 @@ describe('Cola de operaciones sin conexión', () => {
     await cola.sincronizar();
     await cola.encolar(cobro('2', 'b'), new Date('2026-10-19T08:00:00.000Z'));
     assert.deepEqual((await cola.listar()).map((item) => item.visitaId), ['2']);
+  });
+
+  describe('HU #23 · Operación de lote multimarca sin conexión (Regla 4 y Escenario 3)', () => {
+    it('ESCENARIO 3: encola lote multimarca como bloque transaccional y alimenta estado individual', async () => {
+      respuesta = async () => { throw new ErrorRed(); };
+      const ts = '2026-10-20T11:00:00.000Z';
+      await cola.encolar(entregaLote('1', ['101', '102', '103'], ts));
+
+      // Se guarda como un solo bloque en la cola
+      const items = await cola.listar();
+      assert.equal(items.length, 1);
+      assert.equal(items[0].tipo, 'entrega_lote');
+      assert.equal(items[0].estado, 'pendiente');
+
+      // estadoPorClave alimenta la UI para cada remito individualmente en 'pendiente' ('sin_sincronizar')
+      const mapa = await cola.estadoPorClave();
+      assert.equal(mapa.get('entrega_lote:1')?.estado, 'pendiente');
+      assert.equal(mapa.get('entrega:101')?.estado, 'pendiente');
+      assert.equal(mapa.get('entrega:102')?.estado, 'pendiente');
+      assert.equal(mapa.get('entrega:103')?.estado, 'pendiente');
+
+      // Intentar sincronizar sin red mantiene los pendientes
+      const resOffline = await cola.sincronizar();
+      assert.equal(resOffline.sincronizados, 0);
+      assert.equal(resOffline.pendientes, 1);
+
+      // Al recuperar conexión, despacha el bloque completo en una sola operación
+      respuesta = async () => undefined;
+      const resOnline = await cola.sincronizar();
+      assert.equal(resOnline.sincronizados, 1);
+      assert.equal(resOnline.pendientes, 0);
+
+      assert.equal(enviados.length, 1);
+      assert.equal(enviados[0].tipo, 'entrega_lote');
+      if (enviados[0].tipo === 'entrega_lote') {
+        assert.equal(enviados[0].cuerpoGeneral.timestamp, ts);
+        assert.equal(enviados[0].entregas.length, 3);
+        assert.equal(enviados[0].entregas[0].remitoId, '101');
+      }
+
+      // El mapa ahora refleja todos como sincronizados
+      const mapaSync = await cola.estadoPorClave();
+      assert.equal(mapaSync.get('entrega:101')?.estado, 'sincronizado');
+      assert.equal(mapaSync.get('entrega:102')?.estado, 'sincronizado');
+      assert.equal(mapaSync.get('entrega:103')?.estado, 'sincronizado');
+    });
+
+    it('al encolar lote multimarca reemplaza entregas individuales previas de los mismos remitos', async () => {
+      // Había una entrega individual previa del remito 101 en cola
+      await cola.encolar(entrega('101'));
+      assert.equal((await cola.listar()).length, 1);
+
+      // Ahora se confirma toda la visita con lote que incluye 101 y 102
+      await cola.encolar(entregaLote('1', ['101', '102']));
+      const items = await cola.listar();
+      assert.equal(items.length, 1);
+      assert.equal(items[0].tipo, 'entrega_lote');
+    });
   });
 });

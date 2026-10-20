@@ -8,6 +8,21 @@ export interface ConfirmarEntregaDto {
   longitud: number;
 }
 
+export interface ItemEntregaLoteDto {
+  remitoId: string;
+  timestamp?: string;
+  latitud?: number;
+  longitud?: number;
+}
+
+export interface ConfirmarTodaLaVisitaDto {
+  timestamp: string;
+  transportistaId: string;
+  latitud: number;
+  longitud: number;
+  entregas?: ItemEntregaLoteDto[];
+}
+
 export interface RemitoEntrega {
   id: string;
   numeroRemito: string;
@@ -266,21 +281,24 @@ export const transportistaService = {
 
       const remitosDeVisita = remitosDeVisitaRes.rows;
       const pendientes = remitosDeVisita.filter(
-        (r) => r.estado !== 'entregado' && r.estado !== 'no_entregado' && r.estado !== 'anulado'
+        (r) => r.estado !== 'entregado' && r.estado !== 'no_entregado' && r.estado !== 'anulado' && r.estado !== 'devuelto'
       );
 
       if (pendientes.length === 0) {
         // TODOS los remitos asociados alcanzaron un estado terminal -> Cerrar visita general
         visitaCerrada = true;
         visitaEstado = 'completada';
+        const tieneExcepciones = remitosDeVisita.some((r) => r.estado === 'no_entregado' || r.estado === 'devuelto');
+        const observacion = tieneExcepciones ? 'Entregada con excepciones' : null;
         await db.query(
           `UPDATE visita
            SET estado = 'completada',
                registrada_en = $1::timestamptz,
                latitud = $2::numeric,
-               longitud = $3::numeric
+               longitud = $3::numeric,
+               observacion = COALESCE($5, observacion)
            WHERE id::text = $4`,
-          [dto.timestamp, dto.latitud, dto.longitud, remitoActualizado.visitaId]
+          [dto.timestamp, dto.latitud, dto.longitud, remitoActualizado.visitaId, observacion]
         );
       } else {
         // La confirmación individual NO cierra la visita general mientras haya remitos pendientes
@@ -305,6 +323,188 @@ export const transportistaService = {
       visitaCerrada,
       visitaEstado,
     };
+  },
+
+  /**
+   * HU #23: Confirmar en un solo paso la entrega de remitos multimarca de toda la visita.
+   * Regla 1: Aplica transición a 'entregado' ÚNICAMENTE sobre remitos en estado 'pendiente' (o 'en_ruta').
+   *          Los remitos ya entregados, rechazados o devueltos conservan su estado original y trazabilidad.
+   * Regla 2: Al no quedar remitos pendientes, la visita pasa a 'completada' (o con observación 'Entregada con excepciones').
+   * Regla 3: Cada remito registra su propio timestamp, GPS y vínculo a su marca.
+   * Regla 4: Procesamiento transaccional atómico (BEGIN...COMMIT).
+   */
+  async confirmarTodaLaVisita(
+    visitaId: string,
+    dto: ConfirmarTodaLaVisitaDto
+  ): Promise<{
+    success: boolean;
+    visitaCerrada: boolean;
+    visitaEstado?: string;
+    conExcepciones?: boolean;
+    entregados?: RemitoEntrega[];
+    totalConfirmados?: number;
+    error?: string;
+  }> {
+    // Validación de parámetros obligatorios (Regla 1 y 3)
+    if (!dto.timestamp || isNaN(Date.parse(dto.timestamp))) {
+      return { success: false, error: 'Timestamp de evento no válido o faltante (Regla 1).', visitaCerrada: false };
+    }
+    if (!dto.transportistaId) {
+      return { success: false, error: 'ID de transportista es obligatorio (Regla 1).', visitaCerrada: false };
+    }
+    if (dto.latitud === undefined || dto.latitud === null || isNaN(dto.latitud)) {
+      return { success: false, error: 'Coordenada GPS (latitud) es obligatoria (Regla 1).', visitaCerrada: false };
+    }
+    if (dto.longitud === undefined || dto.longitud === null || isNaN(dto.longitud)) {
+      return { success: false, error: 'Coordenada GPS (longitud) es obligatoria (Regla 1).', visitaCerrada: false };
+    }
+
+    const cleanTransportistaId = String(dto.transportistaId || '2').replace(/^usr_/, '').trim() || '2';
+
+    // Transacción atómica (Regla 4)
+    const client = await db.getPool().connect();
+    try {
+      await client.query('BEGIN');
+
+      // 1. Verificar existencia de la visita
+      const visitaRes = await client.query(
+        `SELECT id::text as id, estado, observacion FROM visita WHERE id::text = $1`,
+        [visitaId]
+      );
+
+      if (visitaRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return { success: false, error: `Visita con ID ${visitaId} no encontrada.`, visitaCerrada: false };
+      }
+
+      // 2. Obtener todos los remitos de la visita con su marca (Regla 3)
+      const remitosRes = await client.query(
+        `SELECT r.id::text as id, r.numero as "numeroRemito",
+                r.marca_id::text as "marcaId", m.nombre as "marcaNombre",
+                r.comercio_id::text as "comercioId",
+                (CASE WHEN r.importe_centavos > 1000000 THEN r.importe_centavos / 100 ELSE r.importe_centavos END)::int as importe,
+                r.importe_centavos as "importeCentavos",
+                r.estado, r.visita_id::text as "visitaId",
+                r.entregado_en as "entregadoEn",
+                r.entregado_por::text as "entregadoPor",
+                r.latitud, r.longitud
+         FROM remito r
+         JOIN marca m ON m.id = r.marca_id
+         WHERE r.visita_id::text = $1`,
+        [visitaId]
+      );
+
+      const todosRemitos = remitosRes.rows;
+      if (todosRemitos.length === 0) {
+        await client.query('ROLLBACK');
+        return { success: false, error: `La visita ${visitaId} no tiene remitos asociados.`, visitaCerrada: false };
+      }
+
+      // 3. Regla 1: Solo aplicar transición a los remitos que se encuentren en estado 'pendiente' o 'en_ruta'.
+      // Los remitos ya entregados, rechazados o devueltos conservan su estado original y trazabilidad.
+      const entregasMap = new Map<string, ItemEntregaLoteDto>();
+      if (Array.isArray(dto.entregas)) {
+        for (const item of dto.entregas) {
+          entregasMap.set(String(item.remitoId), item);
+        }
+      }
+
+      const remitosActualizados: RemitoEntrega[] = [];
+      let confirmadosAhora = 0;
+
+      for (const r of todosRemitos) {
+        const esPendiente = r.estado === 'pendiente' || r.estado === 'en_ruta';
+
+        if (esPendiente) {
+          const itemDto = entregasMap.get(r.id);
+          const ts = itemDto?.timestamp && !isNaN(Date.parse(itemDto.timestamp)) ? itemDto.timestamp : dto.timestamp;
+          const lat = itemDto?.latitud !== undefined && !isNaN(itemDto.latitud) ? itemDto.latitud : dto.latitud;
+          const lng = itemDto?.longitud !== undefined && !isNaN(itemDto.longitud) ? itemDto.longitud : dto.longitud;
+
+          await client.query(
+            `UPDATE remito
+             SET estado = 'entregado',
+                 entregado_en = $1::timestamptz,
+                 entregado_por = $2::bigint,
+                 latitud = $3::numeric,
+                 longitud = $4::numeric
+             WHERE id::text = $5`,
+            [ts, cleanTransportistaId, lat, lng, r.id]
+          );
+
+          remitosActualizados.push({
+            ...r,
+            estado: 'entregado',
+            entregadoEn: ts,
+            entregadoPor: cleanTransportistaId,
+            latitud: lat,
+            longitud: lng,
+          });
+          confirmadosAhora++;
+        } else {
+          // Remito previo entregado, rechazado o devuelto: se conserva sin tocar
+          remitosActualizados.push({
+            ...r,
+            latitud: r.latitud ? Number(r.latitud) : null,
+            longitud: r.longitud ? Number(r.longitud) : null,
+          });
+        }
+      }
+
+      // 4. Regla 2: Evaluar si quedan remitos pendientes en la visita
+      const pendientesRestantes = remitosActualizados.filter(
+        (r) => r.estado !== 'entregado' && r.estado !== 'no_entregado' && r.estado !== 'devuelto' && r.estado !== 'anulado'
+      );
+
+      let visitaCerrada = false;
+      let visitaEstado = 'en_curso';
+      let tieneExcepciones = false;
+
+      if (pendientesRestantes.length === 0) {
+        visitaCerrada = true;
+        visitaEstado = 'completada';
+        tieneExcepciones = remitosActualizados.some(
+          (r) => r.estado === 'no_entregado' || r.estado === 'devuelto'
+        );
+        const observacion = tieneExcepciones ? 'Entregada con excepciones' : null;
+
+        await client.query(
+          `UPDATE visita
+           SET estado = 'completada',
+               registrada_en = $1::timestamptz,
+               latitud = $2::numeric,
+               longitud = $3::numeric,
+               observacion = COALESCE($5, observacion)
+           WHERE id::text = $4`,
+          [dto.timestamp, dto.latitud, dto.longitud, visitaId, observacion]
+        );
+      } else {
+        visitaCerrada = false;
+        visitaEstado = 'en_curso';
+        await client.query(
+          `UPDATE visita
+           SET estado = 'en_curso'
+           WHERE id::text = $1 AND estado = 'pendiente'`,
+          [visitaId]
+        );
+      }
+
+      await client.query('COMMIT');
+
+      return {
+        success: true,
+        visitaCerrada,
+        visitaEstado,
+        conExcepciones: tieneExcepciones,
+        entregados: remitosActualizados,
+        totalConfirmados: confirmadosAhora,
+      };
+    } catch (err: any) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   },
 
   /**

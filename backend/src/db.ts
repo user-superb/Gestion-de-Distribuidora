@@ -133,6 +133,7 @@ function setupMemoryDb() {
       longitud numeric,
       precision_metros numeric,
       gps_disponible boolean,
+      observacion text,
       cobrada_en timestamp
     );
 

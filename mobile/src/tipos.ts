@@ -64,6 +64,20 @@ export interface Ubicacion {
   precisionMetros: number | null;
 }
 
+/** Entrega de un remito individual dentro de un lote (HU #23). */
+export interface ItemEntregaLote {
+  remitoId: string;
+  cuerpo: EntregaDto;
+}
+
+/** Cuerpo de POST /api/transportista/visitas/:id/confirmar-todo (HU #23). */
+export interface EntregaLoteCuerpo {
+  timestamp: string;
+  latitud: number;
+  longitud: number;
+  entregas: ItemEntregaLote[];
+}
+
 /** Cuerpo de POST /api/transportista/remitos/:id/confirmar (HU #22). La API exige GPS. */
 export interface EntregaDto {
   timestamp: string;

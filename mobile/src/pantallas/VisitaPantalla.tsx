@@ -1,4 +1,4 @@
-// Una visita: entrega de sus remitos (HU #22) y cobro (HU #25 a #29).
+// Una visita: entrega de sus remitos (HU #22 individual, HU #23 multimarca) y cobro (HU #25 a #29).
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
@@ -13,8 +13,15 @@ import {
   validarCobro,
 } from '../dominio/cobro';
 import { centavosATexto, formatearPesos, parsearPesos } from '../dominio/dinero';
-import { armarEntrega, puedeConfirmarse } from '../dominio/entrega';
-import { ColaPorClave, estadoCobro, estadoEntrega, ETIQUETA_ENTREGA, EstadoLocal } from '../dominio/estadoVisita';
+import { armarEntrega, armarEntregaLote, puedeConfirmarse } from '../dominio/entrega';
+import {
+  ColaPorClave,
+  estadoCobro,
+  estadoEntrega,
+  ETIQUETA_ENTREGA,
+  EstadoLocal,
+  resumenVisitaEntrega,
+} from '../dominio/estadoVisita';
 import { colores, estilos } from '../estilos';
 import type { CobroDto, Remito, Visita } from '../tipos';
 import { obtenerUbicacion } from '../ubicacion';
@@ -57,9 +64,10 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
   const porEntregar = visita.remitos.filter(
     (remito) => puedeConfirmarse(remito) && ['pendiente', 'rechazado'].includes(estadoEntrega(remito, cola))
   );
+  const resumenEntrega = resumenVisitaEntrega(visita, cola);
 
-  // HU #22: cada remito se confirma por separado, con hora y GPS. Se guarda primero en el celular.
-  async function confirmarEntregas(remitos: Remito[]) {
+  // HU #22: cada remito se puede confirmar individualmente con hora y GPS
+  async function confirmarEntregaIndividual(remito: Remito) {
     setEntregando(true);
     setErrorEntrega(null);
     try {
@@ -68,13 +76,55 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
         setErrorEntrega('No se pudo obtener la ubicación GPS, y la entrega la exige. Activá la ubicación y volvé a intentar.');
         return;
       }
-      for (const remito of remitos) {
-        await colaOperaciones.encolar({ tipo: 'entrega', visitaId: visita.id, remitoId: remito.id, cuerpo: entrega });
-      }
+      await colaOperaciones.encolar({ tipo: 'entrega', visitaId: visita.id, remitoId: remito.id, cuerpo: entrega });
       if (enLinea) await colaOperaciones.sincronizar();
       await onCambio();
     } finally {
       setEntregando(false);
+    }
+  }
+
+  // HU #23: Confirmar en un solo paso la entrega de remitos multimarca de toda la visita
+  async function confirmarTodaLaVisita() {
+    if (porEntregar.length === 0) return;
+    setEntregando(true);
+    setErrorEntrega(null);
+    try {
+      const ubicacion = await obtenerUbicacion();
+      const lote = armarEntregaLote(porEntregar, ubicacion);
+      if (!lote) {
+        setErrorEntrega('No se pudo obtener la ubicación GPS, y la entrega la exige. Activá la ubicación y volvé a intentar.');
+        return;
+      }
+
+      // Se guarda como un bloque transaccional en la cola (Regla 4)
+      await colaOperaciones.encolar({
+        tipo: 'entrega_lote',
+        visitaId: visita.id,
+        entregas: lote.entregas,
+        cuerpoGeneral: lote.cuerpoGeneral,
+      });
+
+      if (enLinea) await colaOperaciones.sincronizar();
+      await onCambio();
+
+      const tieneExcepciones = visita.remitos.some((r) => ['no_entregado', 'devuelto'].includes(r.estado));
+      onListo(
+        tieneExcepciones
+          ? `Visita entregada con excepciones: ${comercio.nombreFantasia || comercio.razonSocial}`
+          : `Visita completada: ${comercio.nombreFantasia || comercio.razonSocial}`
+      );
+    } finally {
+      setEntregando(false);
+    }
+  }
+
+  // Compatibilidad
+  async function confirmarEntregas(remitos: Remito[]) {
+    if (remitos.length === 1) {
+      await confirmarEntregaIndividual(remitos[0]);
+    } else {
+      await confirmarTodaLaVisita();
     }
   }
 
@@ -129,7 +179,7 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
       <Text style={estilos.titulo}>{comercio.nombreFantasia || comercio.razonSocial}</Text>
       <Text style={estilos.subtitulo}>{comercio.domicilio}</Text>
 
-      {/* HU #22: confirmación individual de entrega de remitos */}
+      {/* HU #22 y HU #23: Entrega de remitos individuales y multimarca */}
       <Text style={[estilos.texto, { fontWeight: '700' }]}>Entrega de remitos</Text>
       <View style={estilos.tarjeta}>
         {visita.remitos.map((remito) => {
@@ -148,7 +198,7 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
                 </Text>
                 {!noEntregable && ['pendiente', 'rechazado'].includes(estadoRemito) ? (
                   <Pressable
-                    onPress={() => confirmarEntregas([remito])}
+                    onPress={() => confirmarEntregaIndividual(remito)}
                     disabled={entregando}
                     accessibilityRole="button"
                     accessibilityLabel={`Confirmar entrega del remito ${remito.numero}`}
@@ -163,17 +213,30 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
           );
         })}
       </View>
-      {porEntregar.length > 1 ? (
+
+      {/* HU #23: Acción principal en un solo paso para remitos multimarca */}
+      {porEntregar.length > 0 ? (
         <Pressable
-          style={[estilos.botonSecundario, entregando && { borderColor: colores.deshabilitado }]}
+          style={[estilos.boton, entregando && estilos.botonDeshabilitado, { marginVertical: 8 }]}
           disabled={entregando}
-          onPress={() => confirmarEntregas(porEntregar)}
+          onPress={confirmarTodaLaVisita}
           accessibilityRole="button"
+          accessibilityLabel="Confirmar toda la visita"
         >
-          <Text style={estilos.botonSecundarioTexto}>Confirmar entrega de los {porEntregar.length} remitos</Text>
+          {entregando ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={estilos.botonTexto}>Confirmar toda la visita</Text>
+          )}
         </Pressable>
+      ) : resumenEntrega.completada ? (
+        <Aviso tono={resumenEntrega.conExcepciones ? 'alerta' : 'ok'}>
+          {resumenEntrega.conExcepciones
+            ? 'Visita entregada con excepciones (existen remitos devueltos o no entregados).'
+            : 'Todos los remitos de la visita fueron entregados.'}
+        </Aviso>
       ) : null}
-      {entregando ? <ActivityIndicator /> : null}
+      {entregando && porEntregar.length === 0 ? <ActivityIndicator /> : null}
       {errorEntrega ? <Aviso tono="error">{errorEntrega}</Aviso> : null}
 
       {/* HU #25: importe de solo lectura, con desglose por marca */}
