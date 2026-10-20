@@ -262,7 +262,7 @@ export const remitoService = {
       );
       nuevoRemito = remitoRes.rows[0];
     } catch (err: any) {
-      if (err.message?.includes('sucursal_id')) {
+      if (err.message?.includes('column "sucursal_id"') || (err.message?.includes('sucursal_id') && err.message?.includes('does not exist'))) {
         const remitoRes = await db.query(
           `INSERT INTO remito (numero, marca_id, comercio_id, importe_centavos, estado, visita_id)
            VALUES ($1, $2::bigint, $3::bigint, $4::bigint, 'pendiente', NULL)

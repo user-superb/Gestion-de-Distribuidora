@@ -155,19 +155,19 @@ function setupMemoryDb() {
       ('reporte.ver', 'Consultar reportes e indicadores'),
       ('usuario.administrar', 'Administrar usuarios y permisos');
 
-    INSERT INTO sucursal (id, nombre, domicilio) VALUES
-      (1, 'Sucursal Central - La Plata', 'Calle 12 N° 500, La Plata'),
-      (2, 'Depósito Sur - Berisso', 'Av. Río de la Plata 1240, Berisso'),
-      (3, 'Hub Central - Distribución', 'Ruta 2 Km 45, La Plata'),
-      (4, 'Sede Administrativa Central', 'Calle 7 N° 850, La Plata')
+    INSERT INTO sucursal (nombre, domicilio) VALUES
+      ('Sucursal Central - La Plata', 'Calle 12 N° 500, La Plata'),
+      ('Depósito Sur - Berisso', 'Av. Río de la Plata 1240, Berisso'),
+      ('Hub Central - Distribución', 'Ruta 2 Km 45, La Plata'),
+      ('Sede Administrativa Central', 'Calle 7 N° 850, La Plata')
     ON CONFLICT (nombre) DO NOTHING;
 
-    INSERT INTO usuario (id, usuario, nombre, email, password_hash, rol, es_transportista, activo) VALUES
-      (1, 'admin', 'Martín Jirafales Coordinador', 'admin@tutucas.com.ar', '${hash}', 'Administrativo', false, true),
-      (2, 'chofer', 'Carlos Repartidor', 'chofer@tutucas.com.ar', '${hash}', 'Transportista', true, true),
-      (3, 'supervisor', 'Valeria Logística', 'supervisor@tutucas.com.ar', '${hash}', 'Supervisor', false, true),
-      (4, 'gerencia', 'Roberto Gerente', 'gerencia@tutucas.com.ar', '${hash}', 'Gerente', false, true),
-      (5, 'admin_sistema', 'Administrador del Sistema', 'admin.sistema@tutucas.com.ar', '${hash}', 'Administrador del sistema', false, true)
+    INSERT INTO usuario (usuario, nombre, email, password_hash, rol, es_transportista, activo) VALUES
+      ('admin', 'Martín Jirafales Coordinador', 'admin@tutucas.com.ar', '${hash}', 'Administrativo', false, true),
+      ('chofer', 'Carlos Repartidor', 'chofer@tutucas.com.ar', '${hash}', 'Transportista', true, true),
+      ('supervisor', 'Valeria Logística', 'supervisor@tutucas.com.ar', '${hash}', 'Supervisor', false, true),
+      ('gerencia', 'Roberto Gerente', 'gerencia@tutucas.com.ar', '${hash}', 'Gerente', false, true),
+      ('admin_sistema', 'Administrador del Sistema', 'admin.sistema@tutucas.com.ar', '${hash}', 'Administrador del sistema', false, true)
     ON CONFLICT (usuario) DO NOTHING;
 
     INSERT INTO usuario_sucursal (usuario_id, sucursal_id) VALUES
@@ -182,27 +182,27 @@ function setupMemoryDb() {
     SELECT id, 'Cuenta operativa demo', 'Banco Demo' FROM sucursal WHERE nombre = 'Sucursal Central - La Plata'
     ON CONFLICT (sucursal_id, alias) DO NOTHING;
 
-    INSERT INTO hoja_de_ruta (id, sucursal_id, transportista_id, estado) VALUES
-      (1, 1, 2, 'borrador')
+    INSERT INTO hoja_de_ruta (sucursal_id, transportista_id, estado) VALUES
+      (1, 2, 'borrador')
     ON CONFLICT DO NOTHING;
 
-    INSERT INTO marca (id, nombre) VALUES
-      (1, 'Lácteos del Sur'),
-      (2, 'Bebidas Nacionales'),
-      (3, 'Alimentos Río de la Plata')
+    INSERT INTO marca (nombre) VALUES
+      ('Lácteos del Sur'),
+      ('Bebidas Nacionales'),
+      ('Alimentos Río de la Plata')
     ON CONFLICT (nombre) DO NOTHING;
 
-    INSERT INTO comercio (id, razon_social, domicilio, localidad) VALUES
-      (1, 'Mayorista El Sol S.R.L.', 'Av. Hipólito Yrigoyen 4500, Lanús', 'Lanús'),
-      (2, 'Autoservicio Luna', 'Belgrano 1230, Avellaneda', 'Avellaneda'),
-      (3, 'Distribuidora Los Andes', 'Camino Gral. Belgrano 1800, Gerli', 'Gerli');
+    INSERT INTO comercio (razon_social, domicilio, localidad) VALUES
+      ('Mayorista El Sol S.R.L.', 'Av. Hipólito Yrigoyen 4500, Lanús', 'Lanús'),
+      ('Autoservicio Luna', 'Belgrano 1230, Avellaneda', 'Avellaneda'),
+      ('Distribuidora Los Andes', 'Camino Gral. Belgrano 1800, Gerli', 'Gerli');
 
-    INSERT INTO remito (id, numero, marca_id, comercio_id, sucursal_id, importe_centavos, estado) VALUES
-      (1, 'R-0001-45120', 1, 1, 1, 15000000, 'pendiente'),
-      (2, 'R-0002-89310', 2, 1, 1, 700000, 'pendiente'),
-      (3, 'R-0001-45121', 1, 2, 1, 6200000, 'pendiente'),
-      (4, 'R-0003-11200', 3, 2, 1, 11000000, 'pendiente'),
-      (5, 'R-0002-89315', 2, 3, 1, 9400000, 'pendiente');
+    INSERT INTO remito (numero, marca_id, comercio_id, sucursal_id, importe_centavos, estado) VALUES
+      ('R-0001-45120', 1, 1, 1, 15000000, 'pendiente'),
+      ('R-0002-89310', 2, 1, 1, 700000, 'pendiente'),
+      ('R-0001-45121', 1, 2, 1, 6200000, 'pendiente'),
+      ('R-0003-11200', 3, 2, 1, 11000000, 'pendiente'),
+      ('R-0002-89315', 2, 3, 1, 9400000, 'pendiente');
   `);
 
   memDbInstance = mem.adapters.createPg().Pool;
