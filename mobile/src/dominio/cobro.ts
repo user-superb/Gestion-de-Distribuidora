@@ -1,5 +1,7 @@
 // Reglas de cobro que la app valida antes de confirmar (HU #26 a #29).
 // El backend vuelve a validar todo (backend/src/services/cobroService.ts).
+import type { ImporteVisita, Visita } from '../tipos';
+import { ColaPorClave, esRemitoRechazado } from './estadoVisita';
 import { formatearPesos, parsearPesos } from './dinero';
 
 export type MedioPago = 'efectivo' | 'transferencia' | 'qr';
@@ -79,4 +81,30 @@ export function validarCobro(pagos: PagoEnCarga[], totalExigibleCentavos: number
 export function importeRestante(pagos: PagoEnCarga[], totalExigibleCentavos: number): number {
   const cargado = pagos.reduce((suma, pago) => suma + (parsearPesos(pago.importeTexto) || 0), 0);
   return Math.max(totalExigibleCentavos - cargado, 0);
+}
+
+/**
+ * HU #25: Calcula el importe exigible de la visita en el celular,
+ * descontando remitos rechazados (tanto en servidor como encolados sin conexión).
+ */
+export function calcularImporteVisitaLocal(visita: Visita, cola: ColaPorClave): ImporteVisita {
+  const subtotales = new Map<string, number>();
+  const remitosExcluidos: string[] = [];
+  let totalCentavos = 0;
+
+  for (const remito of visita.remitos) {
+    if (esRemitoRechazado(remito, cola) || remito.estado === 'anulado') {
+      remitosExcluidos.push(remito.numero);
+      continue;
+    }
+    totalCentavos += remito.importeCentavos;
+    subtotales.set(remito.marca, (subtotales.get(remito.marca) || 0) + remito.importeCentavos);
+  }
+
+  return {
+    totalCentavos,
+    subtotalesPorMarca: [...subtotales].map(([marca, importeCentavos]) => ({ marca, importeCentavos })),
+    remitosExcluidos,
+    sinCobroEnDestino: totalCentavos === 0,
+  };
 }

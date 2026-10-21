@@ -1,7 +1,7 @@
 // Persistencia local: sesión, última hoja de ruta descargada y cola de cobros.
 // RNF: el celular guarda la hoja completa de la jornada para trabajar 24 h sin conexión.
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { confirmarEntrega, confirmarTodaLaVisita, enviarCobro } from './api';
+import { confirmarEntrega, confirmarTodaLaVisita, enviarCobro, rechazarRemito } from './api';
 import { ErrorApi } from './errores';
 import { ColaOperaciones } from './sincronizacion/cola';
 import type { HojaDeRuta, Sesion } from './tipos';
@@ -50,6 +50,7 @@ export const colaOperaciones = new ColaOperaciones(AsyncStorage, async (operacio
       ...operacion.cuerpoGeneral,
       entregas: operacion.entregas,
     });
-  }
-  else await enviarCobro(sesionActual.token, operacion.visitaId, operacion.cuerpo);
+  } else if (operacion.tipo === 'rechazo') {
+    await rechazarRemito(sesionActual.token, operacion.remitoId, operacion.cuerpo);
+  } else await enviarCobro(sesionActual.token, operacion.visitaId, operacion.cuerpo);
 });

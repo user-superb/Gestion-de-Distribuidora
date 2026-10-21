@@ -13,6 +13,7 @@ export interface Remito {
   marca: string;
   importeCentavos: number;
   estado: string;
+  motivoNoEntrega?: string | null;
 }
 
 export interface ImporteVisita {
@@ -76,6 +77,14 @@ export interface EntregaLoteCuerpo {
   latitud: number;
   longitud: number;
   entregas: ItemEntregaLote[];
+}
+
+/** Cuerpo de POST /api/transportista/remitos/:id/rechazar */
+export interface RechazoDto {
+  motivo: string;
+  timestamp: string;
+  latitud?: number | null;
+  longitud?: number | null;
 }
 
 /** Cuerpo de POST /api/transportista/remitos/:id/confirmar (HU #22). La API exige GPS. */

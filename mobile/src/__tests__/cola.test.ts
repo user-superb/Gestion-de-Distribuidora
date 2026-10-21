@@ -36,6 +36,15 @@ function entregaLote(visitaId: string, remitoIds: string[], timestamp = '2026-10
   };
 }
 
+function rechazo(remitoId: string, motivo: string, timestamp = '2026-10-20T08:00:00.000Z'): Operacion {
+  return {
+    tipo: 'rechazo',
+    visitaId: '1',
+    remitoId,
+    cuerpo: { motivo, timestamp, latitud: -34.92, longitud: -57.95 },
+  };
+}
+
 describe('Cola de operaciones sin conexión', () => {
   let almacen: Almacen;
   let respuesta: (operacion: Operacion) => Promise<void>;
@@ -202,6 +211,120 @@ describe('Cola de operaciones sin conexión', () => {
       const items = await cola.listar();
       assert.equal(items.length, 1);
       assert.equal(items[0].tipo, 'entrega_lote');
+    });
+  });
+
+  describe('HU: Registro de rechazo de un remito (Escenarios 1, 2, 3 y 4)', () => {
+    it('ESCENARIO 1: Registro de rechazo exitoso con motivo preestablecido con conexión', async () => {
+      const ts = '2026-10-20T10:15:00.000Z';
+      await cola.encolar(rechazo('101', 'Comercio cerrado', ts));
+
+      // Se sincroniza inmediatamente al estar online
+      const res = await cola.sincronizar();
+      assert.equal(res.sincronizados, 1);
+      assert.equal(res.pendientes, 0);
+
+      assert.equal(enviados.length, 1);
+      assert.equal(enviados[0].tipo, 'rechazo');
+      if (enviados[0].tipo === 'rechazo') {
+        assert.equal(enviados[0].remitoId, '101');
+        assert.equal(enviados[0].cuerpo.motivo, 'Comercio cerrado');
+        assert.equal(enviados[0].cuerpo.timestamp, ts);
+      }
+
+      const mapa = await cola.estadoPorClave();
+      assert.equal(mapa.get('rechazo:101')?.estado, 'sincronizado');
+    });
+
+    it('ESCENARIO 2: Registro de rechazo exitoso con motivo escrito manualmente con conexión', async () => {
+      const motivoManual = 'El local no cuenta con espacio físico para almacenar el producto';
+      const ts = '2026-10-20T10:20:00.000Z';
+      await cola.encolar(rechazo('102', motivoManual, ts));
+
+      const res = await cola.sincronizar();
+      assert.equal(res.sincronizados, 1);
+      assert.equal(enviados[0].tipo === 'rechazo' && enviados[0].cuerpo.motivo, motivoManual);
+
+      const mapa = await cola.estadoPorClave();
+      assert.equal(mapa.get('rechazo:102')?.estado, 'sincronizado');
+    });
+
+    it('ESCENARIO 3: Registro de rechazo exitoso sin conexión (motivo preestablecido)', async () => {
+      respuesta = async () => { throw new ErrorRed(); };
+      const ts = '2026-10-20T10:25:00.000Z';
+      await cola.encolar(rechazo('103', 'Mercadería dañada o en mal estado', ts));
+
+      // Queda guardado localmente aguardando conexión en segundo plano
+      const items = await cola.listar();
+      assert.equal(items.length, 1);
+      assert.equal(items[0].tipo, 'rechazo');
+      assert.equal(items[0].estado, 'pendiente');
+
+      const mapaOffline = await cola.estadoPorClave();
+      assert.equal(mapaOffline.get('rechazo:103')?.estado, 'pendiente');
+
+      const resOffline = await cola.sincronizar();
+      assert.equal(resOffline.sincronizados, 0);
+      assert.equal(resOffline.pendientes, 1);
+
+      // Al restablecerse la conexión se envía conservando el timestamp y motivo
+      respuesta = async () => undefined;
+      const resOnline = await cola.sincronizar();
+      assert.equal(resOnline.sincronizados, 1);
+      assert.equal(resOnline.pendientes, 0);
+
+      assert.equal(enviados.length, 1);
+      if (enviados[0].tipo === 'rechazo') {
+        assert.equal(enviados[0].remitoId, '103');
+        assert.equal(enviados[0].cuerpo.motivo, 'Mercadería dañada o en mal estado');
+        assert.equal(enviados[0].cuerpo.timestamp, ts);
+      }
+    });
+
+    it('ESCENARIO 4: Registro de rechazo exitoso con motivo escrito manualmente sin conexión', async () => {
+      respuesta = async () => { throw new ErrorRed(); };
+      const motivoManual = 'Cliente rechazó el bulto por tener fecha de vencimiento próxima';
+      const ts = '2026-10-20T10:30:00.000Z';
+      await cola.encolar(rechazo('104', motivoManual, ts));
+
+      // Guardado localmente sin conexión
+      const items = await cola.listar();
+      assert.equal(items.length, 1);
+      assert.equal(items[0].tipo, 'rechazo');
+      assert.equal(items[0].estado, 'pendiente');
+
+      // Reintento offline mantiene el pendiente
+      await cola.sincronizar();
+      assert.equal((await cola.listar())[0].estado, 'pendiente');
+
+      // Al recuperar conexión se sincroniza en segundo plano
+      respuesta = async () => undefined;
+      const res = await cola.sincronizar();
+      assert.equal(res.sincronizados, 1);
+      assert.equal(res.pendientes, 0);
+      assert.equal(enviados[0].tipo === 'rechazo' && enviados[0].cuerpo.motivo, motivoManual);
+    });
+
+    it('el rechazo reemplaza una entrega previa del mismo remito y viceversa', async () => {
+      await cola.encolar(entrega('105'));
+      assert.equal((await cola.listar())[0].tipo, 'entrega');
+
+      // Si luego se registra el rechazo del mismo remito, lo reemplaza
+      await cola.encolar(rechazo('105', 'Comercio cerrado'));
+      const items = await cola.listar();
+      assert.equal(items.length, 1);
+      assert.equal(items[0].tipo, 'rechazo');
+    });
+
+    it('el rechazo se envía antes del cobro de la visita', async () => {
+      respuesta = async () => { throw new ErrorRed(); };
+      await cola.encolar(rechazo('106', 'Diferencia de precio'));
+      await cola.encolar(cobro('1', 'clave-visita-1'));
+
+      respuesta = async () => undefined;
+      await cola.sincronizar();
+
+      assert.deepEqual(enviados.map((op) => op.tipo), ['rechazo', 'cobro']);
     });
   });
 });

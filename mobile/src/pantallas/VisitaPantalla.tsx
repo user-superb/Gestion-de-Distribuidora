@@ -1,10 +1,11 @@
 // Una visita: entrega de sus remitos (HU #22 individual, HU #23 multimarca) y cobro (HU #25 a #29).
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { colaOperaciones } from '../almacenamiento';
 import { Aviso } from '../componentes/Aviso';
 import {
+  calcularImporteVisitaLocal,
   importeRestante,
   MEDIOS_SOLO_EN_LINEA,
   MedioPago,
@@ -13,13 +14,21 @@ import {
   validarCobro,
 } from '../dominio/cobro';
 import { centavosATexto, formatearPesos, parsearPesos } from '../dominio/dinero';
-import { armarEntrega, armarEntregaLote, puedeConfirmarse } from '../dominio/entrega';
+import {
+  armarEntrega,
+  armarEntregaLote,
+  armarRechazo,
+  MOTIVOS_RECHAZO_PREESTABLECIDOS,
+  puedeConfirmarse,
+} from '../dominio/entrega';
 import {
   ColaPorClave,
+  esRemitoResuelto,
   estadoCobro,
   estadoEntrega,
   ETIQUETA_ENTREGA,
   EstadoLocal,
+  infoEstadoRemito,
   resumenVisitaEntrega,
 } from '../dominio/estadoVisita';
 import { colores, estilos } from '../estilos';
@@ -51,20 +60,64 @@ const COLOR_ESTADO: Record<EstadoLocal, string> = {
 };
 
 export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onListo }: Props) {
-  const { importe, comercio } = visita;
+  const { comercio } = visita;
+  const importe = calcularImporteVisitaLocal(visita, cola);
   const [pagos, setPagos] = useState<PagoEnCarga[]>([]);
   const [guardando, setGuardando] = useState(false);
   const [entregando, setEntregando] = useState(false);
   const [errorEntrega, setErrorEntrega] = useState<string | null>(null);
+  const [remitoARechazar, setRemitoARechazar] = useState<Remito | null>(null);
+  const [motivoPreestablecido, setMotivoPreestablecido] = useState<string | null>(null);
+  const [motivoManual, setMotivoManual] = useState<string>('');
+  const [rechazando, setRechazando] = useState(false);
+
   const enColaCobro = cola.get(`cobro:${visita.id}`);
   const [rechazo, setRechazo] = useState<string | null>(enColaCobro?.estado === 'rechazado' ? enColaCobro.motivo || null : null);
   const estado = estadoCobro(visita, cola);
   const yaCobrada = estado === 'hecho' || estado === 'sin_sincronizar';
   const validacion = validarCobro(pagos, importe.totalCentavos, enLinea);
-  const porEntregar = visita.remitos.filter(
-    (remito) => puedeConfirmarse(remito) && ['pendiente', 'rechazado'].includes(estadoEntrega(remito, cola))
-  );
+  const porEntregar = visita.remitos.filter((remito) => !esRemitoResuelto(remito, cola));
   const resumenEntrega = resumenVisitaEntrega(visita, cola);
+
+  const motivoRechazoFinal = (motivoManual.trim() || motivoPreestablecido || '').trim();
+  const puedeConfirmarRechazo = motivoRechazoFinal.length > 0;
+
+  // HU: registrar el rechazo de un remito
+  async function confirmarRechazo() {
+    if (!remitoARechazar || !puedeConfirmarRechazo) return;
+    setRechazando(true);
+    setErrorEntrega(null);
+    try {
+      const ubicacion = await obtenerUbicacion().catch(() => null);
+      const rechazoDto = armarRechazo(motivoRechazoFinal, ubicacion);
+      if (!rechazoDto) return;
+
+      await colaOperaciones.encolar({
+        tipo: 'rechazo',
+        visitaId: visita.id,
+        remitoId: remitoARechazar.id,
+        cuerpo: rechazoDto,
+      });
+
+      if (enLinea) await colaOperaciones.sincronizar();
+      await onCambio();
+
+      const resultado = (await colaOperaciones.estadoPorClave()).get(`rechazo:${remitoARechazar.id}`);
+      onListo(
+        resultado?.estado === 'sincronizado'
+          ? `Remito ${remitoARechazar.numero} rechazado.`
+          : `Rechazo guardado en el celular (Remito ${remitoARechazar.numero}). Se enviará al recuperar la conexión.`
+      );
+
+      setRemitoARechazar(null);
+      setMotivoPreestablecido(null);
+      setMotivoManual('');
+    } catch (err: any) {
+      setErrorEntrega(err.message || 'Error al registrar el rechazo.');
+    } finally {
+      setRechazando(false);
+    }
+  }
 
   // HU #22: cada remito se puede confirmar individualmente con hora y GPS
   async function confirmarEntregaIndividual(remito: Remito) {
@@ -179,13 +232,11 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
       <Text style={estilos.titulo}>{comercio.nombreFantasia || comercio.razonSocial}</Text>
       <Text style={estilos.subtitulo}>{comercio.domicilio}</Text>
 
-      {/* HU #22 y HU #23: Entrega de remitos individuales y multimarca */}
+      {/* HU #22 y HU #23: Entrega de remitos individuales y multimarca, y HU: Rechazo de remito */}
       <Text style={[estilos.texto, { fontWeight: '700' }]}>Entrega de remitos</Text>
       <View style={estilos.tarjeta}>
         {visita.remitos.map((remito) => {
-          const noEntregable = ETIQUETA_NO_ENTREGABLE[remito.estado];
-          const estadoRemito = estadoEntrega(remito, cola);
-          const motivo = cola.get(`entrega:${remito.id}`)?.motivo;
+          const info = infoEstadoRemito(remito, cola);
           return (
             <View key={remito.id} style={{ paddingVertical: 8, gap: 4, borderBottomWidth: 1, borderBottomColor: colores.borde }}>
               <View style={estilos.fila}>
@@ -193,22 +244,43 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
                 <Text style={estilos.texto}>{formatearPesos(remito.importeCentavos)}</Text>
               </View>
               <View style={estilos.fila}>
-                <Text style={{ fontWeight: '700', color: noEntregable ? colores.textoSuave : COLOR_ESTADO[estadoRemito] }}>
-                  {noEntregable || ETIQUETA_ENTREGA[estadoRemito]}
+                <Text style={{ fontWeight: '700', color: info.color }}>
+                  {info.texto}
                 </Text>
-                {!noEntregable && ['pendiente', 'rechazado'].includes(estadoRemito) ? (
-                  <Pressable
-                    onPress={() => confirmarEntregaIndividual(remito)}
-                    disabled={entregando}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Confirmar entrega del remito ${remito.numero}`}
-                    hitSlop={8}
-                  >
-                    <Text style={estilos.botonSecundarioTexto}>Confirmar entrega</Text>
-                  </Pressable>
+                {info.puedeOperar ? (
+                  <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                    <Pressable
+                      style={[estilos.botonAccion, (entregando || rechazando) && { opacity: 0.5 }]}
+                      onPress={() => confirmarEntregaIndividual(remito)}
+                      disabled={entregando || rechazando}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Confirmar entrega del remito ${remito.numero}`}
+                      hitSlop={8}
+                    >
+                      <Text style={estilos.botonAccionTexto}>Confirmar entrega</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[estilos.botonAccionRechazar, (entregando || rechazando) && { opacity: 0.5 }]}
+                      onPress={() => {
+                        setRemitoARechazar(remito);
+                        setMotivoPreestablecido(null);
+                        setMotivoManual('');
+                      }}
+                      disabled={entregando || rechazando}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Rechazar remito ${remito.numero}`}
+                      hitSlop={8}
+                    >
+                      <Text style={estilos.botonAccionRechazarTexto}>Rechazar</Text>
+                    </Pressable>
+                  </View>
                 ) : null}
               </View>
-              {estadoRemito === 'rechazado' && motivo ? <Text style={{ color: colores.error }}>{motivo}</Text> : null}
+              {info.motivo ? (
+                <Text style={{ fontSize: 13, color: info.esRechazado ? colores.alerta : colores.error }}>
+                  Motivo: {info.motivo}
+                </Text>
+              ) : null}
             </View>
           );
         })}
@@ -337,6 +409,120 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
           ) : null}
         </>
       )}
+
+      {/* Modal / Diálogo de Rechazo de Remito */}
+      <Modal
+        visible={remitoARechazar !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          if (!rechazando) {
+            setRemitoARechazar(null);
+            setMotivoPreestablecido(null);
+            setMotivoManual('');
+          }
+        }}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}>
+          <View style={[estilos.tarjeta, { backgroundColor: '#fff', maxHeight: '90%' }]}>
+            <Text style={[estilos.titulo, { fontSize: 20 }]}>Rechazar remito</Text>
+            <Text style={[estilos.subtitulo, { marginBottom: 12 }]}>
+              {remitoARechazar?.numero} · {remitoARechazar?.marca}
+            </Text>
+            <Text style={[estilos.textoSuave, { marginBottom: 8 }]}>
+              Seleccioná un motivo preestablecido o ingresá uno manualmente:
+            </Text>
+
+            {/* Motivos preestablecidos */}
+            <View style={{ gap: 6, marginBottom: 12 }}>
+              {MOTIVOS_RECHAZO_PREESTABLECIDOS.map((motivo) => {
+                const seleccionado = motivoPreestablecido === motivo && !motivoManual.trim();
+                return (
+                  <Pressable
+                    key={motivo}
+                    style={[
+                      estilos.botonSecundario,
+                      { paddingVertical: 10, paddingHorizontal: 12, justifyContent: 'center', alignItems: 'center' },
+                      seleccionado && { backgroundColor: '#e0f2fe', borderColor: colores.primario },
+                    ]}
+                    onPress={() => {
+                      setMotivoPreestablecido(motivo);
+                      setMotivoManual('');
+                    }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: seleccionado }}
+                  >
+                    <Text
+                      style={[
+                        estilos.botonSecundarioTexto,
+                        { fontSize: 15, textAlign: 'center' },
+                        seleccionado && { color: colores.primario, fontWeight: '700' },
+                      ]}
+                    >
+                      {motivo}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {/* Ingreso manual */}
+            <Text style={[estilos.textoSuave, { marginBottom: 4 }]}>O escribí el motivo manualmente:</Text>
+            <TextInput
+              style={[estilos.input, { minHeight: 44 }]}
+              placeholder="Ingresá el motivo del rechazo..."
+              value={motivoManual}
+              onChangeText={(t) => {
+                setMotivoManual(t);
+                if (t.trim()) setMotivoPreestablecido(null);
+              }}
+              accessibilityLabel="Motivo de rechazo manual"
+            />
+
+            {/* Acciones */}
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+              <Pressable
+                style={[estilos.botonSecundario, { flex: 1, justifyContent: 'center', alignItems: 'center' }]}
+                disabled={rechazando}
+                onPress={() => {
+                  setRemitoARechazar(null);
+                  setMotivoPreestablecido(null);
+                  setMotivoManual('');
+                }}
+                accessibilityRole="button"
+              >
+                <Text style={[estilos.botonSecundarioTexto, { textAlign: 'center' }]}>Cancelar</Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  estilos.boton,
+                  {
+                    flex: 1,
+                    backgroundColor: colores.error,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    paddingHorizontal: 8,
+                  },
+                  (!puedeConfirmarRechazo || rechazando) && estilos.botonDeshabilitado,
+                ]}
+                disabled={!puedeConfirmarRechazo || rechazando}
+                onPress={confirmarRechazo}
+                accessibilityRole="button"
+                accessibilityLabel="Confirmar rechazo"
+              >
+                {rechazando ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={[estilos.botonTexto, { textAlign: 'center', fontSize: 16 }]}>
+                    Confirmar rechazo
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }

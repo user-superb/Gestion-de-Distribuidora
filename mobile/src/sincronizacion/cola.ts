@@ -4,14 +4,15 @@
 // Se envían en el orden en que se registraron, así la entrega llega antes que el cobro.
 // Reenviar es seguro: el cobro lleva claves de idempotencia y la entrega de un remito ya entregado no se pisa.
 import { ErrorApi } from '../errores';
-import type { CobroDto, EntregaDto, ItemEntregaLote } from '../tipos';
+import type { CobroDto, EntregaDto, ItemEntregaLote, RechazoDto } from '../tipos';
 
 export type EstadoEnCola = 'pendiente' | 'sincronizado' | 'rechazado';
 
 export type Operacion =
   | { tipo: 'cobro'; visitaId: string; cuerpo: CobroDto }
   | { tipo: 'entrega'; visitaId: string; remitoId: string; cuerpo: EntregaDto }
-  | { tipo: 'entrega_lote'; visitaId: string; entregas: ItemEntregaLote[]; cuerpoGeneral: EntregaDto };
+  | { tipo: 'entrega_lote'; visitaId: string; entregas: ItemEntregaLote[]; cuerpoGeneral: EntregaDto }
+  | { tipo: 'rechazo'; visitaId: string; remitoId: string; cuerpo: RechazoDto };
 
 export type ItemCola = Operacion & { estado: EstadoEnCola; motivo?: string };
 
@@ -33,10 +34,11 @@ export interface ResultadoSincronizacion {
 const CLAVE = 'cola-cobros';
 const MANTENER_SINCRONIZADOS_MS = 48 * 60 * 60 * 1000;
 
-/** Identifica la operación: un cobro por visita, una entrega por remito o un lote de visita. */
+/** Identifica la operación: un cobro por visita, una entrega por remito, un rechazo por remito o un lote de visita. */
 export function claveOperacion(operacion: Operacion): string {
   if (operacion.tipo === 'cobro') return `cobro:${operacion.visitaId}`;
   if (operacion.tipo === 'entrega_lote') return `entrega_lote:${operacion.visitaId}`;
+  if (operacion.tipo === 'rechazo') return `rechazo:${operacion.remitoId}`;
   return `entrega:${operacion.remitoId}`;
 }
 
@@ -65,6 +67,7 @@ export class ColaOperaciones {
    * Guarda la operación en el celular. Si había un intento rechazado de la misma operación, lo reemplaza.
    * De paso descarta las ya sincronizadas de jornadas anteriores (más de 48 h).
    * En caso de lote, reemplaza intentos individuales previos de los remitos incluidos.
+   * En caso de rechazo, anula intentos individuales de entrega previos para el mismo remito (y viceversa).
    */
   async encolar(operacion: Operacion, ahora = new Date()): Promise<void> {
     const clave = claveOperacion(operacion);
@@ -75,7 +78,9 @@ export class ColaOperaciones {
 
     const cola = (await this.listar()).filter((item) => {
       if (claveOperacion(item) === clave && item.estado === 'rechazado') return false;
-      if (remitoIdsEnLote && item.tipo === 'entrega' && remitoIdsEnLote.has(item.remitoId)) return false;
+      if (remitoIdsEnLote && (item.tipo === 'entrega' || item.tipo === 'rechazo') && remitoIdsEnLote.has(item.remitoId)) return false;
+      if (operacion.tipo === 'rechazo' && item.tipo === 'entrega' && item.remitoId === operacion.remitoId) return false;
+      if (operacion.tipo === 'entrega' && item.tipo === 'rechazo' && item.remitoId === operacion.remitoId) return false;
       if (item.estado === 'sincronizado' && registradaEn(item) < limite) return false;
       return true;
     });

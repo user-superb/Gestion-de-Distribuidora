@@ -1,12 +1,41 @@
 // Reglas de la confirmación de entrega de remitos (HU #22).
 // El backend (backend/src/services/transportistaService.ts) exige hora, transportista y GPS (Regla 1).
-import type { EntregaDto, ItemEntregaLote, Remito, Ubicacion } from '../tipos';
+import type { EntregaDto, ItemEntregaLote, RechazoDto, Remito, Ubicacion } from '../tipos';
+
+/** Catálogo de motivos preestablecidos para el rechazo de remitos por parte del cliente. */
+export const MOTIVOS_RECHAZO_PREESTABLECIDOS = [
+  'Comercio cerrado',
+  'Mercadería dañada o en mal estado',
+  'Pedido duplicado o no solicitado',
+  'Diferencia de precio o mercadería',
+  'Falta de dinero / No puede pagar',
+] as const;
 
 /** Estados que ya no se confirman: entregado, rechazado o devuelto, anulado. */
 export const ESTADOS_REMITO_TERMINALES = ['entregado', 'no_entregado', 'devuelto', 'anulado'];
 
 export function puedeConfirmarse(remito: Remito): boolean {
   return !ESTADOS_REMITO_TERMINALES.includes(remito.estado);
+}
+
+/**
+ * HU: Arma el rechazo de un remito.
+ * Requiere obligatoriamente un motivo no vacío (preestablecido o manual).
+ * Si no hay ubicación, permite registrarlo con coordenadas nulas.
+ */
+export function armarRechazo(
+  motivo: string,
+  ubicacion: Ubicacion | null,
+  ahora = new Date()
+): RechazoDto | null {
+  const limpio = (motivo || '').trim();
+  if (!limpio) return null;
+  return {
+    motivo: limpio,
+    timestamp: ahora.toISOString(),
+    latitud: ubicacion ? ubicacion.latitud : null,
+    longitud: ubicacion ? ubicacion.longitud : null,
+  };
 }
 
 /**
