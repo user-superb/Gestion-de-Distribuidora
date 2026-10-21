@@ -483,6 +483,20 @@ export const remitoService = {
       return { success: false, error: 'La hoja de ruta de destino no existe.', status: 404 };
     }
 
+    // Regla: Coherencia de comercio destinatario (Solo se pueden agrupar o anexar remitos del mismo comercio)
+    const visitasDeHoja = mockVisitas.filter((v) => v.hojaDeRutaId === hojaDeRutaId);
+    if (
+      visitasDeHoja.length > 0 &&
+      !visitasDeHoja.some((v) => v.comercioId === remito.comercioId)
+    ) {
+      return {
+        success: false,
+        error:
+          'No se puede anexar la entrega: El remito pertenece a un comercio distinto al de la hoja de ruta de destino. Solo se pueden agrupar o anexar entregas del mismo comercio.',
+        status: 422,
+      };
+    }
+
     // Regla: La ruta de destino debe encontrarse abierta
     if (hoja.estado === 'cerrada' || hoja.estado === 'anulada') {
       return {
@@ -506,7 +520,7 @@ export const remitoService = {
     const sincronizacionPendiente = !reportaConexion;
 
     // Calcular orden al final de la secuencia de esta hoja
-    const visitasDeHoja = mockVisitas.filter((v) => v.hojaDeRutaId === hojaDeRutaId);
+    // Reutilizamos visitasDeHoja
     const maxOrden = visitasDeHoja.reduce((max, v) => Math.max(max, v.orden || 0), 0);
     const nuevoOrden = maxOrden + 1;
 

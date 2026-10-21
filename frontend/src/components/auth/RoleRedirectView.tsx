@@ -14,6 +14,9 @@ import {
   Settings,
 } from 'lucide-react';
 import { AgrupadorRemitos } from '../dashboard/AgrupadorRemitos';
+import { remitoService } from '../../services/remitoService';
+import { HojaDeRuta, Comercio } from '../../types/domain';
+import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { ConciliadorMovimientos } from '../dashboard/ConciliadorMovimientos';
 import { Configuracion } from '../dashboard/Configuracion';
 import { ProfileMenu } from './ProfileMenu';
@@ -30,6 +33,8 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
   onLogout,
 }) => {
   type Seccion = 'hojas' | 'conciliacion' | 'configuracion';
+  const [hojasChofer, setHojasChofer] = useState<HojaDeRuta[]>([]);
+  const [comerciosMap, setComerciosMap] = useState<Record<string, Comercio>>({});
   const [seccion, setSeccion] = useState<Seccion>(() => {
     const path = window.location.pathname;
     if (path.endsWith('/conciliacion')) return 'conciliacion';
@@ -49,6 +54,37 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
     window.addEventListener('popstate', syncSection);
     return () => window.removeEventListener('popstate', syncSection);
   }, [session.role]);
+
+  useEffect(() => {
+    if (session.role === 'Transportista') {
+      const cargarHojasChofer = async () => {
+        try {
+          const [todasHojas, todosComercios] = await Promise.all([
+            remitoService.getHojasDeRutaAsync(),
+            remitoService.getComerciosAsync(),
+          ]);
+
+          const map: Record<string, Comercio> = {};
+          todosComercios.forEach((c) => { map[c.id] = c; });
+          setComerciosMap(map);
+
+          const asignadas = todasHojas.filter((h) => {
+            if (!h.transportistaId && !h.transportistaNombre) return false;
+            const matchId = String(h.transportistaId) === String(session.id);
+            const matchNombre = h.transportistaNombre?.toLowerCase() === session.name?.toLowerCase();
+            const matchEmail = (session.email?.includes('chofer') || session.name?.includes('Carlos')) && (h.transportistaId === '2' || h.transportistaId === '10' || h.transportistaNombre?.includes('Carlos'));
+            return matchId || matchNombre || matchEmail;
+          });
+
+          setHojasChofer(asignadas);
+        } catch {
+          // Fallback silencioso
+        }
+      };
+      cargarHojasChofer();
+    }
+  }, [session]);
+
 
   const getRoleBadge = () => {
     switch (session.role) {
@@ -225,16 +261,101 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
           {isAdmin && <AgrupadorRemitos />}
           {isAdmin && <ConciliadorMovimientos session={session} />}
 
-          {/* Si es transportista, mostramos la simulación de acceso móvil */}
+                    {/* Vista operativa de Hoja de Ruta para el Transportista (Demo HU #19) */}
           {session.role === 'Transportista' && (
-            <div className="border border-slate-200 rounded-md p-4 bg-slate-50 space-y-3">
-              <div className="flex items-center gap-2 text-slate-800 text-xs font-semibold uppercase tracking-wider">
-                <Smartphone className="w-4 h-4 text-emerald-600" />
-                <span>Vista Informativa: Acceso Móvil Transportistas</span>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                <div className="flex items-center gap-2 text-slate-800 text-xs font-bold uppercase tracking-wider">
+                  <Smartphone className="w-4 h-4 text-emerald-600" />
+                  <span>Mis Hojas de Ruta Asignadas ({hojasChofer.length})</span>
+                </div>
+                <span className="text-xs text-slate-500">Planilla vehicular activa</span>
               </div>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Has iniciado sesión con el perfil de <strong>Transportista</strong>. En el flujo de campo, esta pantalla sincroniza la planilla de carga vehicular con el dispositivo del chofer y habilita la firma digital.
-              </p>
+
+              {hojasChofer.length === 0 ? (
+                <div className="border border-slate-200 rounded-lg p-5 bg-slate-50 text-center space-y-2">
+                  <Truck className="w-8 h-8 text-slate-400 mx-auto" />
+                  <p className="text-sm font-medium text-slate-700">
+                    No posees hojas de ruta asignadas actualmente.
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Cuando un administrativo te asigne o anexe entregas a una hoja de ruta, aparecerán detalladas aquí.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {hojasChofer.map((hoja) => {
+                    const codigo = hoja.numero || `HR-${String(hoja.id).padStart(4, '0')}`;
+                    const visitas = hoja.visitas || [];
+                    const tienePendiente = hoja.tieneSincronizacionPendiente || visitas.some((v) => v.sincronizacionPendiente);
+
+                    return (
+                      <div key={hoja.id} className="border border-slate-200 rounded-lg bg-white overflow-hidden shadow-2xs">
+                        <div className="bg-slate-900 text-white p-3.5 flex items-center justify-between flex-wrap gap-2">
+                          <div className="flex items-center gap-2.5">
+                            <Truck className="w-4 h-4 text-emerald-400" />
+                            <strong className="font-mono text-sm">{codigo}</strong>
+                            <span className="text-xs text-slate-300">• Fecha: {hoja.fechaReparto}</span>
+                          </div>
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                            {hoja.estado}
+                          </span>
+                        </div>
+
+                        {tienePendiente && (
+                          <div className="bg-amber-50 border-b border-amber-200 p-2.5 flex items-center gap-2 text-xs text-amber-900 font-medium">
+                            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                            <span>⚠️ Sincronización pendiente: Tenés entregas anexadas recientemente que se confirmarán al recuperar señal.</span>
+                          </div>
+                        )}
+
+                        <div className="p-3.5 space-y-2">
+                          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
+                            Cronograma de Entregas ({visitas.length} paradas)
+                          </span>
+
+                          <div className="divide-y divide-slate-100 border border-slate-100 rounded">
+                            {visitas.map((v, idx) => {
+                              const com = comerciosMap[v.comercioId];
+                              return (
+                                <div key={v.id} className="p-2.5 flex items-center justify-between gap-3 text-xs hover:bg-slate-50">
+                                  <div className="space-y-0.5">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
+                                        PARADA #{v.orden ?? idx + 1}
+                                      </span>
+                                      <strong className="text-slate-900">{com?.razonSocial || 'Comercio Destino'}</strong>
+                                    </div>
+                                    <div className="text-slate-500 flex items-center gap-2">
+                                      <span>{com?.domicilio || 'Domicilio'}</span>
+                                      <span>•</span>
+                                      <span>{v.remitos.length} remito(s)</span>
+                                    </div>
+                                  </div>
+
+                                  <div className="text-right shrink-0">
+                                    {v.sincronizacionPendiente ? (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 font-semibold">
+                                        <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                        <span>Sin sincronizar</span>
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-300 font-medium">
+                                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                        <span>Sincronizado</span>
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>

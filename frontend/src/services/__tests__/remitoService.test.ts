@@ -412,8 +412,8 @@ describe('Historia de Usuario #19 - Anexar una Entrega a una Ruta', () => {
   });
 
   it('ESCENARIO 1: Anexión exitosa: Se asigna el remito a una ruta preexistente. La parada aparece al final de la secuencia del transportista.', () => {
-    // 1. Armamos y programamos una Hoja de Ruta inicial con una parada (secuencia: 1)
-    remitoService.agruparEnVisita(['rem-1', 'rem-2']);
+    // 1. Armamos y programamos una Hoja de Ruta inicial con rem-1 (com-101)
+    remitoService.agruparEnVisita(['rem-1']);
     const prog = remitoService.asignarFechaHojaDeRuta('2026-10-25', '2026-10-20');
     expect(prog.success).toBe(true);
     const hojaId = prog.hojaDeRuta!.id;
@@ -422,8 +422,8 @@ describe('Historia de Usuario #19 - Anexar una Entrega a una Ruta', () => {
     remitoService.setConexionTransportista('2', true);
     remitoService.asignarTransportistaHojaDeRuta(hojaId, '2');
 
-    // 2. Anexamos el remito pendiente 'rem-3' a la hoja de ruta
-    const res = remitoService.anexarEntregaARuta('rem-3', hojaId);
+    // 2. Anexamos el remito pendiente 'rem-2' (mismo comercio com-101) a la hoja de ruta
+    const res = remitoService.anexarEntregaARuta('rem-2', hojaId);
 
     expect(res.success).toBe(true);
     expect(res.parada).toBeDefined();
@@ -434,16 +434,16 @@ describe('Historia de Usuario #19 - Anexar una Entrega a una Ruta', () => {
     expect(res.alerta).toBeUndefined();
 
     // El remito ya no figura entre los pendientes
-    expect(remitoService.getRemitosPendientes().some((r) => r.id === 'rem-3')).toBe(false);
+    expect(remitoService.getRemitosPendientes().some((r) => r.id === 'rem-2')).toBe(false);
 
     // La parada quedó asociada a la hoja de ruta
     expect(res.parada?.hojaDeRutaId).toBe(hojaId);
-    expect(res.parada?.remitos[0].id).toBe('rem-3');
+    expect(res.parada?.remitos[0].id).toBe('rem-2');
   });
 
   it('ESCENARIO 2: Chofer desconectado: Se anexa el remito pero el dispositivo del transportista no reporta conexión. El sistema genera una alerta visual de "Sincronización pendiente".', () => {
-    // 1. Armamos y programamos una Hoja de Ruta inicial
-    remitoService.agruparEnVisita(['rem-1']);
+    // 1. Armamos y programamos una Hoja de Ruta inicial con rem-3 (com-102)
+    remitoService.agruparEnVisita(['rem-3']);
     const prog = remitoService.asignarFechaHojaDeRuta('2026-10-25', '2026-10-20');
     const hojaId = prog.hojaDeRuta!.id;
 
@@ -451,8 +451,8 @@ describe('Historia de Usuario #19 - Anexar una Entrega a una Ruta', () => {
     remitoService.setConexionTransportista('2', false);
     remitoService.asignarTransportistaHojaDeRuta(hojaId, '2');
 
-    // 2. Anexamos el remito
-    const res = remitoService.anexarEntregaARuta('rem-2', hojaId);
+    // 2. Anexamos el remito rem-4 (mismo comercio com-102)
+    const res = remitoService.anexarEntregaARuta('rem-4', hojaId);
 
     // Se anexa la entrega al final de la secuencia
     expect(res.success).toBe(true);
@@ -463,6 +463,20 @@ describe('Historia de Usuario #19 - Anexar una Entrega a una Ruta', () => {
     expect(res.sincronizacionPendiente).toBe(true);
     expect(res.alerta).toBe('Sincronización pendiente');
     expect(res.hojaDeRuta?.tieneSincronizacionPendiente).toBe(true);
+  });
+
+
+  it('REGLA DE NEGOCIO: Rechaza anexar remito si pertenece a un comercio distinto al de la hoja de ruta', () => {
+    // Hoja pertenece a com-101 (rem-1)
+    remitoService.agruparEnVisita(['rem-1']);
+    const prog = remitoService.asignarFechaHojaDeRuta('2026-10-25', '2026-10-20');
+    const hojaId = prog.hojaDeRuta!.id;
+
+    // Intentar anexar rem-3 (pertenece a com-102)
+    const res = remitoService.anexarEntregaARuta('rem-3', hojaId);
+    expect(res.success).toBe(false);
+    expect(res.status).toBe(422);
+    expect(res.error).toMatch(/comercio distinto/i);
   });
 
   it('REGLA A CONSIDERAR: La ruta de destino debe encontrarse abierta (Rechaza cerrada o anulada)', () => {

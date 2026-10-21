@@ -970,6 +970,23 @@ export const remitoService = {
 
     const hojaRow = hojaRes.rows[0];
 
+    // REGLA: Coherencia de comercio destinatario (Solo se pueden agrupar o anexar entregas del mismo comercio)
+    const visitasDeRuta = await db.query(
+      'SELECT DISTINCT comercio_id::text as "comercioId" FROM visita WHERE hoja_de_ruta_id::text = $1',
+      [String(hojaDeRutaId)]
+    );
+    if (
+      visitasDeRuta.rows.length > 0 &&
+      !visitasDeRuta.rows.some((v: any) => v.comercioId === String(remitoRow.comercioId))
+    ) {
+      return {
+        success: false,
+        error:
+          'No se puede anexar la entrega: El remito pertenece a un comercio distinto al de la hoja de ruta de destino. Solo se pueden agrupar o anexar entregas del mismo comercio.',
+        status: 422,
+      };
+    }
+
     // REGLA A CONSIDERAR: "La ruta de destino debe encontrarse abierta"
     // Estados abiertos: borrador, pendiente_de_despacho, publicada, en_curso.
     // No abiertas: cerrada, anulada.

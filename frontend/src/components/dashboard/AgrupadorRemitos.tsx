@@ -23,8 +23,6 @@ import {
   UserCheck,
   Trash2,
   AlertTriangle,
-  Wifi,
-  WifiOff,
 } from 'lucide-react';
 import { Remito, Visita, Comercio, Marca, HojaDeRuta, Transportista } from '../../types/domain';
 import { remitoService, obtenerFechaActualISO } from '../../services/remitoService';
@@ -207,14 +205,7 @@ export const AgrupadorRemitos: React.FC = () => {
     setMensaje({ tipo: 'exito', texto: textoExito });
   };
 
-  const handleAlternarConexionTransportista = async (
-    transportistaId: string,
-    conectadoActual: boolean
-  ) => {
-    await remitoService.actualizarConexionTransportistaAsync(transportistaId, !conectadoActual);
-    await recargarDatos();
-  };
-
+  
   const handleAsignarFecha = async (fechaAProgramar = fechaInput) => {
     if (visitasEnArmado.length === 0) {
       setMensaje({
@@ -494,18 +485,31 @@ export const AgrupadorRemitos: React.FC = () => {
                             Proveedor: {marca?.nombre || remito.marcaId}
                           </span>
                         </div>
-                        <div className="text-sm text-slate-600">
-                          Importe:{' '}
-                          <strong className="font-mono text-slate-900">
-                            ${remito.importe.toLocaleString('es-AR')}
-                          </strong>
+                        <div className="text-sm text-slate-600 flex items-center gap-2">
+                          <span>
+                            Importe:{' '}
+                            <strong className="font-mono text-slate-900">
+                              ${remito.importe.toLocaleString('es-AR')}
+                            </strong>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleAbrirAnexar(remito);
+                            }}
+                            className="text-xs px-2 py-0.5 border border-slate-300 rounded text-slate-700 bg-white hover:bg-slate-50 transition-colors cursor-pointer"
+                            title="Anexar esta entrega a una hoja de ruta existente"
+                          >
+                            Anexar a ruta
+                          </button>
                         </div>
                       </div>
                     </label>
 
                     {/* Desplegable para asignar/cambiar el comercio destinatario */}
-                    <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap sm:w-auto">
-                      <div className="flex items-center gap-2 sm:w-64">
+                    <div className="flex items-center gap-2 sm:w-64">
                         <Building className="w-4 h-4 text-slate-400 flex-shrink-0" />
                         <select
                           value={remito.comercioId}
@@ -519,17 +523,6 @@ export const AgrupadorRemitos: React.FC = () => {
                             </option>
                           ))}
                         </select>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleAbrirAnexar(remito)}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition-colors whitespace-nowrap shadow-2xs cursor-pointer"
-                        title="Anexar esta entrega a una hoja de ruta abierta"
-                      >
-                        <Truck className="w-3.5 h-3.5 text-blue-600" />
-                        <span>Anexar a Ruta</span>
-                      </button>
                     </div>
                   </div>
                 );
@@ -979,37 +972,6 @@ export const AgrupadorRemitos: React.FC = () => {
                               {hoja.transportistaId ? 'Asignado' : 'Sin transportista'}
                             </span>
                           </div>
-
-                          {/* Indicador de conectividad del dispositivo móvil (HU #19) */}
-                          {hoja.transportistaId && (() => {
-                            const chofer = transportistas.find((t) => t.id === hoja.transportistaId);
-                            const estaConectado = chofer?.dispositivoConectado ?? true;
-                            return (
-                              <div className="flex items-center justify-between text-xs pt-1.5 border-t border-blue-100">
-                                <span className="flex items-center gap-1.5 font-medium">
-                                  {estaConectado ? (
-                                    <>
-                                      <Wifi className="w-3.5 h-3.5 text-emerald-600" />
-                                      <span className="text-emerald-700 font-semibold">Dispositivo Conectado</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <WifiOff className="w-3.5 h-3.5 text-amber-600" />
-                                      <span className="text-amber-700 font-semibold">Sin Conexión (Offline)</span>
-                                    </>
-                                  )}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => void handleAlternarConexionTransportista(hoja.transportistaId!, estaConectado)}
-                                  className="text-xs text-blue-700 hover:text-blue-900 hover:underline font-semibold cursor-pointer"
-                                  title="Alternar estado de conexión del dispositivo para pruebas"
-                                >
-                                  {estaConectado ? 'Desconectar' : 'Reconectar'}
-                                </button>
-                              </div>
-                            );
-                          })()}
 
                           {/* Selector de transportista habilitado */}
                           <div className="pt-2 border-t border-blue-100 flex items-center gap-2">
