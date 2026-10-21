@@ -44,3 +44,14 @@ export interface HojaDeRuta {
   cantidadRemitos?: number;
   importeTotal?: number;
 }
+
+export interface Transportista {
+  id: string;
+  nombre: string;
+  usuario: string;
+  email?: string | null;
+  rol?: string;
+  activo: boolean;
+  esTransportista?: boolean;
+}
+

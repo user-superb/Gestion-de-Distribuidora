@@ -165,6 +165,7 @@ function setupMemoryDb() {
     INSERT INTO usuario (id, usuario, nombre, email, password_hash, rol, es_transportista, activo) VALUES
       (1, 'admin', 'Martín Jirafales Coordinador', 'admin@tutucas.com.ar', '${hash}', 'Administrativo', false, true),
       (2, 'chofer', 'Carlos Repartidor', 'chofer@tutucas.com.ar', '${hash}', 'Transportista', true, true),
+      (6, 'chofer2', 'Mario Flete', 'chofer2@tutucas.com.ar', '${hash}', 'Transportista', true, true),
       (3, 'supervisor', 'Valeria Logística', 'supervisor@tutucas.com.ar', '${hash}', 'Supervisor', false, true),
       (4, 'gerencia', 'Roberto Gerente', 'gerencia@tutucas.com.ar', '${hash}', 'Gerente', false, true),
       (5, 'admin_sistema', 'Administrador del Sistema', 'admin.sistema@tutucas.com.ar', '${hash}', 'Administrador del sistema', false, true)

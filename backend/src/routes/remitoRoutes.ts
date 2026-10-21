@@ -22,6 +22,15 @@ remitoRouter.get('/marcas', async (_req, res) => {
   }
 });
 
+remitoRouter.get('/transportistas', async (_req, res) => {
+  try {
+    const transportistas = await remitoService.getTransportistasHabilitados();
+    res.json(transportistas);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 remitoRouter.get('/remitos/pendientes', async (_req, res) => {
   try {
     const pendientes = await remitoService.getRemitosPendientes();
@@ -127,6 +136,20 @@ remitoRouter.patch('/hoja-de-ruta/:id/estado', async (req, res) => {
     res.json({ success: true, id, estado });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+remitoRouter.patch('/hoja-de-ruta/:id/transportista', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { transportistaId } = req.body;
+    const result = await remitoService.asignarTransportistaHojaDeRuta(id, transportistaId ?? null);
+    if (!result.success) {
+      return res.status(result.status || 422).json(result);
+    }
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

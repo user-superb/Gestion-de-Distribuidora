@@ -1,4 +1,4 @@
-import { Remito, Visita, Comercio, Marca, HojaDeRuta } from '../types/domain';
+import { Remito, Visita, Comercio, Marca, HojaDeRuta, Transportista } from '../types/domain';
 
 export const MOCK_COMERCIOS: Comercio[] = [
   { id: 'com-101', razonSocial: 'Mayorista El Sol S.R.L.', domicilio: 'Av. Hipólito Yrigoyen 4500, Lanús' },
@@ -10,6 +10,11 @@ export const MOCK_MARCAS: Marca[] = [
   { id: 'marca-A', nombre: 'Lácteos del Sur' },
   { id: 'marca-B', nombre: 'Bebidas Nacionales' },
   { id: 'marca-C', nombre: 'Alimentos Río de la Plata' },
+];
+
+export const MOCK_TRANSPORTISTAS: Transportista[] = [
+  { id: '2', nombre: 'Carlos Repartidor', usuario: 'chofer', rol: 'Transportista', activo: true, esTransportista: true },
+  { id: '6', nombre: 'Mario Flete', usuario: 'chofer2', rol: 'Transportista', activo: true, esTransportista: true },
 ];
 
 const INITIAL_REMITOS: Remito[] = [
@@ -52,6 +57,7 @@ let mockHojaDeRuta: HojaDeRuta = {
 let mockHojasDeRuta: HojaDeRuta[] = [];
 let cachedComercios: Comercio[] = [...MOCK_COMERCIOS];
 let cachedMarcas: Marca[] = [...MOCK_MARCAS];
+let cachedTransportistas: Transportista[] = [...MOCK_TRANSPORTISTAS];
 
 const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api';
 
@@ -282,6 +288,78 @@ export const remitoService = {
     return { success: true, visitas: [...nuevas] };
   },
 
+  getTransportistas: (): Transportista[] => [...cachedTransportistas],
+
+  asignarTransportistaHojaDeRuta: (
+    hojaDeRutaId: string,
+    transportistaId: string | null
+  ): { success: boolean; hojaDeRuta?: HojaDeRuta; error?: string; status?: number } => {
+    if (!hojaDeRutaId) {
+      return { success: false, error: 'Debe especificar el ID de la hoja de ruta.', status: 400 };
+    }
+
+    const idx = mockHojasDeRuta.findIndex((h) => h.id === hojaDeRutaId);
+    if (idx === -1 && mockHojaDeRuta.id !== hojaDeRutaId) {
+      return { success: false, error: 'La hoja de ruta especificada no existe.', status: 404 };
+    }
+
+    const hojaActual = idx !== -1 ? mockHojasDeRuta[idx] : mockHojaDeRuta;
+
+    // Desasignación si transportistaId es null o vacío
+    if (!transportistaId) {
+      const actualizada: HojaDeRuta = { ...hojaActual, transportistaId: null, transportistaNombre: null };
+      if (idx !== -1) mockHojasDeRuta[idx] = actualizada;
+      if (mockHojaDeRuta.id === hojaDeRutaId) mockHojaDeRuta = actualizada;
+      return { success: true, hojaDeRuta: actualizada };
+    }
+
+    // Regla: Solo transportista habilitado en la flota
+    const transportista = cachedTransportistas.find((t) => t.id === transportistaId);
+    if (!transportista) {
+      return { success: false, error: 'El transportista seleccionado no existe.', status: 404 };
+    }
+
+    const estaHabilitado =
+      Boolean(transportista.activo) &&
+      (Boolean(transportista.esTransportista) || transportista.rol === 'Transportista');
+
+    if (!estaHabilitado) {
+      return {
+        success: false,
+        error: 'La hoja de ruta solo puede ser asignada a un transportista que se encuentre habilitado en la flota.',
+        status: 422,
+      };
+    }
+
+    // Criterio de Aceptación Escenario 2: Fallo por solapamiento de asignación
+    const solapada = mockHojasDeRuta.find(
+      (h) =>
+        h.id !== hojaDeRutaId &&
+        h.transportistaId === transportistaId &&
+        h.fechaReparto === hojaActual.fechaReparto &&
+        h.estado !== 'anulada'
+    );
+
+    if (solapada) {
+      return {
+        success: false,
+        error: `El transportista ya posee una hoja de ruta asignada para esa misma fecha (${hojaActual.fechaReparto}).`,
+        status: 422,
+      };
+    }
+
+    // Criterio de Aceptación Escenario 1: Asignación exitosa
+    const actualizada: HojaDeRuta = {
+      ...hojaActual,
+      transportistaId: transportista.id,
+      transportistaNombre: transportista.nombre,
+    };
+    if (idx !== -1) mockHojasDeRuta[idx] = actualizada;
+    if (mockHojaDeRuta.id === hojaDeRutaId) mockHojaDeRuta = actualizada;
+
+    return { success: true, hojaDeRuta: actualizada };
+  },
+
   desagruparVisita: (visitaId: string): void => {
     const visita = mockVisitas.find((v) => v.id === visitaId);
     if (!visita) return;
@@ -310,6 +388,7 @@ export const remitoService = {
       importeTotal: 0,
     };
     mockHojasDeRuta = [];
+    cachedTransportistas = [...MOCK_TRANSPORTISTAS];
   },
 
   // -------------------------------------------------------------
@@ -546,5 +625,52 @@ export const remitoService = {
       // Fallback a lógica en memoria
     }
     return remitoService.reordenarVisitas(visitaIds);
+  },
+
+  async getTransportistasAsync(): Promise<Transportista[]> {
+    try {
+      const res = await fetch(`${API_BASE}/transportistas`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        cachedTransportistas = data;
+        return data;
+      }
+    } catch {
+      // Fallback a lógica en memoria
+    }
+    return remitoService.getTransportistas();
+  },
+
+  async asignarTransportistaHojaDeRutaAsync(
+    hojaDeRutaId: string,
+    transportistaId: string | null
+  ): Promise<{ success: boolean; hojaDeRuta?: HojaDeRuta; error?: string; status?: number }> {
+    try {
+      const res = await fetch(
+        `${API_BASE}/hoja-de-ruta/${encodeURIComponent(hojaDeRutaId)}/transportista`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transportistaId }),
+          signal: AbortSignal.timeout(3000),
+        }
+      );
+      const data = await res.json();
+      if (res.ok && data.success) {
+        return data;
+      }
+      if (data.error) {
+        return {
+          success: false,
+          error: data.error,
+          status: res.status,
+        };
+      }
+    } catch {
+      // Fallback a lógica en memoria
+    }
+    return remitoService.asignarTransportistaHojaDeRuta(hojaDeRutaId, transportistaId);
   },
 };

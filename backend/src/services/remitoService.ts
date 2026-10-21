@@ -47,6 +47,16 @@ export interface HojaDeRuta {
   importeTotal?: number;
 }
 
+export interface Transportista {
+  id: string;
+  nombre: string;
+  usuario: string;
+  email?: string | null;
+  rol: string;
+  activo: boolean;
+  esTransportista: boolean;
+}
+
 export function obtenerFechaActualISO(): string {
   const now = new Date();
   const y = now.getFullYear();
@@ -586,5 +596,126 @@ export const remitoService = {
 
     const visitasActualizadas = await this.getVisitas();
     return { success: true, visitas: visitasActualizadas };
+  },
+
+  async getTransportistasHabilitados(): Promise<Transportista[]> {
+    try {
+      const res = await db.query(
+        `SELECT id::text as id, nombre, usuario, email, rol, activo, es_transportista as "esTransportista"
+         FROM usuario
+         WHERE activo = true AND (es_transportista = true OR rol = 'Transportista')
+         ORDER BY nombre ASC`
+      );
+      return res.rows.map((r: any) => ({
+        id: String(r.id),
+        nombre: r.nombre,
+        usuario: r.usuario,
+        email: r.email || null,
+        rol: r.rol,
+        activo: Boolean(r.activo),
+        esTransportista: Boolean(r.esTransportista),
+      }));
+    } catch {
+      return [];
+    }
+  },
+
+  async asignarTransportistaHojaDeRuta(
+    hojaDeRutaId: string,
+    transportistaId: string | null
+  ): Promise<{ success: boolean; hojaDeRuta?: HojaDeRuta; error?: string; status?: number }> {
+    if (!hojaDeRutaId) {
+      return { success: false, error: 'Debe especificar el ID de la hoja de ruta.', status: 400 };
+    }
+
+    // 1. Verificar existencia de la hoja de ruta
+    const hojaRes = await db.query(
+      'SELECT id::text as id, sucursal_id::text as "sucursalId", transportista_id::text as "transportistaId", fecha_reparto as "fechaReparto", estado FROM hoja_de_ruta WHERE id::text = $1',
+      [hojaDeRutaId]
+    );
+    if (hojaRes.rows.length === 0) {
+      return { success: false, error: 'La hoja de ruta especificada no existe.', status: 404 };
+    }
+    const hojaRow = hojaRes.rows[0];
+
+    // Desasignación de transportista si se pasa null o vacío
+    if (!transportistaId) {
+      await db.query('UPDATE hoja_de_ruta SET transportista_id = NULL WHERE id::text = $1', [hojaDeRutaId]);
+      const updated = await this.construirHojaDeRutaDetalle({ ...hojaRow, transportistaId: null });
+      return { success: true, hojaDeRuta: updated };
+    }
+
+    // 2. Verificar que el transportista exista y esté habilitado en la flota (Regla de negocio)
+    const transRes = await db.query(
+      `SELECT id::text as id, nombre, activo, es_transportista as "esTransportista", rol 
+       FROM usuario 
+       WHERE id::text = $1`,
+      [String(transportistaId)]
+    );
+
+    if (transRes.rows.length === 0) {
+      return { success: false, error: 'El transportista seleccionado no existe.', status: 404 };
+    }
+
+    const transportista = transRes.rows[0];
+    const estaHabilitado =
+      Boolean(transportista.activo) &&
+      (Boolean(transportista.esTransportista) || transportista.rol === 'Transportista');
+
+    if (!estaHabilitado) {
+      return {
+        success: false,
+        error: 'La hoja de ruta solo puede ser asignada a un transportista que se encuentre habilitado en la flota.',
+        status: 422,
+      };
+    }
+
+    // 3. Verificar si el transportista ya posee una hoja de ruta para esa misma fecha (Criterio Escenario 2: Solapamiento)
+    const fechaReparto = normalizarFechaISO(hojaRow.fechaReparto);
+    const solapadas = await db.query(
+      `SELECT id::text as id, fecha_reparto as "fechaReparto", estado 
+       FROM hoja_de_ruta 
+       WHERE transportista_id::text = $1 
+         AND fecha_reparto = $2::date 
+         AND id::text != $3 
+         AND estado NOT IN ('anulada')`,
+      [String(transportistaId), fechaReparto, String(hojaDeRutaId)]
+    );
+
+    if (solapadas.rows.length > 0) {
+      return {
+        success: false,
+        error: `El transportista ya posee una hoja de ruta asignada para esa misma fecha (${fechaReparto}).`,
+        status: 422,
+      };
+    }
+
+    // 4. Asignar la hoja de ruta al transportista
+    try {
+      await db.query(
+        'UPDATE hoja_de_ruta SET transportista_id = $1 WHERE id::text = $2',
+        [String(transportistaId), String(hojaDeRutaId)]
+      );
+    } catch (err: any) {
+      if (err?.code === '23505' || String(err?.message || '').includes('hoja_unica_por_transportista_y_fecha')) {
+        return {
+          success: false,
+          error: `El transportista ya posee una hoja de ruta asignada para esa misma fecha (${fechaReparto}).`,
+          status: 422,
+        };
+      }
+      throw err;
+    }
+
+    // 5. Retornar hoja de ruta actualizada vinculada al perfil del transportista (Criterio Escenario 1)
+    const hojaActualizada = await this.construirHojaDeRutaDetalle({
+      ...hojaRow,
+      transportistaId: String(transportistaId),
+    });
+
+    return {
+      success: true,
+      hojaDeRuta: hojaActualizada,
+    };
   },
 };

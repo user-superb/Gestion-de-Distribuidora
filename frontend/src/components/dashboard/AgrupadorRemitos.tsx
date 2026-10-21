@@ -22,7 +22,7 @@ import {
   UserCheck,
   Trash2,
 } from 'lucide-react';
-import { Remito, Visita, Comercio, Marca, HojaDeRuta } from '../../types/domain';
+import { Remito, Visita, Comercio, Marca, HojaDeRuta, Transportista } from '../../types/domain';
 import { remitoService, obtenerFechaActualISO } from '../../services/remitoService';
 
 function formatearFechaCorta(fechaISO?: string): string {
@@ -39,6 +39,10 @@ export const AgrupadorRemitos: React.FC = () => {
   const [comercios, setComercios] = useState<Comercio[]>([]);
   const [marcas, setMarcas] = useState<Marca[]>([]);
   const [hojasRuta, setHojasRuta] = useState<HojaDeRuta[]>([]);
+  const [transportistas, setTransportistas] = useState<Transportista[]>([]);
+  const [asignandoHojaId, setAsignandoHojaId] = useState<string | null>(null);
+  const [errorAsignacionPorHoja, setErrorAsignacionPorHoja] = useState<Record<string, string>>({});
+  const [exitoAsignacionPorHoja, setExitoAsignacionPorHoja] = useState<Record<string, string>>({});
   const [fechaInput, setFechaInput] = useState<string>(hoyISO);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
@@ -53,12 +57,13 @@ export const AgrupadorRemitos: React.FC = () => {
     marcas.find((m) => m.id === id) || remitoService.getMarcaById(id);
 
   const recargarDatos = async () => {
-    const [pend, vis, com, mar, listaHojas] = await Promise.all([
+    const [pend, vis, com, mar, listaHojas, trans] = await Promise.all([
       remitoService.getRemitosPendientesAsync(),
       remitoService.getVisitasAsync(),
       remitoService.getComerciosAsync(),
       remitoService.getMarcasAsync(),
       remitoService.getHojasDeRutaAsync(),
+      remitoService.getTransportistasAsync(),
     ]);
 
     setPendientes(pend);
@@ -66,6 +71,7 @@ export const AgrupadorRemitos: React.FC = () => {
     setComercios(com);
     setMarcas(mar);
     setHojasRuta(listaHojas);
+    setTransportistas(trans);
   };
 
   useEffect(() => {
@@ -83,11 +89,44 @@ export const AgrupadorRemitos: React.FC = () => {
   );
 
   // En Sección 3 se muestran todas las Hojas de Ruta Armadas (en estado pendiente_de_despacho / publicada)
-  const hojasArmadas = hojasRuta.filter(
-    (h) =>
-      (h.estado === 'pendiente_de_despacho' || h.estado === 'publicada') &&
-      (h.visitas?.length || 0) > 0
-  );
+  const hojasArmadas = hojasRuta.filter((h) => {
+    if (h.estado !== 'pendiente_de_despacho' && h.estado !== 'publicada') return false;
+    const tieneVisitasDirectas = (h.visitas?.length || 0) > 0;
+    const tieneVisitasEnEstado = visitas.some((v) => v.hojaDeRutaId === h.id);
+    const tieneCantidadVisitas = (h.cantidadVisitas || 0) > 0;
+    return tieneVisitasDirectas || tieneVisitasEnEstado || tieneCantidadVisitas;
+  });
+
+  const handleAsignarTransportista = async (hojaId: string, transportistaId: string) => {
+    setAsignandoHojaId(hojaId);
+    setErrorAsignacionPorHoja((prev) => ({ ...prev, [hojaId]: '' }));
+    setExitoAsignacionPorHoja((prev) => ({ ...prev, [hojaId]: '' }));
+
+    const res = await remitoService.asignarTransportistaHojaDeRutaAsync(
+      hojaId,
+      transportistaId || null
+    );
+
+    if (res.success && res.hojaDeRuta) {
+      const hojaActualizada = res.hojaDeRuta;
+      setHojasRuta((prev) =>
+        prev.map((h) => (h.id === hojaId ? { ...h, ...hojaActualizada } : h))
+      );
+      const nombre = hojaActualizada.transportistaNombre;
+      setExitoAsignacionPorHoja((prev) => ({
+        ...prev,
+        [hojaId]: nombre
+          ? `Transportista "${nombre}" asignado exitosamente.`
+          : 'Transportista desvinculado de la hoja de ruta.',
+      }));
+    } else {
+      setErrorAsignacionPorHoja((prev) => ({
+        ...prev,
+        [hojaId]: res.error || 'No se pudo asignar el transportista.',
+      }));
+    }
+    setAsignandoHojaId(null);
+  };
 
   const handleToggleSeleccion = (id: string) => {
     const nuevos = new Set(seleccionados);
@@ -759,7 +798,10 @@ export const AgrupadorRemitos: React.FC = () => {
               {hojasArmadas.map((hoja) => {
                 const codigoHoja =
                   hoja.numero || `HR-${String(hoja.id).padStart(4, '0')}`;
-                const visitasHoja = hoja.visitas || [];
+                const visitasHoja =
+                  hoja.visitas && hoja.visitas.length > 0
+                    ? hoja.visitas
+                    : visitas.filter((v) => v.hojaDeRutaId === hoja.id);
                 const totalRemitosHoja = visitasHoja.reduce(
                   (acc, v) => acc + v.remitos.length,
                   0
@@ -827,23 +869,96 @@ export const AgrupadorRemitos: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Espacio listo para HU #14: Asignar Hoja de Ruta al Transportista */}
-                        <div className="bg-blue-50/40 border border-blue-200 rounded-md p-3.5 flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-2.5">
-                            <UserCheck className="w-5 h-5 text-blue-600 flex-shrink-0" />
-                            <div>
-                              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 block">
-                                Transportista Asignado
-                              </span>
-                              <strong className="text-sm text-slate-900">
-                                {hoja.transportistaNombre ||
-                                  'Sin asignar (pendiente de asignación)'}
-                              </strong>
+                        {/* HU #14: Asignar Hoja de Ruta al Transportista */}
+                        <div className="bg-blue-50/40 border border-blue-200 rounded-md p-3.5 flex flex-col justify-between gap-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <UserCheck className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                              <div>
+                                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 block">
+                                  Transportista Asignado
+                                </span>
+                                <strong
+                                  className="text-sm text-slate-900 block truncate max-w-[200px]"
+                                  title={hoja.transportistaNombre || 'Sin asignar'}
+                                >
+                                  {hoja.transportistaNombre || 'Sin asignar'}
+                                </strong>
+                              </div>
                             </div>
+                            <span
+                              className={`text-xs font-semibold px-2.5 py-1 rounded whitespace-nowrap border ${
+                                hoja.transportistaId
+                                  ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                                  : 'bg-amber-100 text-amber-900 border-amber-300'
+                              }`}
+                            >
+                              {hoja.transportistaId ? 'Asignado' : 'Sin transportista'}
+                            </span>
                           </div>
-                          <span className="text-xs font-semibold px-2.5 py-1 rounded bg-amber-100 text-amber-900 border border-amber-300 whitespace-nowrap">
-                            {hoja.transportistaId ? 'Asignado' : 'Sin transportista'}
-                          </span>
+
+                          {/* Selector de transportista habilitado */}
+                          <div className="pt-2 border-t border-blue-100 flex items-center gap-2">
+                            <div className="relative flex-1">
+                              <select
+                                value={hoja.transportistaId || ''}
+                                onChange={(e) => void handleAsignarTransportista(hoja.id, e.target.value)}
+                                disabled={asignandoHojaId === hoja.id}
+                                aria-label="Seleccionar transportista para la hoja de ruta"
+                                className="w-full text-xs bg-white border border-slate-300 rounded px-2.5 py-1.5 text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60 cursor-pointer"
+                              >
+                                <option value="">-- Seleccionar transportista --</option>
+                                {transportistas.map((t) => {
+                                  // Solapamiento: el transportista ya posee OTRA hoja de ruta asignada para esa misma fecha
+                                  const ocupadoEnFecha = hojasRuta.some(
+                                    (otra) =>
+                                      otra.id !== hoja.id &&
+                                      otra.transportistaId === t.id &&
+                                      otra.fechaReparto === hoja.fechaReparto &&
+                                      otra.estado !== 'anulada'
+                                  );
+                                  return (
+                                    <option
+                                      key={t.id}
+                                      value={t.id}
+                                      disabled={ocupadoEnFecha}
+                                      className={ocupadoEnFecha ? 'text-slate-400 bg-slate-50' : 'text-slate-900'}
+                                    >
+                                      {t.nombre} {ocupadoEnFecha ? `(Ocupado el ${formatearFechaCorta(hoja.fechaReparto)})` : ''}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </div>
+
+                            {hoja.transportistaId && (
+                              <button
+                                type="button"
+                                onClick={() => void handleAsignarTransportista(hoja.id, '')}
+                                disabled={asignandoHojaId === hoja.id}
+                                className="text-xs text-red-600 hover:text-red-800 px-2 py-1.5 border border-red-200 rounded hover:bg-red-50 font-medium transition-colors whitespace-nowrap"
+                                title="Desasignar transportista"
+                              >
+                                Desasignar
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Mensaje de error de solapamiento o regla para esta hoja */}
+                          {errorAsignacionPorHoja[hoja.id] && (
+                            <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2 flex items-start gap-1.5">
+                              <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                              <span>{errorAsignacionPorHoja[hoja.id]}</span>
+                            </div>
+                          )}
+
+                          {/* Mensaje de confirmación de asignación */}
+                          {exitoAsignacionPorHoja[hoja.id] && (
+                            <div className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded p-2 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                              <span>{exitoAsignacionPorHoja[hoja.id]}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
 
