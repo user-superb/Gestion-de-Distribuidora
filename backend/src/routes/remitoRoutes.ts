@@ -208,3 +208,48 @@ remitoRouter.put('/visitas/reordenar', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+remitoRouter.post('/hoja-de-ruta/:id/anexar-entrega', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { remitoId, dispositivoConectado } = req.body;
+    const result = await remitoService.anexarEntregaARuta(remitoId, id, {
+      dispositivoConectado:
+        dispositivoConectado !== undefined ? Boolean(dispositivoConectado) : undefined,
+    });
+    if (!result.success) {
+      return res.status(result.status || 422).json(result);
+    }
+    res.status(200).json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+remitoRouter.post('/remitos/:id/anexar', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { hojaDeRutaId, dispositivoConectado } = req.body;
+    const result = await remitoService.anexarEntregaARuta(id, hojaDeRutaId, {
+      dispositivoConectado:
+        dispositivoConectado !== undefined ? Boolean(dispositivoConectado) : undefined,
+    });
+    if (!result.success) {
+      return res.status(result.status || 422).json(result);
+    }
+    res.status(200).json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+remitoRouter.patch('/transportistas/:id/conexion', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { conectado } = req.body;
+    const result = await remitoService.actualizarConexionTransportista(id, Boolean(conectado));
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});

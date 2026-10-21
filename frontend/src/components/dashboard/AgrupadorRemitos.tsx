@@ -22,6 +22,9 @@ import {
   ClipboardCheck,
   UserCheck,
   Trash2,
+  AlertTriangle,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 import { Remito, Visita, Comercio, Marca, HojaDeRuta, Transportista } from '../../types/domain';
 import { remitoService, obtenerFechaActualISO } from '../../services/remitoService';
@@ -34,6 +37,7 @@ function formatearFechaCorta(fechaISO?: string): string {
 }
 
 import { ModalCargaManual } from './ModalCargaManual';
+import { ModalAnexarEntrega } from './ModalAnexarEntrega';
 
 export const AgrupadorRemitos: React.FC = () => {
   const hoyISO = obtenerFechaActualISO();
@@ -53,6 +57,9 @@ export const AgrupadorRemitos: React.FC = () => {
   const [ultimaVisitaId, setUltimaVisitaId] = useState<string | null>(null);
   const [mensaje, setMensaje] = useState<{ tipo: 'error' | 'exito'; texto: string } | null>(null);
   const [modalCargaManualAbierto, setModalCargaManualAbierto] = useState<boolean>(false);
+  const [remitoParaAnexar, setRemitoParaAnexar] = useState<Remito | null>(null);
+  const [hojaDestinoPreseleccionada, setHojaDestinoPreseleccionada] = useState<string | null>(null);
+  const [modalAnexarAbierto, setModalAnexarAbierto] = useState<boolean>(false);
 
   const getComercio = (id: string) =>
     comercios.find((c) => c.id === id) || remitoService.getComercioById(id);
@@ -187,6 +194,25 @@ export const AgrupadorRemitos: React.FC = () => {
   const handleCargaManualExitosa = async (_remito: Remito, textoExito: string) => {
     await recargarDatos();
     setMensaje({ tipo: 'exito', texto: textoExito });
+  };
+
+  const handleAbrirAnexar = (remito: Remito, hojaId?: string) => {
+    setRemitoParaAnexar(remito);
+    setHojaDestinoPreseleccionada(hojaId || null);
+    setModalAnexarAbierto(true);
+  };
+
+  const handleAnexionExitosa = async (_resultado: any, textoExito: string) => {
+    await recargarDatos();
+    setMensaje({ tipo: 'exito', texto: textoExito });
+  };
+
+  const handleAlternarConexionTransportista = async (
+    transportistaId: string,
+    conectadoActual: boolean
+  ) => {
+    await remitoService.actualizarConexionTransportistaAsync(transportistaId, !conectadoActual);
+    await recargarDatos();
   };
 
   const handleAsignarFecha = async (fechaAProgramar = fechaInput) => {
@@ -478,20 +504,32 @@ export const AgrupadorRemitos: React.FC = () => {
                     </label>
 
                     {/* Desplegable para asignar/cambiar el comercio destinatario */}
-                    <div className="flex items-center gap-2 sm:w-64">
-                      <Building className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                      <select
-                        value={remito.comercioId}
-                        onChange={(e) => handleCambiarComercio(remito.id, e.target.value)}
-                        className="w-full text-sm font-medium bg-slate-50 border border-slate-300 rounded px-2.5 py-2 text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        title="Comercio destinatario del remito"
+                    <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap sm:w-auto">
+                      <div className="flex items-center gap-2 sm:w-64">
+                        <Building className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                        <select
+                          value={remito.comercioId}
+                          onChange={(e) => handleCambiarComercio(remito.id, e.target.value)}
+                          className="w-full text-sm font-medium bg-slate-50 border border-slate-300 rounded px-2.5 py-2 text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          title="Comercio destinatario del remito"
+                        >
+                          {comercios.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.razonSocial}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleAbrirAnexar(remito)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition-colors whitespace-nowrap shadow-2xs cursor-pointer"
+                        title="Anexar esta entrega a una hoja de ruta abierta"
                       >
-                        {comercios.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.razonSocial}
-                          </option>
-                        ))}
-                      </select>
+                        <Truck className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Anexar a Ruta</span>
+                      </button>
                     </div>
                   </div>
                 );
@@ -850,18 +888,46 @@ export const AgrupadorRemitos: React.FC = () => {
                         </span>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => void handleEliminarHojaDeRuta(hoja)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-700 bg-white hover:bg-red-50 border border-red-300 rounded transition-colors"
-                        title="Eliminar esta hoja de ruta y devolver sus visitas a la Sección 2"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Eliminar Hoja de Ruta</span>
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {pendientes.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleAbrirAnexar(pendientes[0], hoja.id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-700 bg-white hover:bg-blue-50 border border-blue-300 rounded transition-colors cursor-pointer"
+                            title="Anexar una entrega pendiente a esta hoja de ruta"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Anexar Entrega</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => void handleEliminarHojaDeRuta(hoja)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-700 bg-white hover:bg-red-50 border border-red-300 rounded transition-colors cursor-pointer"
+                          title="Eliminar esta hoja de ruta y devolver sus visitas a la Sección 2"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Eliminar Hoja de Ruta</span>
+                        </button>
+                      </div>
                     </div>
 
                     <div className="p-5 space-y-4">
+                      {/* Alerta Visual: Sincronización pendiente (HU #19 Escenario 2) */}
+                      {(hoja.tieneSincronizacionPendiente || visitasHoja.some((v) => v.sincronizacionPendiente)) && (
+                        <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-md p-3.5 flex items-start gap-3 shadow-2xs">
+                          <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                          <div className="text-xs space-y-0.5">
+                            <strong className="font-bold text-amber-950 text-sm block">
+                              Sincronización pendiente
+                            </strong>
+                            <p className="text-amber-800">
+                              El transportista asignado no reporta conexión en su dispositivo móvil. Las paradas anexadas fueron registradas al final de la secuencia pero permanecen pendientes de sincronización con la aplicación de campo.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Resumen Operativo + Bloque de Transportista preparado para HU #14 */}
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="bg-slate-50 border border-slate-200 rounded-md p-3.5">
@@ -913,6 +979,37 @@ export const AgrupadorRemitos: React.FC = () => {
                               {hoja.transportistaId ? 'Asignado' : 'Sin transportista'}
                             </span>
                           </div>
+
+                          {/* Indicador de conectividad del dispositivo móvil (HU #19) */}
+                          {hoja.transportistaId && (() => {
+                            const chofer = transportistas.find((t) => t.id === hoja.transportistaId);
+                            const estaConectado = chofer?.dispositivoConectado ?? true;
+                            return (
+                              <div className="flex items-center justify-between text-xs pt-1.5 border-t border-blue-100">
+                                <span className="flex items-center gap-1.5 font-medium">
+                                  {estaConectado ? (
+                                    <>
+                                      <Wifi className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span className="text-emerald-700 font-semibold">Dispositivo Conectado</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <WifiOff className="w-3.5 h-3.5 text-amber-600" />
+                                      <span className="text-amber-700 font-semibold">Sin Conexión (Offline)</span>
+                                    </>
+                                  )}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleAlternarConexionTransportista(hoja.transportistaId!, estaConectado)}
+                                  className="text-xs text-blue-700 hover:text-blue-900 hover:underline font-semibold cursor-pointer"
+                                  title="Alternar estado de conexión del dispositivo para pruebas"
+                                >
+                                  {estaConectado ? 'Desconectar' : 'Reconectar'}
+                                </button>
+                              </div>
+                            );
+                          })()}
 
                           {/* Selector de transportista habilitado */}
                           <div className="pt-2 border-t border-blue-100 flex items-center gap-2">
@@ -1002,8 +1099,19 @@ export const AgrupadorRemitos: React.FC = () => {
                                 <div className="space-y-1">
                                   <div className="flex items-center gap-2.5 flex-wrap">
                                     <span className="px-2.5 py-0.5 bg-blue-700 text-white font-mono text-xs font-bold rounded">
-                                      PARADA #{ordenNumero}
-                                    </span>
+                                       PARADA #{ordenNumero}
+                                     </span>
+                                     {visita.sincronizacionPendiente ? (
+                                       <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 text-xs font-bold rounded shadow-2xs">
+                                         <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                         <span>Sincronización pendiente</span>
+                                       </span>
+                                     ) : (
+                                       <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-medium rounded">
+                                         <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                         <span>Sincronizado</span>
+                                       </span>
+                                     )}
                                     <strong className="text-base text-slate-900">
                                       {comercio?.razonSocial || 'Comercio destinatario'}
                                     </strong>
@@ -1053,6 +1161,23 @@ export const AgrupadorRemitos: React.FC = () => {
         comercios={comercios}
         marcas={marcas}
         onSuccess={handleCargaManualExitosa}
+      />
+    
+  );
+      {/* Modal para Anexar Entrega a Ruta (HU #19) */}
+      <ModalAnexarEntrega
+        isOpen={modalAnexarAbierto}
+        onClose={() => {
+          setModalAnexarAbierto(false);
+          setRemitoParaAnexar(null);
+        }}
+        remito={remitoParaAnexar}
+        hojasDeRuta={hojasRuta}
+        transportistas={transportistas}
+        comercios={comercios}
+        marcas={marcas}
+        preselectedHojaId={hojaDestinoPreseleccionada}
+        onSuccess={handleAnexionExitosa}
       />
     </div>
   );

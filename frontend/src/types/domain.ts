@@ -28,6 +28,7 @@ export interface Visita {
   orden?: number;
   hojaDeRutaId?: string | null;
   estado?: string;
+  sincronizacionPendiente?: boolean;
 }
 
 export interface HojaDeRuta {
@@ -36,6 +37,7 @@ export interface HojaDeRuta {
   sucursalId?: string;
   transportistaId?: string | null;
   transportistaNombre?: string | null;
+  transportistaConectado?: boolean;
   fechaReparto: string;
   patente?: string;
   estado: 'borrador' | 'pendiente_de_despacho' | 'publicada' | 'en_curso' | 'cerrada' | 'anulada';
@@ -43,6 +45,7 @@ export interface HojaDeRuta {
   cantidadVisitas?: number;
   cantidadRemitos?: number;
   importeTotal?: number;
+  tieneSincronizacionPendiente?: boolean;
 }
 
 export interface Transportista {
@@ -53,6 +56,7 @@ export interface Transportista {
   rol?: string;
   activo: boolean;
   esTransportista?: boolean;
+  dispositivoConectado?: boolean;
 }
 
 export interface NuevoComercioDto {
@@ -71,4 +75,16 @@ export interface CargaEntregaManualDto {
   numeroRemito?: string;
   fechaEmision?: string;
   sucursalId?: string;
+}
+
+export interface AnexarEntregaResultado {
+  success: boolean;
+  parada?: Visita;
+  ordenParada?: number;
+  hojaDeRuta?: HojaDeRuta;
+  sincronizacionPendiente?: boolean;
+  alerta?: string;
+  mensaje?: string;
+  error?: string;
+  status?: number;
 }

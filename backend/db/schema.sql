@@ -39,6 +39,7 @@ CREATE TABLE usuario (
     password_hash   text        NOT NULL,
     rol             text        NOT NULL DEFAULT 'Administrativo' CHECK (rol IN ('Administrador del sistema', 'Administrativo', 'Transportista', 'Supervisor', 'Gerente')),
     es_transportista boolean    NOT NULL DEFAULT false,
+    dispositivo_conectado boolean NOT NULL DEFAULT true,
     activo          boolean     NOT NULL DEFAULT true,
     creado_en       timestamptz NOT NULL DEFAULT now(),
     actualizado_en  timestamptz NOT NULL DEFAULT now()
@@ -280,6 +281,7 @@ CREATE TABLE visita (
     comercio_id         bigint      NOT NULL REFERENCES comercio(id),
     orden               integer,
     estado              text        NOT NULL DEFAULT 'pendiente',
+    sincronizacion_pendiente boolean NOT NULL DEFAULT false,
     -- Ubicación, fecha y hora reales de la operación. Pedido explícito
     -- del cliente; no reemplaza el seguimiento en vivo del camión.
     registrada_en       timestamptz,

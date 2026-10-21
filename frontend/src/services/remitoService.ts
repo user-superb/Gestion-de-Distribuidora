@@ -1,4 +1,4 @@
-import { Remito, Visita, Comercio, Marca, HojaDeRuta, Transportista, CargaEntregaManualDto } from '../types/domain';
+import { Remito, Visita, Comercio, Marca, HojaDeRuta, Transportista, CargaEntregaManualDto, AnexarEntregaResultado } from '../types/domain';
 
 export const MOCK_COMERCIOS: Comercio[] = [
   { id: 'com-101', razonSocial: 'Mayorista El Sol S.R.L.', domicilio: 'Av. Hipólito Yrigoyen 4500, Lanús' },
@@ -13,8 +13,8 @@ export const MOCK_MARCAS: Marca[] = [
 ];
 
 export const MOCK_TRANSPORTISTAS: Transportista[] = [
-  { id: '2', nombre: 'Carlos Repartidor', usuario: 'chofer', rol: 'Transportista', activo: true, esTransportista: true },
-  { id: '6', nombre: 'Mario Flete', usuario: 'chofer2', rol: 'Transportista', activo: true, esTransportista: true },
+  { id: '2', nombre: 'Carlos Repartidor', usuario: 'chofer', rol: 'Transportista', activo: true, esTransportista: true, dispositivoConectado: true },
+  { id: '6', nombre: 'Mario Flete', usuario: 'chofer2', rol: 'Transportista', activo: true, esTransportista: true, dispositivoConectado: true },
 ];
 
 const INITIAL_REMITOS: Remito[] = [
@@ -245,9 +245,17 @@ export const remitoService = {
     return { success: true };
   },
 
-  cambiarEstadoHojaDeRuta: (nuevoEstado: HojaDeRuta['estado']): void => {
-    mockHojaDeRuta.estado = nuevoEstado;
-
+  cambiarEstadoHojaDeRuta: (nuevoEstado: HojaDeRuta['estado'], hojaId?: string): void => {
+    if (hojaId) {
+      mockHojasDeRuta = mockHojasDeRuta.map((h) =>
+        h.id === hojaId ? { ...h, estado: nuevoEstado } : h
+      );
+      if (mockHojaDeRuta.id === hojaId) {
+        mockHojaDeRuta.estado = nuevoEstado;
+      }
+    } else {
+      mockHojaDeRuta.estado = nuevoEstado;
+    }
   },
 
   asignarFechaHojaDeRuta: (
@@ -439,6 +447,105 @@ export const remitoService = {
       idsEnVisita.includes(r.id) ? { ...r, estado: 'PENDIENTE' } : r
     );
     mockVisitas = mockVisitas.filter((v) => v.id !== visitaId);
+  },
+
+
+  setConexionTransportista: (transportistaId: string, conectado: boolean): boolean => {
+    cachedTransportistas = cachedTransportistas.map((t) =>
+      t.id === transportistaId ? { ...t, dispositivoConectado: conectado } : t
+    );
+    return true;
+  },
+
+  anexarEntregaARuta: (
+    remitoId: string,
+    hojaDeRutaId: string,
+    opciones?: { dispositivoConectado?: boolean }
+  ): AnexarEntregaResultado => {
+    if (!remitoId || !hojaDeRutaId) {
+      return { success: false, error: 'Debe especificar el remito y la hoja de ruta de destino.', status: 400 };
+    }
+
+    const remito = mockRemitos.find((r) => r.id === remitoId);
+    if (!remito) {
+      return { success: false, error: 'El remito especificado no existe.', status: 404 };
+    }
+    if (remito.estado === 'AGRUPADO') {
+      return { success: false, error: 'El remito ya se encuentra asignado a una visita.', status: 422 };
+    }
+
+    // Buscar la hoja de ruta de destino
+    let hoja = mockHojasDeRuta.find((h) => h.id === hojaDeRutaId);
+    if (!hoja && mockHojaDeRuta.id === hojaDeRutaId) {
+      hoja = mockHojaDeRuta;
+    }
+    if (!hoja) {
+      return { success: false, error: 'La hoja de ruta de destino no existe.', status: 404 };
+    }
+
+    // Regla: La ruta de destino debe encontrarse abierta
+    if (hoja.estado === 'cerrada' || hoja.estado === 'anulada') {
+      return {
+        success: false,
+        error: `No se puede anexar la entrega: la hoja de ruta de destino no se encuentra abierta (estado actual: "${hoja.estado}").`,
+        status: 422,
+      };
+    }
+
+    // Regla: transportista conexión
+    let reportaConexion = true;
+    if (opciones?.dispositivoConectado !== undefined) {
+      reportaConexion = Boolean(opciones.dispositivoConectado);
+    } else if (hoja.transportistaId) {
+      const chofer = cachedTransportistas.find((t) => t.id === hoja.transportistaId);
+      reportaConexion = chofer?.dispositivoConectado ?? true;
+    } else {
+      reportaConexion = false;
+    }
+
+    const sincronizacionPendiente = !reportaConexion;
+
+    // Calcular orden al final de la secuencia de esta hoja
+    const visitasDeHoja = mockVisitas.filter((v) => v.hojaDeRutaId === hojaDeRutaId);
+    const maxOrden = visitasDeHoja.reduce((max, v) => Math.max(max, v.orden || 0), 0);
+    const nuevoOrden = maxOrden + 1;
+
+    // Crear la nueva parada
+    const nuevaVisitaId = `vis-anexada-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const updatedRemito: Remito = { ...remito, estado: 'AGRUPADO' };
+    mockRemitos = mockRemitos.map((r) => (r.id === remitoId ? updatedRemito : r));
+
+    const nuevaParada: Visita = {
+      id: nuevaVisitaId,
+      comercioId: remito.comercioId,
+      remitos: [updatedRemito],
+      importeTotal: remito.importe,
+      orden: nuevoOrden,
+      hojaDeRutaId,
+      estado: 'pendiente',
+      sincronizacionPendiente,
+    };
+
+    mockVisitas.push(nuevaParada);
+
+    // Actualizar la hoja de ruta
+    hoja.visitas = [...(hoja.visitas || []), nuevaParada];
+    hoja.cantidadVisitas = (hoja.cantidadVisitas || 0) + 1;
+    hoja.cantidadRemitos = (hoja.cantidadRemitos || 0) + 1;
+    hoja.importeTotal = (hoja.importeTotal || 0) + remito.importe;
+    hoja.tieneSincronizacionPendiente = hoja.visitas.some((v) => Boolean(v.sincronizacionPendiente));
+
+    return {
+      success: true,
+      parada: nuevaParada,
+      ordenParada: nuevoOrden,
+      hojaDeRuta: { ...hoja },
+      sincronizacionPendiente,
+      alerta: sincronizacionPendiente ? 'Sincronización pendiente' : undefined,
+      mensaje: sincronizacionPendiente
+        ? 'Entrega anexada a la ruta. El dispositivo del transportista no reporta conexión; se generó una alerta de "Sincronización pendiente".'
+        : 'Entrega anexada exitosamente al final de la secuencia de la hoja de ruta y sincronizada con el transportista.',
+    };
   },
 
   resetearDatosMock: (): void => {
@@ -769,5 +876,65 @@ export const remitoService = {
     }
     return remitoService.asignarTransportistaHojaDeRuta(hojaDeRutaId, transportistaId);
   },
+  async anexarEntregaARutaAsync(
+    remitoId: string,
+    hojaDeRutaId: string,
+    opciones?: { dispositivoConectado?: boolean }
+  ): Promise<AnexarEntregaResultado> {
+    try {
+      const res = await fetch(
+        `${API_BASE}/hoja-de-ruta/${encodeURIComponent(hojaDeRutaId)}/anexar-entrega`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ remitoId, ...opciones }),
+          signal: AbortSignal.timeout(3000),
+        }
+      );
+      const data = await res.json();
+      if (res.ok && data.success) {
+        return data;
+      }
+      if (data.error) {
+        return {
+          success: false,
+          error: data.error,
+          status: res.status,
+        };
+      }
+    } catch {
+      // Fallback a lógica en memoria
+    }
+    return remitoService.anexarEntregaARuta(remitoId, hojaDeRutaId, opciones);
+  },
 
+  async actualizarConexionTransportistaAsync(
+    transportistaId: string,
+    conectado: boolean
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(
+        `${API_BASE}/transportistas/${encodeURIComponent(transportistaId)}/conexion`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conectado }),
+          signal: AbortSignal.timeout(3000),
+        }
+      );
+      const data = await res.json();
+      if (res.ok) {
+        cachedTransportistas = cachedTransportistas.map((t) =>
+          t.id === transportistaId ? { ...t, dispositivoConectado: conectado } : t
+        );
+        return data;
+      }
+    } catch {
+      // Fallback a memoria
+    }
+    cachedTransportistas = cachedTransportistas.map((t) =>
+      t.id === transportistaId ? { ...t, dispositivoConectado: conectado } : t
+    );
+    return { success: true };
+  },
 };

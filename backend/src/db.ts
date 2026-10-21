@@ -39,6 +39,7 @@ function setupMemoryDb() {
       password_hash text NOT NULL,
       rol text NOT NULL DEFAULT 'Administrativo',
       es_transportista boolean NOT NULL DEFAULT false,
+      dispositivo_conectado boolean NOT NULL DEFAULT true,
       activo boolean NOT NULL DEFAULT true,
       creado_en timestamp DEFAULT now(),
       actualizado_en timestamp DEFAULT now()
@@ -120,7 +121,8 @@ function setupMemoryDb() {
       comercio_id bigint NOT NULL,
       hoja_de_ruta_id bigint,
       orden integer,
-      estado text NOT NULL DEFAULT 'pendiente'
+      estado text NOT NULL DEFAULT 'pendiente',
+      sincronizacion_pendiente boolean NOT NULL DEFAULT false
     );
 
     CREATE TABLE IF NOT EXISTS remito (
