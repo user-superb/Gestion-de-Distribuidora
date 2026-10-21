@@ -1,4 +1,4 @@
-import { Remito, Visita, Comercio, Marca, HojaDeRuta, CargaEntregaManualDto } from '../types/domain';
+import { Remito, Visita, Comercio, Marca, HojaDeRuta, Transportista, CargaEntregaManualDto } from '../types/domain';
 
 export const MOCK_COMERCIOS: Comercio[] = [
   { id: 'com-101', razonSocial: 'Mayorista El Sol S.R.L.', domicilio: 'Av. Hipólito Yrigoyen 4500, Lanús' },
@@ -12,6 +12,11 @@ export const MOCK_MARCAS: Marca[] = [
   { id: 'marca-C', nombre: 'Alimentos Río de la Plata' },
 ];
 
+export const MOCK_TRANSPORTISTAS: Transportista[] = [
+  { id: '2', nombre: 'Carlos Repartidor', usuario: 'chofer', rol: 'Transportista', activo: true, esTransportista: true },
+  { id: '6', nombre: 'Mario Flete', usuario: 'chofer2', rol: 'Transportista', activo: true, esTransportista: true },
+];
+
 const INITIAL_REMITOS: Remito[] = [
   { id: 'rem-1', numeroRemito: 'R-0001-45120', comercioId: 'com-101', marcaId: 'marca-A', importe: 150000, estado: 'PENDIENTE' },
   { id: 'rem-2', numeroRemito: 'R-0002-89310', comercioId: 'com-101', marcaId: 'marca-B', importe: 85000, estado: 'PENDIENTE' },
@@ -20,15 +25,39 @@ const INITIAL_REMITOS: Remito[] = [
   { id: 'rem-5', numeroRemito: 'R-0002-89315', comercioId: 'com-103', marcaId: 'marca-B', importe: 94000, estado: 'PENDIENTE' },
 ];
 
+export function obtenerFechaActualISO(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function esFechaCalendarioValida(fechaISO: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaISO)) return false;
+  const parsed = new Date(`${fechaISO}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === fechaISO;
+}
+
 let mockRemitos: Remito[] = [...INITIAL_REMITOS];
 let mockVisitas: Visita[] = [];
+let mockHojaCounter = 1;
 let mockHojaDeRuta: HojaDeRuta = {
   id: 'hdr-1',
-  fechaReparto: new Date().toISOString().split('T')[0],
+  numero: 'HR-0001',
+  transportistaId: null,
+  transportistaNombre: null,
+  fechaReparto: obtenerFechaActualISO(),
   estado: 'borrador',
+  visitas: [],
+  cantidadVisitas: 0,
+  cantidadRemitos: 0,
+  importeTotal: 0,
 };
+let mockHojasDeRuta: HojaDeRuta[] = [];
 let cachedComercios: Comercio[] = [...MOCK_COMERCIOS];
 let cachedMarcas: Marca[] = [...MOCK_MARCAS];
+let cachedTransportistas: Transportista[] = [...MOCK_TRANSPORTISTAS];
 
 const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api';
 
@@ -144,8 +173,10 @@ export const remitoService = {
 
     const remitosActualizados = seleccionados.map((r) => ({ ...r, estado: 'AGRUPADO' as const }));
 
-    // Verificar si ya hay una visita abierta para ese mismo comercio y sumarlos ahí, o crear una nueva
-    const indexExistente = mockVisitas.findIndex((v) => v.comercioId === comercioIdBase);
+    // Verificar si ya hay una visita abierta en armado (sin hojaDeRutaId) para ese mismo comercio
+    const indexExistente = mockVisitas.findIndex(
+      (v) => v.comercioId === comercioIdBase && !v.hojaDeRutaId
+    );
 
     if (indexExistente >= 0) {
       const visitaActual = mockVisitas[indexExistente];
@@ -159,13 +190,14 @@ export const remitoService = {
       return { success: true, visita: visitaActualizada };
     }
 
+    const visitasEnArmado = mockVisitas.filter((v) => !v.hojaDeRutaId);
     const nuevaVisita: Visita = {
       id: `VIS-${mockVisitas.length + 1}`,
       comercioId: comercioIdBase,
       remitos: remitosActualizados,
       importeTotal: remitosActualizados.reduce((acc, r) => acc + r.importe, 0),
-      orden: mockVisitas.length + 1,
-      hojaDeRutaId: mockHojaDeRuta.id,
+      orden: visitasEnArmado.length + 1,
+      hojaDeRutaId: null,
       estado: 'pendiente',
     };
 
@@ -177,8 +209,123 @@ export const remitoService = {
     return { ...mockHojaDeRuta, visitas: [...mockVisitas] };
   },
 
-  cambiarEstadoHojaDeRuta: (nuevoEstado: 'borrador' | 'en_curso'): void => {
-    mockHojaDeRuta = { ...mockHojaDeRuta, estado: nuevoEstado };
+  getHojasDeRuta: (): HojaDeRuta[] =>
+    mockHojasDeRuta.map((h) => {
+      const visitasRuta = mockVisitas.filter((v) => v.hojaDeRutaId === h.id);
+      return {
+        ...h,
+        visitas: visitasRuta,
+        cantidadVisitas: visitasRuta.length,
+        cantidadRemitos: visitasRuta.reduce((acc, v) => acc + v.remitos.length, 0),
+        importeTotal: visitasRuta.reduce((acc, v) => acc + v.importeTotal, 0),
+      };
+    }),
+
+  eliminarHojaDeRuta: (id: string): { success: boolean } => {
+    mockVisitas = mockVisitas.map((v) =>
+      v.hojaDeRutaId === id ? { ...v, hojaDeRutaId: null } : v
+    );
+    let orden = 1;
+    mockVisitas = mockVisitas.map((v) => (!v.hojaDeRutaId ? { ...v, orden: orden++ } : v));
+    mockHojasDeRuta = mockHojasDeRuta.filter((h) => h.id !== id);
+    if (mockHojaDeRuta.id === id) {
+      mockHojaDeRuta = {
+        id: `hdr-${mockHojaCounter}`,
+        numero: `HR-${String(mockHojaCounter).padStart(4, '0')}`,
+        transportistaId: null,
+        transportistaNombre: null,
+        fechaReparto: obtenerFechaActualISO(),
+        estado: 'borrador',
+        visitas: [],
+        cantidadVisitas: 0,
+        cantidadRemitos: 0,
+        importeTotal: 0,
+      };
+    }
+    return { success: true };
+  },
+
+  cambiarEstadoHojaDeRuta: (nuevoEstado: HojaDeRuta['estado']): void => {
+    mockHojaDeRuta.estado = nuevoEstado;
+
+  },
+
+  asignarFechaHojaDeRuta: (
+    fechaReparto: string,
+    fechaReferencia?: string
+  ): { success: boolean; hojaDeRuta?: HojaDeRuta; error?: string; status?: number } => {
+    const fechaLimpia = typeof fechaReparto === 'string' ? fechaReparto.trim() : '';
+
+    if (!fechaLimpia || !esFechaCalendarioValida(fechaLimpia)) {
+      return {
+        success: false,
+        error: 'Debe ingresar una fecha válida con formato AAAA-MM-DD.',
+        status: 400,
+      };
+    }
+
+    const hoy =
+      fechaReferencia && esFechaCalendarioValida(fechaReferencia)
+        ? fechaReferencia
+        : obtenerFechaActualISO();
+
+    // Criterio de Aceptación ESCENARIO 2:
+    // "Fallo por fecha pretérita: El administrativo intenta ingresar una fecha anterior a la actual. El sistema rechaza la programación."
+    if (fechaLimpia < hoy) {
+      return {
+        success: false,
+        error:
+          'No se puede programar la hoja de ruta en una fecha anterior a la actual. El sistema opera logísticamente en el día o a futuro.',
+        status: 422,
+      };
+    }
+
+    if (
+      mockHojaDeRuta.estado === 'en_curso' ||
+      mockHojaDeRuta.estado === 'cerrada' ||
+      mockHojaDeRuta.estado === 'anulada'
+    ) {
+      return {
+        success: false,
+        error: 'No se puede reprogramar la fecha: la hoja de ruta ya fue despachada o finalizada.',
+        status: 409,
+      };
+    }
+
+    const nuevaHojaId = `hdr-${mockHojaCounter}`;
+    const numeroHoja = `HR-${String(mockHojaCounter).padStart(4, '0')}`;
+    mockHojaCounter++;
+
+    // Consolidar las visitas en armado (sin hojaDeRutaId) dentro de esta nueva Hoja de Ruta
+    let idxOrden = 1;
+    mockVisitas = mockVisitas.map((v) =>
+      !v.hojaDeRutaId ? { ...v, hojaDeRutaId: nuevaHojaId, orden: idxOrden++ } : v
+    );
+
+    const visitasDeEstaHoja = mockVisitas.filter((v) => v.hojaDeRutaId === nuevaHojaId);
+
+    // Criterio de Aceptación ESCENARIO 1:
+    // "Programación exitosa: Se define la fecha. La ruta queda en estado 'Pendiente de Despacho'."
+    const hojaCreada: HojaDeRuta = {
+      id: nuevaHojaId,
+      numero: numeroHoja,
+      transportistaId: null,
+      transportistaNombre: null,
+      fechaReparto: fechaLimpia,
+      estado: 'pendiente_de_despacho',
+      visitas: visitasDeEstaHoja,
+      cantidadVisitas: visitasDeEstaHoja.length,
+      cantidadRemitos: visitasDeEstaHoja.reduce((acc, v) => acc + v.remitos.length, 0),
+      importeTotal: visitasDeEstaHoja.reduce((acc, v) => acc + v.importeTotal, 0),
+    };
+
+    mockHojaDeRuta = { ...hojaCreada };
+    mockHojasDeRuta = [...mockHojasDeRuta, hojaCreada];
+
+    return {
+      success: true,
+      hojaDeRuta: { ...hojaCreada },
+    };
   },
 
   reordenarVisitas: (
@@ -206,8 +353,81 @@ export const remitoService = {
       }
     });
 
-    mockVisitas = nuevas;
-    return { success: true, visitas: [...mockVisitas] };
+    const restantes = mockVisitas.filter((v) => !visitaIds.includes(v.id));
+    mockVisitas = [...nuevas, ...restantes];
+    return { success: true, visitas: [...nuevas] };
+  },
+
+  getTransportistas: (): Transportista[] => [...cachedTransportistas],
+
+  asignarTransportistaHojaDeRuta: (
+    hojaDeRutaId: string,
+    transportistaId: string | null
+  ): { success: boolean; hojaDeRuta?: HojaDeRuta; error?: string; status?: number } => {
+    if (!hojaDeRutaId) {
+      return { success: false, error: 'Debe especificar el ID de la hoja de ruta.', status: 400 };
+    }
+
+    const idx = mockHojasDeRuta.findIndex((h) => h.id === hojaDeRutaId);
+    if (idx === -1 && mockHojaDeRuta.id !== hojaDeRutaId) {
+      return { success: false, error: 'La hoja de ruta especificada no existe.', status: 404 };
+    }
+
+    const hojaActual = idx !== -1 ? mockHojasDeRuta[idx] : mockHojaDeRuta;
+
+    // Desasignación si transportistaId es null o vacío
+    if (!transportistaId) {
+      const actualizada: HojaDeRuta = { ...hojaActual, transportistaId: null, transportistaNombre: null };
+      if (idx !== -1) mockHojasDeRuta[idx] = actualizada;
+      if (mockHojaDeRuta.id === hojaDeRutaId) mockHojaDeRuta = actualizada;
+      return { success: true, hojaDeRuta: actualizada };
+    }
+
+    // Regla: Solo transportista habilitado en la flota
+    const transportista = cachedTransportistas.find((t) => t.id === transportistaId);
+    if (!transportista) {
+      return { success: false, error: 'El transportista seleccionado no existe.', status: 404 };
+    }
+
+    const estaHabilitado =
+      Boolean(transportista.activo) &&
+      (Boolean(transportista.esTransportista) || transportista.rol === 'Transportista');
+
+    if (!estaHabilitado) {
+      return {
+        success: false,
+        error: 'La hoja de ruta solo puede ser asignada a un transportista que se encuentre habilitado en la flota.',
+        status: 422,
+      };
+    }
+
+    // Criterio de Aceptación Escenario 2: Fallo por solapamiento de asignación
+    const solapada = mockHojasDeRuta.find(
+      (h) =>
+        h.id !== hojaDeRutaId &&
+        h.transportistaId === transportistaId &&
+        h.fechaReparto === hojaActual.fechaReparto &&
+        h.estado !== 'anulada'
+    );
+
+    if (solapada) {
+      return {
+        success: false,
+        error: `El transportista ya posee una hoja de ruta asignada para esa misma fecha (${hojaActual.fechaReparto}).`,
+        status: 422,
+      };
+    }
+
+    // Criterio de Aceptación Escenario 1: Asignación exitosa
+    const actualizada: HojaDeRuta = {
+      ...hojaActual,
+      transportistaId: transportista.id,
+      transportistaNombre: transportista.nombre,
+    };
+    if (idx !== -1) mockHojasDeRuta[idx] = actualizada;
+    if (mockHojaDeRuta.id === hojaDeRutaId) mockHojaDeRuta = actualizada;
+
+    return { success: true, hojaDeRuta: actualizada };
   },
 
   desagruparVisita: (visitaId: string): void => {
@@ -224,13 +444,23 @@ export const remitoService = {
   resetearDatosMock: (): void => {
     mockRemitos = [...INITIAL_REMITOS];
     mockVisitas = [];
+    mockHojaCounter = 1;
     mockHojaDeRuta = {
       id: 'hdr-1',
-      fechaReparto: new Date().toISOString().split('T')[0],
+      numero: 'HR-0001',
+      transportistaId: null,
+      transportistaNombre: null,
+      fechaReparto: obtenerFechaActualISO(),
       estado: 'borrador',
+      visitas: [],
+      cantidadVisitas: 0,
+      cantidadRemitos: 0,
+      importeTotal: 0,
     };
     cachedComercios = [...MOCK_COMERCIOS];
     cachedMarcas = [...MOCK_MARCAS];
+    mockHojasDeRuta = [];
+    cachedTransportistas = [...MOCK_TRANSPORTISTAS];
   },
 
   // -------------------------------------------------------------
@@ -393,6 +623,34 @@ export const remitoService = {
     return remitoService.getHojaDeRutaActiva();
   },
 
+  async getHojasDeRutaAsync(): Promise<HojaDeRuta[]> {
+    try {
+      const res = await fetch(`${API_BASE}/hojas-de-ruta`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) return data;
+      }
+    } catch {
+      // Fallback
+    }
+    return remitoService.getHojasDeRuta();
+  },
+
+  async eliminarHojaDeRutaAsync(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/hojas-de-ruta/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch {
+      // Fallback
+    }
+    return remitoService.eliminarHojaDeRuta(id);
+  },
+
   async cambiarEstadoHojaDeRutaAsync(id: string, estado: string): Promise<void> {
     try {
       const res = await fetch(`${API_BASE}/hoja-de-ruta/${encodeURIComponent(id)}/estado`, {
@@ -406,6 +664,37 @@ export const remitoService = {
       // Fallback
     }
     remitoService.cambiarEstadoHojaDeRuta(estado as any);
+  },
+
+  async asignarFechaHojaDeRutaAsync(
+    fechaReparto: string,
+    id?: string
+  ): Promise<{ success: boolean; hojaDeRuta?: HojaDeRuta; error?: string; status?: number }> {
+    try {
+      const endpoint = id
+        ? `${API_BASE}/hoja-de-ruta/${encodeURIComponent(id)}/fecha`
+        : `${API_BASE}/hoja-de-ruta/fecha`;
+      const res = await fetch(endpoint, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fechaReparto, hojaDeRutaId: id }),
+        signal: AbortSignal.timeout(3000),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        return data;
+      }
+      if (data.error) {
+        return {
+          success: false,
+          error: data.error,
+          status: res.status,
+        };
+      }
+    } catch {
+      // Fallback a lógica en memoria
+    }
+    return remitoService.asignarFechaHojaDeRuta(fechaReparto);
   },
 
   async reordenarVisitasAsync(
@@ -433,4 +722,52 @@ export const remitoService = {
     }
     return remitoService.reordenarVisitas(visitaIds);
   },
+
+  async getTransportistasAsync(): Promise<Transportista[]> {
+    try {
+      const res = await fetch(`${API_BASE}/transportistas`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        cachedTransportistas = data;
+        return data;
+      }
+    } catch {
+      // Fallback a lógica en memoria
+    }
+    return remitoService.getTransportistas();
+  },
+
+  async asignarTransportistaHojaDeRutaAsync(
+    hojaDeRutaId: string,
+    transportistaId: string | null
+  ): Promise<{ success: boolean; hojaDeRuta?: HojaDeRuta; error?: string; status?: number }> {
+    try {
+      const res = await fetch(
+        `${API_BASE}/hoja-de-ruta/${encodeURIComponent(hojaDeRutaId)}/transportista`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transportistaId }),
+          signal: AbortSignal.timeout(3000),
+        }
+      );
+      const data = await res.json();
+      if (res.ok && data.success) {
+        return data;
+      }
+      if (data.error) {
+        return {
+          success: false,
+          error: data.error,
+          status: res.status,
+        };
+      }
+    } catch {
+      // Fallback a lógica en memoria
+    }
+    return remitoService.asignarTransportistaHojaDeRuta(hojaDeRutaId, transportistaId);
+  },
+
 };

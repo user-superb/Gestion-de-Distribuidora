@@ -167,7 +167,8 @@ function setupMemoryDb() {
       ('chofer', 'Carlos Repartidor', 'chofer@tutucas.com.ar', '${hash}', 'Transportista', true, true),
       ('supervisor', 'Valeria Logística', 'supervisor@tutucas.com.ar', '${hash}', 'Supervisor', false, true),
       ('gerencia', 'Roberto Gerente', 'gerencia@tutucas.com.ar', '${hash}', 'Gerente', false, true),
-      ('admin_sistema', 'Administrador del Sistema', 'admin.sistema@tutucas.com.ar', '${hash}', 'Administrador del sistema', false, true)
+      ('admin_sistema', 'Administrador del Sistema', 'admin.sistema@tutucas.com.ar', '${hash}', 'Administrador del sistema', false, true),
+      ('chofer2', 'Mario Flete', 'chofer2@tutucas.com.ar', '${hash}', 'Transportista', true, true)
     ON CONFLICT (usuario) DO NOTHING;
 
     INSERT INTO usuario_sucursal (usuario_id, sucursal_id) VALUES
@@ -175,7 +176,8 @@ function setupMemoryDb() {
       (2, 2),
       (3, 3),
       (4, 4),
-      (5, 1)
+      (5, 1),
+      (6, 1)
     ON CONFLICT (usuario_id, sucursal_id) DO NOTHING;
 
     INSERT INTO cuenta_recepcion (sucursal_id, alias, banco)
