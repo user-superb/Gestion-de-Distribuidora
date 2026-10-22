@@ -25,6 +25,48 @@ const MAX_FAILED_ATTEMPTS = 5;
 const failedAttemptsMap = new Map<string, { count: number; lockedUntil?: number }>();
 
 export const authService = {
+  async changePassword(userId: number, currentPassword: string, newPassword: string): Promise<{
+    success: boolean;
+    error?: 'USER_NOT_FOUND' | 'INVALID_CURRENT_PASSWORD' | 'PASSWORD_REUSED';
+  }> {
+    const client = await db.getPool().connect();
+    try {
+      await client.query('BEGIN');
+      const userResult = await client.query(
+        'SELECT password_hash FROM usuario WHERE id = $1 FOR UPDATE',
+        [userId]
+      );
+      const user = userResult.rows[0];
+      if (!user) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'USER_NOT_FOUND' };
+      }
+
+      if (!(await bcryptjs.compare(currentPassword, user.password_hash))) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'INVALID_CURRENT_PASSWORD' };
+      }
+
+      if (await bcryptjs.compare(newPassword, user.password_hash)) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'PASSWORD_REUSED' };
+      }
+
+      const nextHash = await bcryptjs.hash(newPassword, 10);
+      await client.query(
+        'UPDATE usuario SET password_hash = $1, actualizado_en = now() WHERE id = $2',
+        [nextHash, userId]
+      );
+      await client.query('COMMIT');
+      return { success: true };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
   /**
    * Autenticación contra base de datos PostgreSQL
    */

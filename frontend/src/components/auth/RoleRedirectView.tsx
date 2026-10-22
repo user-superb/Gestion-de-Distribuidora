@@ -17,7 +17,7 @@ import { AgrupadorRemitos } from '../dashboard/AgrupadorRemitos';
 import { remitoService } from '../../services/remitoService';
 import { HojaDeRuta, Comercio } from '../../types/domain';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
-import { ConciliadorMovimientos } from '../dashboard/ConciliadorMovimientos';
+import { ConciliacionCentro } from '../dashboard/ConciliacionCentro';
 import { Configuracion } from '../dashboard/Configuracion';
 import { ProfileMenu } from './ProfileMenu';
 
@@ -203,7 +203,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
           {seccion === 'hojas'
             ? <AgrupadorRemitos />
             : seccion === 'conciliacion'
-              ? <ConciliadorMovimientos session={session} />
+              ? <ConciliacionCentro session={session} />
               : <Configuracion session={session} />}
         </main>
       </div>
@@ -259,7 +259,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
 
           {/* Módulo de Administrativo: Agrupador de Remitos en Visitas */}
           {isAdmin && <AgrupadorRemitos />}
-          {isAdmin && <ConciliadorMovimientos session={session} />}
+          {isAdmin && <ConciliacionCentro session={session} />}
 
                     {/* Vista operativa de Hoja de Ruta para el Transportista (Demo HU #19) */}
           {session.role === 'Transportista' && (

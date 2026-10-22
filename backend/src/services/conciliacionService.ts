@@ -19,6 +19,49 @@ function normalizarNombre(value: string | null | undefined): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
+const VENTANA_SUGERENCIAS_DIAS = 7;
+const HORAS_PARA_HUERFANO = Math.max(1, Number(process.env.ORPHAN_MOVEMENT_HOURS || 48));
+
+function diasEntre(a: Date | string | null, b: Date | string | null): number {
+  if (!a || !b) return Number.POSITIVE_INFINITY;
+  const fechaA = new Date(a).getTime();
+  const fechaB = new Date(b).getTime();
+  return Number.isFinite(fechaA) && Number.isFinite(fechaB)
+    ? Math.abs(fechaA - fechaB) / 86_400_000
+    : Number.POSITIVE_INFINITY;
+}
+
+function mismoCliente(movimiento: any, remito: any): boolean {
+  const cuitMovimiento = (movimiento.ordenante_cuit || '').replace(/\D/g, '');
+  const cuitComercio = (remito.cuit || '').replace(/\D/g, '');
+  if (cuitMovimiento && cuitComercio) return cuitMovimiento === cuitComercio;
+  const ordenante = normalizarNombre(movimiento.ordenante);
+  return !!ordenante && ordenante === normalizarNombre(remito.razon_social);
+}
+
+function sugerir(movimiento: any, remito: any) {
+  const dias = diasEntre(movimiento.fecha_hora, remito.fecha_entrega);
+  if (dias > VENTANA_SUGERENCIAS_DIAS || String(movimiento.sucursal_id) !== String(remito.sucursal_id)) return null;
+  const importe = BigInt(movimiento.importe_disponible_centavos);
+  const saldo = BigInt(remito.saldo_centavos);
+  const diferencia = importe >= saldo ? importe - saldo : saldo - importe;
+  const clienteCoincide = mismoCliente(movimiento, remito);
+  const importeCoincide = diferencia === 0n;
+  const importeAproximado = !importeCoincide && diferencia * 10n <= saldo;
+
+  if (clienteCoincide && importeCoincide) {
+    return { tipo: 'exacta', motivo: 'Coinciden cliente, importe y fecha cercana.', diferencia_centavos: '0' };
+  }
+  if ((importeCoincide && !clienteCoincide) || (clienteCoincide && importeAproximado)) {
+    return {
+      tipo: 'parcial',
+      motivo: importeCoincide ? 'Coincide el importe, pero verificá el cliente.' : 'Coincide el cliente, pero hay una diferencia de importe.',
+      diferencia_centavos: (importe - saldo).toString(),
+    };
+  }
+  return null;
+}
+
 function parsearIds(value: unknown, entidad: string): string[] {
   if (!Array.isArray(value) || value.length === 0) {
     throw new ConciliacionError(`Seleccioná al menos un ${entidad}.`, 400);
@@ -37,11 +80,15 @@ async function validarSeleccion(
 ) {
   const movimientoRes = await client.query(
     `SELECT mb.id::text AS id, mb.cuenta_id::text AS cuenta_id,
-            mb.importe_centavos::text AS importe_centavos,
-            mb.estado, mb.ordenante, mb.ordenante_cuit,
+            (mb.importe_centavos - COALESCE(i.imputado_centavos, 0))::text AS importe_disponible_centavos,
+            mb.estado, mb.ordenante, mb.ordenante_cuit, mb.fecha_hora,
             cr.sucursal_id
      FROM movimiento_bancario mb
      JOIN cuenta_recepcion cr ON cr.id = mb.cuenta_id
+     LEFT JOIN (
+       SELECT movimiento_bancario_id, SUM(importe_centavos) AS imputado_centavos
+       FROM imputacion WHERE movimiento_bancario_id IS NOT NULL GROUP BY movimiento_bancario_id
+     ) i ON i.movimiento_bancario_id = mb.id
      WHERE mb.id = ANY($1::bigint[])
      ORDER BY mb.id
      FOR UPDATE OF mb`,
@@ -55,7 +102,7 @@ async function validarSeleccion(
   }
   const movimientosPorId = new Map(movimientoRes.rows.map((item) => [String(item.id), item]));
   const movimientos = movimientoIds.map((id) => movimientosPorId.get(id)!);
-  const noPendientes = movimientos.filter((item) => item.estado !== 'sin_imputar');
+  const noPendientes = movimientos.filter((item) => !['sin_imputar', 'parcial'].includes(item.estado) || BigInt(item.importe_disponible_centavos) <= 0n);
   if (noPendientes.length) {
     throw new ConciliacionError('Hay movimientos que ya no están pendientes de conciliación.', 409, {
       movimientosNoElegibles: noPendientes.map((item) => item.id),
@@ -79,9 +126,11 @@ async function validarSeleccion(
   const remitosRes = await client.query(
     `SELECT r.id, r.numero, r.estado, r.sucursal_id,
             c.id AS comercio_id, c.razon_social, c.cuit,
-            rs.saldo_centavos::text AS saldo_centavos
+            rs.saldo_centavos::text AS saldo_centavos,
+            COALESCE(r.entregado_en, v.registrada_en) AS fecha_entrega
      FROM remito r
      JOIN comercio c ON c.id = r.comercio_id
+     LEFT JOIN visita v ON v.id = r.visita_id
      JOIN remito_saldo rs ON rs.remito_id = r.id
      WHERE r.id = ANY($1::bigint[])
      ORDER BY r.id`,
@@ -115,11 +164,7 @@ async function validarSeleccion(
 
   const comercio = remitos[0];
   const otrosOrdenantes = movimientos.filter((movimiento) => {
-    const ordenanteCuit = (movimiento.ordenante_cuit || '').trim();
-    const comercioCuit = (comercio.cuit || '').trim();
-    return ordenanteCuit && comercioCuit
-      ? ordenanteCuit !== comercioCuit
-      : normalizarNombre(movimiento.ordenante) !== normalizarNombre(comercio.razon_social);
+    return !mismoCliente(movimiento, comercio);
   });
   if (otrosOrdenantes.length) {
     throw new ConciliacionError('Todos los movimientos deben corresponder al comercio de los remitos.', 422, {
@@ -130,7 +175,7 @@ async function validarSeleccion(
   const saldos = new Map(remitos.map((remito) => [String(remito.id), BigInt(remito.saldo_centavos)]));
   const imputaciones: Array<{ movimientoId: string; remitoId: string; importeCentavos: bigint }> = [];
   for (const movimiento of movimientos) {
-    let restante = BigInt(movimiento.importe_centavos);
+    let restante = BigInt(movimiento.importe_disponible_centavos);
     for (const remito of remitos) {
       if (restante === 0n) break;
       const remitoId = String(remito.id);
@@ -142,7 +187,7 @@ async function validarSeleccion(
       restante -= importeCentavos;
     }
   }
-  const importeMovimiento = movimientos.reduce<bigint>((total, item) => total + BigInt(item.importe_centavos), 0n);
+  const importeMovimiento = movimientos.reduce<bigint>((total, item) => total + BigInt(item.importe_disponible_centavos), 0n);
   const importeSeleccionado = remitos.reduce<bigint>((total, item) => total + BigInt(item.saldo_centavos), 0n);
 
   return {
@@ -180,16 +225,120 @@ export const conciliacionService = {
     }
     const result = await db.query(
       `SELECT mb.id::text AS id, mb.fecha_hora, mb.ordenante,
-              mb.importe_centavos::text AS importe_centavos,
+              (mb.importe_centavos - COALESCE(i.imputado_centavos, 0))::text AS importe_centavos,
               mb.cuenta_id::text AS cuenta_id, cr.alias AS cuenta
        FROM movimiento_bancario mb
        JOIN cuenta_recepcion cr ON cr.id = mb.cuenta_id
-       WHERE mb.estado = 'sin_imputar'
+       LEFT JOIN (
+         SELECT movimiento_bancario_id, SUM(importe_centavos) AS imputado_centavos
+         FROM imputacion WHERE movimiento_bancario_id IS NOT NULL GROUP BY movimiento_bancario_id
+       ) i ON i.movimiento_bancario_id = mb.id
+       WHERE mb.estado IN ('sin_imputar', 'parcial')
          ${fechaFiltro}
        ORDER BY mb.fecha_hora DESC, mb.id DESC`,
       params
     );
     return result.rows;
+  },
+
+  async getSugerencias() {
+    const [movimientosRes, remitosRes] = await Promise.all([
+      db.query(
+        `SELECT mb.id::text AS movimiento_id, mb.fecha_hora, mb.ordenante, mb.ordenante_cuit,
+                (mb.importe_centavos - COALESCE(i.imputado_centavos, 0))::text AS importe_disponible_centavos,
+                mb.cuenta_id::text AS cuenta_id, cr.alias AS cuenta, cr.sucursal_id::text AS sucursal_id
+         FROM movimiento_bancario mb
+         JOIN cuenta_recepcion cr ON cr.id = mb.cuenta_id AND cr.activa = true
+         LEFT JOIN (
+           SELECT movimiento_bancario_id, SUM(importe_centavos) AS imputado_centavos
+           FROM imputacion WHERE movimiento_bancario_id IS NOT NULL GROUP BY movimiento_bancario_id
+         ) i ON i.movimiento_bancario_id = mb.id
+         WHERE mb.estado IN ('sin_imputar', 'parcial')
+           AND mb.importe_centavos > COALESCE(i.imputado_centavos, 0)
+           AND NOT EXISTS (
+             SELECT 1 FROM discrepancia_conciliacion dc
+             WHERE dc.estado = 'pendiente' AND mb.id = ANY(dc.movimiento_ids)
+           )
+         ORDER BY mb.fecha_hora DESC, mb.id DESC`
+      ),
+      db.query(
+        `SELECT r.id::text AS remito_id, r.numero, r.sucursal_id::text AS sucursal_id,
+                c.razon_social, c.cuit, rs.saldo_centavos::text AS saldo_centavos,
+                COALESCE(r.entregado_en, v.registrada_en) AS fecha_entrega
+         FROM remito r
+         JOIN comercio c ON c.id = r.comercio_id
+         JOIN remito_saldo rs ON rs.remito_id = r.id
+         LEFT JOIN visita v ON v.id = r.visita_id
+         WHERE r.estado = 'entregado' AND rs.saldo_centavos > 0
+         ORDER BY r.entregado_en DESC NULLS LAST, r.id DESC`
+      ),
+    ]);
+
+    const remitosPorSucursal = new Map<string, any[]>();
+    for (const remito of remitosRes.rows) {
+      if (!remito.fecha_entrega) continue;
+      const sucursal = String(remito.sucursal_id);
+      const grupo = remitosPorSucursal.get(sucursal) || [];
+      grupo.push(remito);
+      remitosPorSucursal.set(sucursal, grupo);
+    }
+    for (const grupo of remitosPorSucursal.values()) {
+      grupo.sort((a, b) => new Date(a.fecha_entrega).getTime() - new Date(b.fecha_entrega).getTime());
+    }
+
+    const sugerencias: any[] = [];
+    for (const movimiento of movimientosRes.rows) {
+      const fechaMovimiento = new Date(movimiento.fecha_hora).getTime();
+      const remitos = remitosPorSucursal.get(String(movimiento.sucursal_id)) || [];
+      for (const remito of remitos) {
+        const fechaRemito = new Date(remito.fecha_entrega).getTime();
+        if (fechaRemito < fechaMovimiento - VENTANA_SUGERENCIAS_DIAS * 86_400_000) continue;
+        if (fechaRemito > fechaMovimiento + VENTANA_SUGERENCIAS_DIAS * 86_400_000) break;
+        const match = sugerir(movimiento, remito);
+        if (match) sugerencias.push({ ...match, ...movimiento, ...remito });
+      }
+    }
+    return sugerencias.sort((a, b) => {
+      if (a.tipo !== b.tipo) return a.tipo === 'exacta' ? -1 : 1;
+      const byDate = diasEntre(a.fecha_hora, a.fecha_entrega) - diasEntre(b.fecha_hora, b.fecha_entrega);
+      return byDate || a.razon_social.localeCompare(b.razon_social) || a.numero.localeCompare(b.numero);
+    });
+  },
+
+  async getMovimientosHuerfanos(filters: { sucursalId?: string; cuentaId?: string; desde?: string; hasta?: string } = {}) {
+    const sugerencias = await this.getSugerencias();
+    const movimientosConSugerencias = new Set(sugerencias.map((item) => item.movimiento_id));
+    const cutoff = new Date(Date.now() - HORAS_PARA_HUERFANO * 3_600_000);
+    const result = await db.query(
+      `SELECT mb.id::text AS id, mb.fecha_hora, mb.ordenante,
+              (mb.importe_centavos - COALESCE(i.imputado_centavos, 0))::text AS importe_centavos,
+              mb.cuenta_id::text AS cuenta_id, cr.alias AS cuenta,
+              cr.sucursal_id::text AS sucursal_id, s.nombre AS sucursal
+       FROM movimiento_bancario mb
+       JOIN cuenta_recepcion cr ON cr.id = mb.cuenta_id AND cr.activa = true
+       JOIN sucursal s ON s.id = cr.sucursal_id
+       LEFT JOIN (
+         SELECT movimiento_bancario_id, SUM(importe_centavos) AS imputado_centavos
+         FROM imputacion WHERE movimiento_bancario_id IS NOT NULL GROUP BY movimiento_bancario_id
+       ) i ON i.movimiento_bancario_id = mb.id
+       WHERE mb.estado IN ('sin_imputar', 'parcial')
+         AND mb.importe_centavos > COALESCE(i.imputado_centavos, 0)
+         AND mb.fecha_hora <= $1
+         AND NOT EXISTS (
+           SELECT 1 FROM discrepancia_conciliacion dc
+           WHERE dc.estado = 'pendiente' AND mb.id = ANY(dc.movimiento_ids)
+         )
+       ORDER BY mb.fecha_hora DESC, mb.id DESC`,
+      [cutoff]
+    );
+    const movimientos = result.rows.filter((item) => {
+      if (movimientosConSugerencias.has(item.id)) return false;
+      const fecha = new Date(item.fecha_hora).toISOString().slice(0, 10);
+      return (!filters.sucursalId || item.sucursal_id === filters.sucursalId) &&
+        (!filters.cuentaId || item.cuenta_id === filters.cuentaId) &&
+        (!filters.desde || fecha >= filters.desde) && (!filters.hasta || fecha <= filters.hasta);
+    }).map((item) => ({ ...item, antiguedad_horas: Math.floor((Date.now() - new Date(item.fecha_hora).getTime()) / 3_600_000) }));
+    return { horasUmbral: HORAS_PARA_HUERFANO, movimientos };
   },
 
   async getRemitosPendientes() {
@@ -229,11 +378,23 @@ export const conciliacionService = {
     return result.rows;
   },
 
-  async conciliar(movimientoIdsValue: unknown, remitoIdsValue: unknown, usuarioId: number) {
+  async conciliar(movimientoIdsValue: unknown, remitoIdsValue: unknown, usuarioId: number, aceptarSugerencia = false) {
     const movimientoIds = parsearIds(movimientoIdsValue, 'movimiento');
     const remitoIds = parsearIds(remitoIdsValue, 'remito');
     return enTransaccion(async (client) => {
       const result = await validarSeleccion(client, movimientoIds, remitoIds);
+      if (aceptarSugerencia && (movimientoIds.length !== 1 || remitoIds.length !== 1 || result.diferencia !== 0n ||
+          diasEntre(result.movimientos[0].fecha_hora, result.remitos[0].fecha_entrega) > VENTANA_SUGERENCIAS_DIAS)) {
+        throw new ConciliacionError('La sugerencia dejó de ser exacta o ya no está vigente; revisá la conciliación manual.', 409);
+      }
+      if (aceptarSugerencia) {
+        const discrepancia = await client.query(
+          `SELECT id FROM discrepancia_conciliacion
+           WHERE estado = 'pendiente' AND movimiento_ids && $1::bigint[] FOR UPDATE`,
+          [movimientoIds]
+        );
+        if (discrepancia.rows.length) throw new ConciliacionError('El movimiento está en la bandeja de discrepancias y requiere revisión manual.', 409);
+      }
       if (result.diferencia > 0n) {
         throw new ConciliacionError('El total de movimientos supera los saldos seleccionados.', 422, {
           importeMovimiento: result.importeMovimiento.toString(),

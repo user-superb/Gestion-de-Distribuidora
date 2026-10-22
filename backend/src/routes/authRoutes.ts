@@ -67,6 +67,33 @@ authRouter.post('/auth/login', async (req: Request, res: Response) => {
   return res.json(result);
 });
 
+authRouter.post('/auth/change-password', requireAuth, async (req: Request, res: Response) => {
+  const { currentPassword, newPassword } = req.body || {};
+  if (typeof currentPassword !== 'string' || !currentPassword ||
+      typeof newPassword !== 'string' || newPassword.length < 8 || Buffer.byteLength(newPassword, 'utf8') > 72) {
+    return res.status(400).json({ success: false, message: 'La nueva contraseña debe tener al menos 8 caracteres y no superar 72 bytes.' });
+  }
+
+  const sessionId = (req as any).userSession?.id;
+  const userId = typeof sessionId === 'string' ? Number(sessionId.replace(/^usr_/, '')) : NaN;
+  if (!Number.isSafeInteger(userId) || userId <= 0) {
+    return res.status(401).json({ success: false, message: 'La sesión no identifica un usuario válido.' });
+  }
+
+  const result = await authService.changePassword(userId, currentPassword, newPassword);
+  res.setHeader('Cache-Control', 'no-store');
+  if (!result.success) {
+    const message = result.error === 'INVALID_CURRENT_PASSWORD'
+      ? 'La contraseña actual es incorrecta.'
+      : result.error === 'PASSWORD_REUSED'
+        ? 'La nueva contraseña debe ser distinta de la contraseña actual.'
+        : 'No se encontró el usuario de la sesión.';
+    return res.status(result.error === 'USER_NOT_FOUND' ? 404 : 400).json({ success: false, message });
+  }
+
+  return res.json({ success: true, message: 'La contraseña se actualizó correctamente.' });
+});
+
 /**
  * POST /api/auth/logout
  * ESCENARIO 1: Cierre de sesión voluntario

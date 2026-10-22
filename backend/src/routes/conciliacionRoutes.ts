@@ -54,9 +54,53 @@ conciliacionRouter.get('/discrepancias', async (_req, res) => {
   }
 });
 
+conciliacionRouter.get('/sugerencias', async (_req, res) => {
+  try {
+    return res.json(await conciliacionService.getSugerencias());
+  } catch (error) {
+    return responderError(error, res);
+  }
+});
+
+conciliacionRouter.get('/movimientos-huerfanos', async (req, res) => {
+  const { sucursalId, cuentaId, desde, hasta } = req.query;
+  const idValido = (value: unknown) => value === undefined || (typeof value === 'string' && /^[1-9]\d*$/.test(value));
+  const fechaValida = (value: unknown) => {
+    if (value === undefined) return true;
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  };
+  if (!idValido(sucursalId) || !idValido(cuentaId) || !fechaValida(desde) || !fechaValida(hasta) ||
+      (typeof desde === 'string' && typeof hasta === 'string' && desde > hasta)) {
+    return res.status(400).json({ error: 'INVALID_FILTER', message: 'Revisá sucursal, cuenta y rango de fechas.' });
+  }
+  try {
+    return res.json(await conciliacionService.getMovimientosHuerfanos({
+      sucursalId: sucursalId as string | undefined,
+      cuentaId: cuentaId as string | undefined,
+      desde: desde as string | undefined,
+      hasta: hasta as string | undefined,
+    }));
+  } catch (error) {
+    return responderError(error, res);
+  }
+});
+
 conciliacionRouter.post('/imputaciones', async (req, res) => {
   try {
     const result = await conciliacionService.conciliar(req.body?.movimientoIds, req.body?.remitoIds, getUsuarioId(req));
+    return res.status(201).json({ success: true, ...result });
+  } catch (error) {
+    return responderError(error, res);
+  }
+});
+
+conciliacionRouter.post('/sugerencias/aceptar', async (req, res) => {
+  try {
+    const result = await conciliacionService.conciliar(
+      [req.body?.movimientoId], [req.body?.remitoId], getUsuarioId(req), true
+    );
     return res.status(201).json({ success: true, ...result });
   } catch (error) {
     return responderError(error, res);
