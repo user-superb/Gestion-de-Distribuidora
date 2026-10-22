@@ -144,11 +144,6 @@ export const AgrupadorRemitos: React.FC = () => {
     setMensaje(null);
   };
 
-  const handleCambiarComercio = async (remitoId: string, nuevoComercioId: string) => {
-    await remitoService.asignarComercioARemitoAsync(remitoId, nuevoComercioId);
-    await recargarDatos();
-    setMensaje(null);
-  };
 
   const handleSeleccionarPorComercio = (comercioId: string) => {
     const idsMismoComercio = pendientes
@@ -457,6 +452,7 @@ export const AgrupadorRemitos: React.FC = () => {
             ) : (
               pendientesFiltrados.map((remito) => {
                 const marca = getMarca(remito.marcaId);
+                const comercio = getComercio(remito.comercioId);
                 const isSelected = seleccionados.has(remito.id);
 
                 return (
@@ -508,21 +504,17 @@ export const AgrupadorRemitos: React.FC = () => {
                       </div>
                     </label>
 
-                    {/* Desplegable para asignar/cambiar el comercio destinatario */}
+                    {/* Comercio destinatario fijo */}
                     <div className="flex items-center gap-2 sm:w-64">
+                      <div
+                        className="flex items-center gap-2 w-full text-sm font-medium bg-slate-50 border border-slate-200 rounded px-2.5 py-2 text-slate-800"
+                        title={`Destino: ${comercio?.razonSocial || remito.comercioId}`}
+                      >
                         <Building className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                        <select
-                          value={remito.comercioId}
-                          onChange={(e) => handleCambiarComercio(remito.id, e.target.value)}
-                          className="w-full text-sm font-medium bg-slate-50 border border-slate-300 rounded px-2.5 py-2 text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          title="Comercio destinatario del remito"
-                        >
-                          {comercios.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.razonSocial}
-                            </option>
-                          ))}
-                        </select>
+                        <span className="truncate">
+                          {comercio?.razonSocial || remito.comercioId}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 );
