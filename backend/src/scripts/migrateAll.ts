@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const connectionString =
-  process.env.DATABASE_URL || 'postgresql://postgres:tutucas@localhost:5432/tutucas_db';
+  process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tutucas_db';
 
 async function migrateAll() {
   const pool = new pg.Pool({

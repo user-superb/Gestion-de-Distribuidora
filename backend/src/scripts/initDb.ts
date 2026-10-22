@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const targetUrl =
-  process.env.DATABASE_URL || 'postgresql://postgres:tutucas@localhost:5432/tutucas_db';
+  process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tutucas_db';
 
 async function initDb() {
   const parsed = new URL(targetUrl);
@@ -65,9 +65,25 @@ async function initDb() {
     await client.query(seedSql);
     console.log('✅ Datos semilla insertados con éxito.');
 
+    const migrationsDir = path.resolve(process.cwd(), 'db', 'migrations');
+    if (fs.existsSync(migrationsDir)) {
+      const files = fs
+        .readdirSync(migrationsDir)
+        .filter((f) => f.endsWith('.sql'))
+        .sort();
+
+      for (const file of files) {
+        const filePath = path.join(migrationsDir, file);
+        console.log(`⚙️  Aplicando migración: ${file}...`);
+        const sql = fs.readFileSync(filePath, 'utf-8');
+        await client.query(sql);
+        console.log(`✅ ${file} aplicada.`);
+      }
+    }
+
     client.release();
     await targetPool.end();
-    console.log('🎉 ¡Base de datos PostgreSQL inicializada y lista para Tutucas!');
+    console.log('🎉 ¡Base de datos PostgreSQL inicializada y migrada para Tutucas!');
   } catch (error) {
     console.error('❌ Error al inicializar las tablas:', error);
     await targetPool.end();

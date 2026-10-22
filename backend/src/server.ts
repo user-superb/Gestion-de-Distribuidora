@@ -60,6 +60,14 @@ if (process.env.NODE_ENV !== 'test') {
     const isConnected = await db.checkConnection();
     if (isConnected) {
       console.log(`🐘 Conexión exitosa con PostgreSQL.`);
+      try {
+        await db.query('ALTER TABLE hoja_de_ruta ALTER COLUMN transportista_id DROP NOT NULL;');
+        await db.query('ALTER TABLE hoja_de_ruta DROP CONSTRAINT IF EXISTS hoja_unica_por_transportista_y_fecha;');
+        await db.query('ALTER TABLE usuario ADD COLUMN IF NOT EXISTS dispositivo_conectado boolean NOT NULL DEFAULT true;');
+        await db.query('ALTER TABLE visita ADD COLUMN IF NOT EXISTS sincronizacion_pendiente boolean NOT NULL DEFAULT false;');
+      } catch (e: any) {
+        console.warn('⚠️  Aviso de sincronización DDL al inicio:', e.message);
+      }
     } else {
       console.log(`⚠️  PostgreSQL no responde en DATABASE_URL. Verificá que el servicio esté iniciado o corré 'npm run db:init' cuando esté disponible.`);
     }

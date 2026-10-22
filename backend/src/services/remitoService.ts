@@ -659,11 +659,27 @@ export const remitoService = {
           );
           targetId = String(nuevaHojaRes.rows[0].id);
         } catch (err: any) {
-          if (err?.code === '23514' || String(err?.message || '').includes('hoja_estado_valido')) {
-            await db.query('ALTER TABLE hoja_de_ruta DROP CONSTRAINT IF EXISTS hoja_estado_valido');
-            await db.query(
-              "ALTER TABLE hoja_de_ruta ADD CONSTRAINT hoja_estado_valido CHECK (estado IN ('borrador','pendiente_de_despacho','publicada','en_curso','cerrada','anulada'))"
-            );
+          const isNotNullViolation =
+            err?.code === '23502' || String(err?.message || '').includes('transportista_id');
+          const isCheckViolation =
+            err?.code === '23514' || String(err?.message || '').includes('hoja_estado_valido');
+          const isUniqueViolation =
+            err?.code === '23505' || String(err?.message || '').includes('hoja_unica_por_transportista_y_fecha');
+
+          if (isNotNullViolation || isCheckViolation || isUniqueViolation) {
+            try {
+              await db.query('ALTER TABLE hoja_de_ruta ALTER COLUMN transportista_id DROP NOT NULL');
+            } catch { /* ignorar */ }
+            try {
+              await db.query('ALTER TABLE hoja_de_ruta DROP CONSTRAINT IF EXISTS hoja_unica_por_transportista_y_fecha');
+            } catch { /* ignorar */ }
+            try {
+              await db.query('ALTER TABLE hoja_de_ruta DROP CONSTRAINT IF EXISTS hoja_estado_valido');
+              await db.query(
+                "ALTER TABLE hoja_de_ruta ADD CONSTRAINT hoja_estado_valido CHECK (estado IN ('borrador','pendiente_de_despacho','publicada','en_curso','cerrada','anulada'))"
+              );
+            } catch { /* ignorar */ }
+
             const nuevaHojaRes = await db.query(
               'INSERT INTO hoja_de_ruta (sucursal_id, transportista_id, fecha_reparto, estado) VALUES ($1, NULL, $2::date, $3) RETURNING id::text as id',
               [sucursalId, fechaLimpia, 'pendiente_de_despacho']
@@ -699,11 +715,27 @@ export const remitoService = {
         [fechaLimpia, 'pendiente_de_despacho', targetId]
       );
     } catch (err: any) {
-      if (err?.code === '23514' || String(err?.message || '').includes('hoja_estado_valido')) {
-        await db.query('ALTER TABLE hoja_de_ruta DROP CONSTRAINT IF EXISTS hoja_estado_valido');
-        await db.query(
-          "ALTER TABLE hoja_de_ruta ADD CONSTRAINT hoja_estado_valido CHECK (estado IN ('borrador','pendiente_de_despacho','publicada','en_curso','cerrada','anulada'))"
-        );
+      if (
+        err?.code === '23514' ||
+        err?.code === '23502' ||
+        err?.code === '23505' ||
+        String(err?.message || '').includes('hoja_estado_valido') ||
+        String(err?.message || '').includes('transportista_id') ||
+        String(err?.message || '').includes('hoja_unica_por_transportista_y_fecha')
+      ) {
+        try {
+          await db.query('ALTER TABLE hoja_de_ruta ALTER COLUMN transportista_id DROP NOT NULL');
+        } catch { /* ignorar */ }
+        try {
+          await db.query('ALTER TABLE hoja_de_ruta DROP CONSTRAINT IF EXISTS hoja_unica_por_transportista_y_fecha');
+        } catch { /* ignorar */ }
+        try {
+          await db.query('ALTER TABLE hoja_de_ruta DROP CONSTRAINT IF EXISTS hoja_estado_valido');
+          await db.query(
+            "ALTER TABLE hoja_de_ruta ADD CONSTRAINT hoja_estado_valido CHECK (estado IN ('borrador','pendiente_de_despacho','publicada','en_curso','cerrada','anulada'))"
+          );
+        } catch { /* ignorar */ }
+
         await db.query(
           'UPDATE hoja_de_ruta SET fecha_reparto = $1::date, estado = $2 WHERE id::text = $3',
           [fechaLimpia, 'pendiente_de_despacho', targetId]

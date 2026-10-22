@@ -805,10 +805,10 @@ export const remitoService = {
       if (res.ok && data.success) {
         return data;
       }
-      if (data.error) {
+      if (!res.ok || data.error) {
         return {
           success: false,
-          error: data.error,
+          error: data?.error || data?.message || 'Error al asignar fecha a la hoja de ruta en el servidor.',
           status: res.status,
         };
       }

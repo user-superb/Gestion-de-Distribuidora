@@ -39,3 +39,6 @@ Thumbs.db
 .env.local
 *.sqlite
 backend/data/
+
+# Assistant / AI rules
+GEMINI.md
