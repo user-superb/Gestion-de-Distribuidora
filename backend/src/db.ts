@@ -4,10 +4,17 @@ import dotenv from 'dotenv';
 import { newDb } from 'pg-mem';
 import bcryptjs from 'bcryptjs';
 
+import path from 'path';
+import fs from 'fs';
+
+const rootEnv = path.resolve(process.cwd(), '.env');
+const backendEnv = path.resolve(process.cwd(), 'backend', '.env');
+if (fs.existsSync(backendEnv)) dotenv.config({ path: backendEnv });
+if (fs.existsSync(rootEnv)) dotenv.config({ path: rootEnv });
 dotenv.config();
 
 const connectionString =
-  process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tutucas_db';
+  process.env.DATABASE_URL || 'postgresql://postgres:tutucas@localhost:5432/tutucas_db';
 
 let activePool = new pg.Pool({
   connectionString,

@@ -260,9 +260,7 @@ CREATE TABLE hoja_de_ruta (
     cerrada_en      timestamptz,
     creado_en       timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT hoja_estado_valido
-        CHECK (estado IN ('borrador','pendiente_de_despacho','publicada','en_curso','cerrada','anulada')),
-    CONSTRAINT hoja_unica_por_transportista_y_fecha
-        UNIQUE (transportista_id, fecha_reparto)
+        CHECK (estado IN ('borrador','pendiente_de_despacho','publicada','en_curso','cerrada','anulada'))
 );
 
 ALTER TABLE hoja_de_ruta DROP CONSTRAINT IF EXISTS hoja_estado_valido;

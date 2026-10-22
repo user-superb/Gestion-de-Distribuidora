@@ -91,7 +91,12 @@ FROM (VALUES
   ('Alimentos Río de la Plata', 'Autoservicio Luna', 'R-0003-11200', 11000000::bigint),
   ('Bebidas Nacionales', 'Distribuidora Los Andes', 'R-0002-89315', 9400000::bigint),
   ('Lácteos del Sur', 'Mayorista El Sol S.R.L.', 'R-HU38-EXACTA', 15000000::bigint),
-  ('Lácteos del Sur', 'Autoservicio Luna', 'R-HU38-PARCIAL', 15000000::bigint)
+  ('Lácteos del Sur', 'Autoservicio Luna', 'R-HU38-PARCIAL', 15000000::bigint),
+  ('Lácteos del Sur', 'Mayorista El Sol S.R.L.', 'R-0004-90001', 12500000::bigint),
+  ('Bebidas Nacionales', 'Mayorista El Sol S.R.L.', 'R-0004-90002', 8400000::bigint),
+  ('Lácteos del Sur', 'Autoservicio Luna', 'R-0004-90003', 4500000::bigint),
+  ('Alimentos Río de la Plata', 'Distribuidora Los Andes', 'R-0004-90004', 16000000::bigint),
+  ('Bebidas Nacionales', 'Distribuidora Los Andes', 'R-0004-90005', 9200000::bigint)
 ) AS r(marca_nombre, comercio_nombre, numero, importe_centavos)
 JOIN marca m ON m.nombre = r.marca_nombre
 JOIN comercio c ON c.razon_social = r.comercio_nombre
