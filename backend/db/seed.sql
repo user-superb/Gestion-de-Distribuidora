@@ -69,10 +69,14 @@ WHERE NOT EXISTS (
 
 -- 5. Hoja de Ruta Inicial de Prueba (en estado borrador)
 INSERT INTO hoja_de_ruta (sucursal_id, transportista_id, fecha_reparto, estado)
-SELECT s.id, NULL, CURRENT_DATE, 'borrador'
+SELECT s.id, u.id, CURRENT_DATE, 'borrador'
 FROM sucursal s
+JOIN usuario u ON u.usuario = 'chofer'
 WHERE s.nombre = 'Sucursal Central - La Plata'
-  AND NOT EXISTS (SELECT 1 FROM hoja_de_ruta);
+  AND NOT EXISTS (
+    SELECT 1 FROM hoja_de_ruta h
+    WHERE h.transportista_id = u.id AND h.fecha_reparto = CURRENT_DATE
+  );
 
 -- 6. Remitos de Prueba (Importes en centavos)
 -- Nota: Asociamos a sucursal 1 y a los IDs de marca y comercio generados
@@ -85,7 +89,9 @@ FROM (VALUES
   ('Bebidas Nacionales', 'Mayorista El Sol S.R.L.', 'R-0002-89311', 5700000::bigint),
   ('Lácteos del Sur', 'Autoservicio Luna', 'R-0001-45121', 6200000::bigint),
   ('Alimentos Río de la Plata', 'Autoservicio Luna', 'R-0003-11200', 11000000::bigint),
-  ('Bebidas Nacionales', 'Distribuidora Los Andes', 'R-0002-89315', 9400000::bigint)
+  ('Bebidas Nacionales', 'Distribuidora Los Andes', 'R-0002-89315', 9400000::bigint),
+  ('Lácteos del Sur', 'Mayorista El Sol S.R.L.', 'R-HU38-EXACTA', 15000000::bigint),
+  ('Lácteos del Sur', 'Autoservicio Luna', 'R-HU38-PARCIAL', 15000000::bigint)
 ) AS r(marca_nombre, comercio_nombre, numero, importe_centavos)
 JOIN marca m ON m.nombre = r.marca_nombre
 JOIN comercio c ON c.razon_social = r.comercio_nombre
@@ -94,7 +100,7 @@ ON CONFLICT (marca_id, numero) DO NOTHING;
 
 -- Remitos entregados de ejemplo para la bandeja de cobranza y conciliación exacta.
 UPDATE remito SET estado = 'entregado', entregado_en = now() - interval '12 days'
-WHERE numero IN ('R-0001-45120', 'R-0002-89310', 'R-0001-45122', 'R-0002-89311');
+WHERE numero IN ('R-0001-45120', 'R-0002-89310', 'R-0001-45122', 'R-0002-89311', 'R-HU38-EXACTA', 'R-HU38-PARCIAL');
 
 -- 7. Movimientos bancarios de ejemplo para probar E5-04
 INSERT INTO cuenta_recepcion (sucursal_id, alias, banco)
@@ -118,6 +124,24 @@ CROSS JOIN (VALUES
   ('Mayorista El Sol S.R.L.', 'DEMO-E5-04-008', 5000000::bigint)  -- segundo pago completa ese remito
 ) AS demo(ordenante, referencia, importe_centavos)
 JOIN comercio c ON c.razon_social = demo.ordenante
+WHERE s.nombre = 'Sucursal Central - La Plata'
+  AND cr.sucursal_id = s.id
+  AND cr.alias = 'Cuenta operativa demo'
+  AND NOT EXISTS (
+      SELECT 1 FROM movimiento_bancario mb
+      WHERE mb.cuenta_id = cr.id AND mb.referencia_externa = demo.referencia
+  );
+
+-- 8. Casos de ejemplo para sugerencias exactas/parciales y movimientos huérfanos
+INSERT INTO movimiento_bancario (cuenta_id, fecha_hora, ordenante, referencia_externa, importe_centavos)
+SELECT cr.id, demo.fecha_hora, demo.ordenante, demo.referencia, demo.importe_centavos
+FROM cuenta_recepcion cr
+JOIN sucursal s ON s.id = cr.sucursal_id
+CROSS JOIN (VALUES
+  ('Mayorista El Sol S.R.L.', 'DEMO-HU38-EXACTA', 15000000::bigint, now() - interval '11 days'),
+  ('Autoservicio Luna',      'DEMO-HU38-PARCIAL', 14200000::bigint, now() - interval '11 days'),
+  ('Ordenante sin identificar', 'DEMO-HU40-HUERFANO', 8300000::bigint, now() - interval '4 days')
+) AS demo(ordenante, referencia, importe_centavos, fecha_hora)
 WHERE s.nombre = 'Sucursal Central - La Plata'
   AND cr.sucursal_id = s.id
   AND cr.alias = 'Cuenta operativa demo'

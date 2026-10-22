@@ -3,6 +3,7 @@ import { UserSession } from '../../types/auth';
 
 interface ConciliadorMovimientosProps {
   session: UserSession;
+  initialSelection?: { movimientoId: string; remitoId: string; fecha: string } | null;
 }
 
 interface Movimiento {
@@ -46,15 +47,15 @@ function formatoARS(centavos: string | bigint): string {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(Number(centavos) / 100);
 }
 
-export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ session }) => {
-  const [fecha, setFecha] = useState(fechaLocal);
+export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ session, initialSelection }) => {
+  const [fecha, setFecha] = useState(() => initialSelection?.fecha || fechaLocal());
   const [cuentaId, setCuentaId] = useState('todas');
   const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
   const [remitos, setRemitos] = useState<RemitoPendiente[]>([]);
   const [filtroRemitos, setFiltroRemitos] = useState({ texto: '', comercio: '', sucursal: '', marca: '', antiguedad: '' });
   const [discrepancias, setDiscrepancias] = useState<Discrepancia[]>([]);
-  const [movimientosSeleccionados, setMovimientosSeleccionados] = useState<Set<string>>(new Set());
-  const [remitosSeleccionados, setRemitosSeleccionados] = useState<Set<string>>(new Set());
+  const [movimientosSeleccionados, setMovimientosSeleccionados] = useState<Set<string>>(() => new Set(initialSelection ? [initialSelection.movimientoId] : []));
+  const [remitosSeleccionados, setRemitosSeleccionados] = useState<Set<string>>(() => new Set(initialSelection ? [initialSelection.remitoId] : []));
   const [nota, setNota] = useState('');
   const [mensaje, setMensaje] = useState('');
   const [error, setError] = useState('');

@@ -7,6 +7,23 @@ const API_BASE_URL = API_ROOT;
 const STORAGE_KEY_SESSION = 'tutucas_auth_session';
 
 class AuthService {
+  public async changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+    const session = this.getCurrentSession();
+    if (!session?.token) return { success: false, message: 'Tu sesión ya no está disponible. Iniciá sesión nuevamente.' };
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const data = await response.json();
+      return { success: response.ok && data.success, message: data.message || 'No se pudo cambiar la contraseña.' };
+    } catch {
+      return { success: false, message: 'No se pudo conectar con el servidor.' };
+    }
+  }
+
   private failedAttempts: number = 0;
   private isLocked: boolean = false;
 
