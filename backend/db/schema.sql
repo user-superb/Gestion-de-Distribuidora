@@ -204,6 +204,9 @@ CREATE TABLE remito (
 );
 
 ALTER TABLE remito ADD COLUMN IF NOT EXISTS entregado_en timestamptz;
+ALTER TABLE remito ADD COLUMN IF NOT EXISTS entregado_por bigint REFERENCES usuario(id);
+ALTER TABLE remito ADD COLUMN IF NOT EXISTS latitud numeric(9,6);
+ALTER TABLE remito ADD COLUMN IF NOT EXISTS longitud numeric(9,6);
 ALTER TABLE remito DROP CONSTRAINT IF EXISTS remito_estado_valido;
 ALTER TABLE remito ADD CONSTRAINT remito_estado_valido
     CHECK (estado IN ('pendiente','en_ruta','entregado','no_entregado','anulado','devuelto'));
@@ -280,6 +283,7 @@ CREATE TABLE visita (
     orden               integer,
     estado              text        NOT NULL DEFAULT 'pendiente',
     sincronizacion_pendiente boolean NOT NULL DEFAULT false,
+    cobrada_en          timestamptz,
     -- Ubicación, fecha y hora reales de la operación. Pedido explícito
     -- del cliente; no reemplaza el seguimiento en vivo del camión.
     registrada_en       timestamptz,
@@ -391,6 +395,7 @@ CREATE TABLE cobro (
     movimiento_bancario_id  bigint      REFERENCES movimiento_bancario(id),
     -- Para efectivo: la rendición física en la que entra.
     rendicion_id            bigint      REFERENCES rendicion_efectivo(id),
+    referencia_transferencia text,
     estado                  text        NOT NULL DEFAULT 'pendiente',
     -- Idempotencia de la sincronización offline: el móvil genera esta
     -- clave y un reenvío tras una caída de red no duplica el cobro.
@@ -413,6 +418,8 @@ CREATE TABLE cobro (
 );
 
 CREATE INDEX cobro_visita_idx      ON cobro (visita_id);
+CREATE INDEX IF NOT EXISTS cobro_referencia_idx  ON cobro (referencia_transferencia)
+    WHERE referencia_transferencia IS NOT NULL;
 CREATE INDEX cobro_movimiento_idx  ON cobro (movimiento_bancario_id);
 CREATE INDEX cobro_rendicion_idx   ON cobro (rendicion_id);
 

@@ -7,12 +7,15 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "tsx --test src/__tests__/remitoApi.test.ts src/__tests__/authApi.test.ts src/__tests__/usuarioApi.test.ts src/__tests__/secuenciaVisitas.test.ts src/__tests__/remitoManual.test.ts src/__tests__/fechaHojaRuta.test.ts src/__tests__/asignarTransportista.test.ts src/__tests__/anexarEntrega.test.ts",
+    "test": "tsx --test src/__tests__/remitoApi.test.ts src/__tests__/authApi.test.ts src/__tests__/usuarioApi.test.ts src/__tests__/secuenciaVisitas.test.ts src/__tests__/remitoManual.test.ts src/__tests__/fechaHojaRuta.test.ts src/__tests__/asignarTransportista.test.ts src/__tests__/anexarEntrega.test.ts src/__tests__/transportistaApi.test.ts src/__tests__/cobroMovil.test.ts",
     "db:init": "tsx src/scripts/initDb.ts",
     "db:migrate": "tsx src/scripts/migrateAll.ts",
     "db:migrate-admin": "tsx src/scripts/migrateAdminRole.ts",
     "db:migrate-permissions": "tsx src/scripts/migratePermissions.ts",
-    "db:query": "tsx src/scripts/queryDb.ts"
+    "db:migrate-cobro-movil": "tsx src/scripts/runSqlFile.ts db/migrations/005_cobro_movil.sql",
+    "db:query": "tsx src/scripts/queryDb.ts",
+    "db:demo-movil": "tsx src/scripts/runSqlFile.ts db/demo_movil.sql",
+    "db:demo-movil-reset": "tsx src/scripts/runSqlFile.ts db/demo_movil_reset.sql && tsx src/scripts/runSqlFile.ts db/demo_movil.sql"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

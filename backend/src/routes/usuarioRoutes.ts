@@ -13,7 +13,7 @@ const requireSystemAdmin = (req: any, res: any, next: any) => {
   next();
 };
 
-usuarioRouter.use(requireAuth, requireSystemAdmin);
+usuarioRouter.use('/usuarios', requireAuth, requireSystemAdmin);
 
 usuarioRouter.get('/usuarios', async (_req, res) => {
   try {

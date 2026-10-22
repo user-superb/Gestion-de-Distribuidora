@@ -113,13 +113,16 @@ function setupMemoryDb() {
       actualizado_en timestamp DEFAULT now()
     );
 
-    CREATE TABLE IF NOT EXISTS hoja_de_ruta (
+        CREATE TABLE IF NOT EXISTS hoja_de_ruta (
       id serial PRIMARY KEY,
       sucursal_id bigint NOT NULL DEFAULT 1,
       transportista_id bigint,
       fecha_reparto date NOT NULL DEFAULT CURRENT_DATE,
       patente text,
       estado text NOT NULL DEFAULT 'borrador',
+      armada_por bigint,
+      publicada_en timestamp,
+      cerrada_en timestamp,
       creado_en timestamp DEFAULT now()
     );
 
@@ -129,6 +132,13 @@ function setupMemoryDb() {
       hoja_de_ruta_id bigint,
       orden integer,
       estado text NOT NULL DEFAULT 'pendiente',
+      registrada_en timestamp,
+      latitud numeric,
+      longitud numeric,
+      precision_metros numeric,
+      gps_disponible boolean,
+      observacion text,
+      cobrada_en timestamp,
       sincronizacion_pendiente boolean NOT NULL DEFAULT false
     );
 
@@ -140,8 +150,100 @@ function setupMemoryDb() {
       sucursal_id bigint,
       importe_centavos bigint NOT NULL,
       estado text NOT NULL DEFAULT 'pendiente',
-      visita_id bigint
+      visita_id bigint,
+      entregado_en timestamp,
+      entregado_por bigint,
+      latitud numeric,
+      longitud numeric,
+      actualizado_en timestamp DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS cobro (
+      id serial PRIMARY KEY,
+      visita_id bigint NOT NULL,
+      medio_pago text NOT NULL,
+      importe_centavos bigint NOT NULL,
+      registrado_en timestamp NOT NULL,
+      latitud numeric,
+      longitud numeric,
+      registrado_por bigint NOT NULL,
+      movimiento_bancario_id bigint,
+      rendicion_id bigint,
+      referencia_transferencia text,
+      estado text NOT NULL DEFAULT 'pendiente',
+      clave_idempotencia text NOT NULL UNIQUE,
+      sincronizado_en timestamp,
+      creado_en timestamp DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS auditoria (
+      id serial PRIMARY KEY,
+      entidad text NOT NULL,
+      entidad_id bigint NOT NULL,
+      accion text NOT NULL,
+      usuario_id bigint NOT NULL,
+      ocurrido_en timestamp DEFAULT now(),
+      ip_origen text,
+      valores_antes jsonb,
+      valores_despues jsonb,
+      observacion text
+    );
+
+    CREATE TABLE IF NOT EXISTS movimiento_bancario (
+      id serial PRIMARY KEY,
+      cuenta_id bigint NOT NULL,
+      fecha_hora timestamp DEFAULT now(),
+      ordenante text NOT NULL,
+      ordenante_cuit char(11),
+      referencia_externa text,
+      importe_centavos bigint NOT NULL,
+      estado text NOT NULL DEFAULT 'sin_imputar',
+      creado_en timestamp DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS imputacion (
+      id serial PRIMARY KEY,
+      movimiento_bancario_id bigint,
+      cobro_id bigint,
+      remito_id bigint NOT NULL,
+      importe_centavos bigint NOT NULL,
+      imputado_por bigint NOT NULL,
+      imputado_en timestamp DEFAULT now(),
+      anulado boolean NOT NULL DEFAULT false,
+      anulado_por bigint,
+      anulado_en timestamp,
+      motivo_anulacion text
+    );
+
+    CREATE TABLE IF NOT EXISTS discrepancia_conciliacion (
+      id serial PRIMARY KEY,
+      movimiento_id bigint,
+      movimiento_ids bigint[] DEFAULT '{}',
+      remito_ids bigint[] NOT NULL,
+      importe_movimiento bigint NOT NULL,
+      importe_seleccionado bigint NOT NULL,
+      diferencia_centavos bigint NOT NULL,
+      nota text NOT NULL,
+      estado text NOT NULL DEFAULT 'pendiente',
+      creada_por bigint NOT NULL,
+      creada_en timestamp DEFAULT now()
+    );
+
+    CREATE VIEW remito_saldo AS
+    SELECT  r.id AS remito_id,
+            r.comercio_id,
+            r.marca_id,
+            r.importe_centavos,
+            COALESCE(SUM(i.importe_centavos), 0) AS imputado_centavos,
+            r.importe_centavos - COALESCE(SUM(i.importe_centavos), 0) AS saldo_centavos,
+            CASE
+                WHEN r.importe_centavos = COALESCE(SUM(i.importe_centavos), 0) THEN 'saldado'
+                WHEN COALESCE(SUM(i.importe_centavos), 0) > 0 THEN 'parcial'
+                ELSE 'pendiente'
+            END AS estado_pago
+    FROM remito r
+    LEFT JOIN imputacion i ON i.remito_id = r.id AND i.anulado = false
+    GROUP BY r.id, r.comercio_id, r.marca_id, r.importe_centavos;
   `);
 
   // Seeds iniciales
