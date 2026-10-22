@@ -8,6 +8,8 @@ import { authRouter } from './routes/authRoutes.js';
 import { conciliacionRouter } from './routes/conciliacionRoutes.js';
 import { usuarioRouter } from './routes/usuarioRoutes.js';
 import { configuracionRouter } from './routes/configuracionRoutes.js';
+import { movilRouter } from './routes/movilRoutes.js';
+import { transportistaRouter } from './routes/transportistaRoutes.js';
 
 dotenv.config();
 
@@ -31,6 +33,8 @@ app.get('/', async (_req, res) => {
       auth: '/api/auth/login',
       remitos: '/api/remitos',
       hojasDeRuta: '/api/hojas-de-ruta',
+      movil: '/api/movil/hoja-de-ruta',
+      transportista: '/api/transportista/hoja-activa',
     },
     timestamp: new Date().toISOString(),
   });
@@ -48,8 +52,10 @@ app.get('/api/health', async (_req, res) => {
 });
 
 app.use('/api', authRouter);
-app.use('/api', remitoRouter);
+app.use('/api/movil', movilRouter);
+app.use('/api/transportista', transportistaRouter);
 app.use('/api/conciliacion', conciliacionRouter);
+app.use('/api', remitoRouter);
 app.use('/api', usuarioRouter);
 app.use('/api', configuracionRouter);
 

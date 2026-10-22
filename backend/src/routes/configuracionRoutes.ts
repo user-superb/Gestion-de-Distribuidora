@@ -11,7 +11,7 @@ const requireSystemAdmin = (req: Request, res: Response, next: NextFunction) => 
   next();
 };
 
-configuracionRouter.use(requireAuth, requireSystemAdmin);
+configuracionRouter.use('/configuracion', requireAuth, requireSystemAdmin);
 
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 const optionalText = (value: unknown) => text(value) || null;

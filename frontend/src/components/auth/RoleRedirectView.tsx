@@ -70,7 +70,8 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
 
           const asignadas = todasHojas.filter((h) => {
             if (!h.transportistaId && !h.transportistaNombre) return false;
-            const matchId = String(h.transportistaId) === String(session.id);
+            const cleanSessionId = String(session.id || '').replace(/^usr_/, '');
+            const matchId = String(h.transportistaId) === String(session.id) || String(h.transportistaId) === cleanSessionId;
             const matchNombre = h.transportistaNombre?.toLowerCase() === session.name?.toLowerCase();
             const matchEmail = (session.email?.includes('chofer') || session.name?.includes('Carlos')) && (h.transportistaId === '2' || h.transportistaId === '10' || h.transportistaNombre?.includes('Carlos'));
             return matchId || matchNombre || matchEmail;
