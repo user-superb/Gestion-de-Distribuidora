@@ -35,7 +35,7 @@ interface Discrepancia {
   remito_ids: string;
 }
 
-const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api';
+import { API_BASE } from '../../config/api';
 
 function fechaLocal(): string {
   const now = new Date();

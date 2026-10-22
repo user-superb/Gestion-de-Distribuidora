@@ -1,7 +1,9 @@
 // frontend/src/services/authService.ts
 import { AuthResult, LoginCredentials, LockoutStatus, UserSession } from '../types/auth';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+import { API_ROOT } from '../config/api';
+
+const API_BASE_URL = API_ROOT;
 const STORAGE_KEY_SESSION = 'tutucas_auth_session';
 
 class AuthService {

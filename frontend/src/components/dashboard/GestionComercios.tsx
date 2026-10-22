@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Check, Edit2, Plus, X } from 'lucide-react';
 import { UserSession } from '../../types/auth';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+import { API_ROOT as API } from '../../config/api';
 type Comercio = { id: number; razon_social: string; nombre_fantasia: string | null; cuit: string | null; domicilio: string; localidad: string | null; contacto: string | null; telefono: string | null; activo: boolean };
 type Draft = { id?: number; razon_social: string; nombre_fantasia: string; cuit: string; domicilio: string; localidad: string; contacto: string; telefono: string };
 const emptyDraft = (): Draft => ({ razon_social: '', nombre_fantasia: '', cuit: '', domicilio: '', localidad: '', contacto: '', telefono: '' });

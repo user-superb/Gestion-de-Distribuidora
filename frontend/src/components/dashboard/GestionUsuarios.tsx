@@ -3,7 +3,7 @@ import { UserRole, UserSession } from '../../types/auth';
 import { Check, Edit2, Plus, Shield, UserRound, X } from 'lucide-react';
 
 const roles: UserRole[] = ['Administrador del sistema', 'Administrativo', 'Transportista', 'Supervisor', 'Gerente'];
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+import { API_ROOT as API_BASE_URL } from '../../config/api';
 
 interface UserRecord {
   id: number;

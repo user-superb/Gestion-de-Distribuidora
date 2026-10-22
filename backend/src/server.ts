@@ -12,11 +12,29 @@ import { configuracionRouter } from './routes/configuracionRoutes.js';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = Number(process.env.PORT) || 3001;
+const HOST = process.env.HOST || '0.0.0.0';
 
 // Middlewares
 app.use(cors({ origin: '*' }));
 app.use(express.json());
+
+// Endpoint raíz de bienvenida e información del servicio (ideal para chequeos de port-forwarding)
+app.get('/', async (_req, res) => {
+  const dbConnected = await db.checkConnection();
+  res.json({
+    status: 'ok',
+    service: 'Tutucas Distribuidora API',
+    database: dbConnected ? (db.isMemory() ? 'PostgreSQL In-Memory (pg-mem)' : 'PostgreSQL Conectado') : 'PostgreSQL Desconectado',
+    endpoints: {
+      health: '/api/health',
+      auth: '/api/auth/login',
+      remitos: '/api/remitos',
+      hojasDeRuta: '/api/hojas-de-ruta',
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
 
 // Endpoint de estado y salud
 app.get('/api/health', async (_req, res) => {
@@ -37,8 +55,8 @@ app.use('/api', configuracionRouter);
 
 // Iniciar servidor solo si no estamos importando para testing
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, async () => {
-    console.log(`🚀 Servidor backend escuchando en http://localhost:${PORT}`);
+  app.listen(PORT, HOST, async () => {
+    console.log(`🚀 Servidor backend escuchando en http://${HOST}:${PORT}`);
     const isConnected = await db.checkConnection();
     if (isConnected) {
       console.log(`🐘 Conexión exitosa con PostgreSQL.`);

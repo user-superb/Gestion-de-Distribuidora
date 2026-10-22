@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Check, Edit2, Plus, X } from 'lucide-react';
 import { UserSession } from '../../types/auth';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+import { API_ROOT as API } from '../../config/api';
 type Cuenta = { id: number; sucursal_id: number; sucursal: string; alias: string; cbu: string | null; banco: string | null; activa: boolean };
 type Sucursal = { id: number; nombre: string };
 type Draft = { id?: number; sucursal_id: string; sucursal?: string; alias: string; cbu: string; banco: string };

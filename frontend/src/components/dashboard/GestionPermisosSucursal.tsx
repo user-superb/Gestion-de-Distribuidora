@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Check } from 'lucide-react';
 import { UserSession } from '../../types/auth';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+import { API_ROOT as API } from '../../config/api';
 type User = { id: string; nombre: string; usuario: string; rol: string };
 type Branch = { id: string; nombre: string };
 type Permission = { codigo: string; descripcion: string };

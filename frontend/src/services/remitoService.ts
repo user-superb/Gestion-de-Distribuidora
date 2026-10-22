@@ -59,7 +59,7 @@ let cachedComercios: Comercio[] = [...MOCK_COMERCIOS];
 let cachedMarcas: Marca[] = [...MOCK_MARCAS];
 let cachedTransportistas: Transportista[] = [...MOCK_TRANSPORTISTAS];
 
-const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001/api';
+import { API_BASE } from '../config/api';
 
 export const remitoService = {
   // Síncronos (para tests y modo offline)

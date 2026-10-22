@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Check, Edit2, Plus, X } from 'lucide-react';
 import { UserSession } from '../../types/auth';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+import { API_ROOT as API } from '../../config/api';
 type Marca = { id: number; nombre: string; cuit: string | null; activa: boolean };
 type Draft = { id?: number; nombre: string; cuit: string };
 
