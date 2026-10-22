@@ -1,4 +1,4 @@
-import { FlatList, Pressable, RefreshControl, Text, View } from 'react-native';
+import { FlatList, Image, Pressable, RefreshControl, Text, View } from 'react-native';
 import type { HojaGuardada } from '../almacenamiento';
 import { Aviso } from '../componentes/Aviso';
 import { formatearPesos } from '../dominio/dinero';
@@ -38,7 +38,15 @@ export function HojaDeRutaPantalla({ guardada, cola, error, cargando, enLinea, m
       ListHeaderComponent={
         <View style={{ gap: 10 }}>
           <View style={estilos.fila}>
-            <Text style={estilos.titulo}>Hoja de ruta</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Image
+                source={require('../../assets/marca/isotipo.png')}
+                style={{ width: 64, height: 32 }}
+                resizeMode="contain"
+                accessibilityLabel="RepartoYA"
+              />
+              <Text style={estilos.titulo}>Hoja de ruta</Text>
+            </View>
             <Pressable onPress={onCerrarSesion} accessibilityRole="button" hitSlop={12}>
               <Text style={estilos.botonSecundarioTexto}>Salir</Text>
             </Pressable>

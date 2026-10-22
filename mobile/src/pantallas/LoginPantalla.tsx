@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { iniciarSesion } from '../api';
 import { Aviso } from '../componentes/Aviso';
 import { ErrorRed } from '../errores';
-import { estilos } from '../estilos';
+import { colores, estilos, marca } from '../estilos';
 import type { Sesion } from '../tipos';
 
 export function LoginPantalla({ aviso, onIngreso }: { aviso?: string | null; onIngreso: (sesion: Sesion) => void }) {
@@ -30,9 +30,20 @@ export function LoginPantalla({ aviso, onIngreso }: { aviso?: string | null; onI
   }
 
   return (
-    <View style={[estilos.contenido, { flex: 1, justifyContent: 'center' }]}>
-      <Text style={estilos.titulo}>Tutucas · Reparto</Text>
-      <Text style={estilos.subtitulo}>Ingresá con tu usuario de transportista.</Text>
+    // Variante de marca 04 · App repartidor: fondo Naranja YA.
+    <ScrollView
+      style={{ backgroundColor: marca.naranjaYa }}
+      contentContainerStyle={[estilos.contenido, { flexGrow: 1, justifyContent: 'center', gap: 24 }]}
+      keyboardShouldPersistTaps="handled"
+    >
+      <Image
+        source={require('../../assets/marca/logo-repartidor.png')}
+        style={{ width: 240, height: 170, alignSelf: 'center' }}
+        resizeMode="contain"
+        accessibilityLabel="RepartoYA"
+      />
+      <View style={[estilos.tarjeta, { backgroundColor: colores.fondo, borderColor: colores.fondo, gap: 12, padding: 20 }]}>
+      <Text style={[estilos.texto, { fontWeight: '700', color: colores.titulo }]}>Ingresá con tu usuario de transportista.</Text>
       {aviso ? <Aviso tono="info">{aviso}</Aviso> : null}
       <TextInput
         style={estilos.input}
@@ -61,6 +72,7 @@ export function LoginPantalla({ aviso, onIngreso }: { aviso?: string | null; onI
       >
         {cargando ? <ActivityIndicator color="#fff" /> : <Text style={estilos.botonTexto}>Ingresar</Text>}
       </Pressable>
-    </View>
+      </View>
+    </ScrollView>
   );
 }

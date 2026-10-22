@@ -1,4 +1,4 @@
-# App móvil del transportista · "Tutucas Reparto"
+# RepartoYA · app móvil del transportista
 
 Expo (React Native + TypeScript). Es una app que se instala en el celular y trabaja sin conexión. Cubre la **HU #22** (entrega de remitos) y la **Épica 1.4 · Registro de cobro en el punto de entrega** (HU #25 a #29).
 Usa **Expo SDK 57**: el Expo Go de Play Store todavía no soporta la SDK 58, que salió el 15/10/2026. Cuando la soporte, se puede actualizar con `npx expo install expo@latest --fix`.
@@ -13,6 +13,28 @@ Las reglas, decisiones y preguntas pendientes están en [`docs/requerimientos/ep
 5. **Sin conexión**: la entrega y el cobro se guardan en el celular y se envían solos cuando vuelve la señal. El QR se deshabilita sin conexión. Los reenvíos no duplican cobros, porque cada pago lleva una clave de idempotencia.
 
 Cobrar en efectivo por el total lleva 3 toques: abrir la visita → *Efectivo* (precarga el total) → *Confirmar*.
+
+## Identidad visual
+
+Nombre y marca **RepartoYA**, según la propuesta del equipo de diseño del cliente (22/10/2026).
+
+| Color | Hex | Uso en la app |
+|---|---|---|
+| Naranja YA | `#F4661B` | Botones primarios, fondo del login y del splash, ícono |
+| Azul Ruta | `#123C6B` | Títulos, botones secundarios y enlaces |
+| Crema Pan | `#FFF6EC` | Fondo de las pantallas |
+| Carbón | `#1B1B1F` | Texto de cuerpo |
+| Blanco | `#FFFFFF` | Tarjetas y campos |
+
+- **Ícono:** el "App icon (repartidor)" del manual. En Android es adaptativo: camión sobre fondo naranja.
+- **Login y splash:** la variante *04 · App repartidor · fondo naranja*.
+- **Encabezado de la hoja de ruta:** el isotipo. El favicon usa el isotipo sin líneas de velocidad, como pide el manual por debajo de 48 px.
+- Los colores están en `src/estilos.ts` (`marca`), y las imágenes en `assets/` y `assets/marca/`.
+
+Pendiente con diseño:
+- Las imágenes se recortaron de los PNG de la propuesta. Para el instalable final conviene pedir los originales en SVG o PNG de 1024 px: el ícono se amplió desde 360 px.
+- No mandaron la tipografía. La app usa la fuente del sistema.
+- Los colores de estado (verde para lo confirmado y rojo para los errores) no están en la paleta. Se mantienen para que éxito y error no se confundan.
 
 ## Cómo correrlo
 

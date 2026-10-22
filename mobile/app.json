@@ -1,17 +1,19 @@
 {
   "expo": {
-    "name": "Tutucas Reparto",
-    "slug": "tutucas-reparto",
+    "name": "RepartoYA",
+    "slug": "repartoya",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "backgroundColor": "#FFF6EC",
+    "primaryColor": "#F4661B",
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#F4661B",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -19,16 +21,29 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
+      "name": "RepartoYA",
+      "shortName": "RepartoYA",
+      "themeColor": "#F4661B",
+      "backgroundColor": "#FFF6EC",
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Se registra la ubicación de cada entrega y cobro."
+          "locationWhenInUsePermission": "RepartoYA registra la ubicación de cada entrega y cobro."
         }
       ],
-      "expo-status-bar"
+      "expo-status-bar",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "backgroundColor": "#F4661B"
+        }
+      ]
     ]
   }
 }

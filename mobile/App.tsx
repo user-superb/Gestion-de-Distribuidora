@@ -5,7 +5,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { useNetInfo } from '@react-native-community/netinfo';
 import { cerrarSesion } from './src/api';
 import { borrarHoja, colaOperaciones, guardarSesion, leerSesion } from './src/almacenamiento';
-import { estilos } from './src/estilos';
+import { estilos, marca } from './src/estilos';
 import { VisitaPantalla } from './src/pantallas/VisitaPantalla';
 import { HojaDeRutaPantalla } from './src/pantallas/HojaDeRutaPantalla';
 import { LoginPantalla } from './src/pantallas/LoginPantalla';
@@ -66,8 +66,9 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={estilos.pantalla}>
-        <StatusBar style="dark" />
+      {/* El login usa el fondo Naranja YA; el resto de las pantallas, Crema Pan. */}
+      <SafeAreaView style={[estilos.pantalla, !iniciando && !sesion && { backgroundColor: marca.naranjaYa }]}>
+        <StatusBar style={!iniciando && !sesion ? 'light' : 'dark'} />
         {iniciando ? (
           <View style={{ flex: 1, justifyContent: 'center' }}>
             <ActivityIndicator size="large" />
