@@ -14,6 +14,7 @@ export interface Remito {
   importeCentavos: number;
   estado: string;
   motivoNoEntrega?: string | null;
+  bultos?: number;
 }
 
 export interface ImporteVisita {
@@ -31,6 +32,7 @@ export interface Visita {
   /** Ya tiene el cobro registrado en el servidor (HU #25 a #29). */
   cobrada: boolean;
   comercio: {
+    id?: string;
     razonSocial: string;
     nombreFantasia: string | null;
     domicilio: string;
@@ -50,6 +52,41 @@ export interface HojaDeRuta {
   estado: string;
   sucursal: string;
   visitas: Visita[];
+}
+
+export type EstadoOperativoParada = 'Pendiente' | 'En curso' | 'Entregado' | 'Rechazado';
+
+export interface DocumentoAsociado {
+  id: string;
+  numero: string;
+  marca: string;
+  bultos: number;
+  importeCentavos: number;
+  estadoOperativo: 'Pendiente' | 'Entregado' | 'Rechazado';
+  motivoNoEntrega?: string | null;
+}
+
+export interface ResumenCargaMarca {
+  marca: string;
+  totalRemitos: number;
+  totalBultos: number;
+  totalImporteCentavos: number;
+}
+
+export interface ParadaConsolidada {
+  id: string;
+  visitaPrincipal: Visita;
+  visitas: Visita[];
+  orden: number;
+  comercio: Visita['comercio'];
+  estadoOperativo: EstadoOperativoParada;
+  marcas: string[];
+  totalRemitos: number;
+  totalBultos: number;
+  totalImporteCentavos: number;
+  sinCobroEnDestino: boolean;
+  documentos: DocumentoAsociado[];
+  resumenPorMarca: ResumenCargaMarca[];
 }
 
 export interface PagoDto {

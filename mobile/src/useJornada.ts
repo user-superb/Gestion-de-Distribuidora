@@ -1,7 +1,8 @@
 // Estado de la jornada: hoja de ruta (del servidor o guardada en el celular) y cola de entregas y cobros.
 import { useCallback, useEffect, useState } from 'react';
 import { obtenerHojaDeRuta } from './api';
-import { colaOperaciones, guardarHoja, HojaGuardada, leerHoja } from './almacenamiento';
+import { borrarHoja, colaOperaciones, guardarHoja, HojaGuardada, leerHoja } from './almacenamiento';
+import { esHojaOperativaVigente } from './dominio/parada';
 import { ErrorApi, ErrorRed } from './errores';
 import type { ColaPorClave } from './dominio/estadoVisita';
 import type { Sesion } from './tipos';
@@ -20,7 +21,12 @@ export function useJornada(sesion: Sesion | null, enLinea: boolean, onSesionVenc
     setCargando(true);
     try {
       const local = await leerHoja();
-      if (local) setGuardada(local);
+      if (local && esHojaOperativaVigente(local.hoja)) {
+        setGuardada(local);
+      } else if (local && !esHojaOperativaVigente(local.hoja)) {
+        await borrarHoja();
+        setGuardada(null);
+      }
 
       if (enLinea) {
         const sincronizacion = await colaOperaciones.sincronizar();
@@ -29,15 +35,28 @@ export function useJornada(sesion: Sesion | null, enLinea: boolean, onSesionVenc
           return;
         }
         try {
-          setGuardada(await guardarHoja(await obtenerHojaDeRuta(sesion.token)));
-          setError(null);
+          const hojaServidor = await obtenerHojaDeRuta(sesion.token);
+          if (esHojaOperativaVigente(hojaServidor)) {
+            setGuardada(await guardarHoja(hojaServidor));
+            setError(null);
+          } else {
+            await borrarHoja();
+            setGuardada(null);
+            setError(null);
+          }
         } catch (e) {
           if (e instanceof ErrorApi && e.status === 401) {
             onSesionVencida();
             return;
           }
-          if (e instanceof ErrorApi && e.status === 404) setError(e.message);
-          else if (!(e instanceof ErrorRed)) setError((e as Error).message);
+          if (e instanceof ErrorApi && e.status === 404) {
+            // Escenario 2: Ausencia de rutas asignadas para la fecha
+            await borrarHoja();
+            setGuardada(null);
+            setError(null);
+          } else if (!(e instanceof ErrorRed)) {
+            setError((e as Error).message);
+          }
         }
       }
       setCola(await colaOperaciones.estadoPorClave());

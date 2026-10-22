@@ -250,7 +250,7 @@ export const cobroService = {
        JOIN sucursal s ON s.id = h.sucursal_id
        WHERE h.transportista_id = $1
          AND h.fecha_reparto = $2::date
-         AND h.estado IN ('publicada', 'en_curso')
+         AND h.estado IN ('publicada', 'asignada', 'en_curso')
        LIMIT 1`,
       [transportistaId, fecha]
     );
@@ -259,6 +259,7 @@ export const cobroService = {
 
     const visitasRes = await db.query(
       `SELECT v.id::text AS id, v.orden, v.estado, v.cobrada_en IS NOT NULL AS cobrada,
+              c.id::text AS comercio_id,
               c.razon_social, c.nombre_fantasia, c.domicilio, c.localidad,
               c.ventana_desde::text AS ventana_desde, c.ventana_hasta::text AS ventana_hasta, c.telefono
        FROM visita v
@@ -277,6 +278,7 @@ export const cobroService = {
         estado: v.estado,
         cobrada: !!v.cobrada,
         comercio: {
+          id: v.comercio_id,
           razonSocial: v.razon_social,
           nombreFantasia: v.nombre_fantasia,
           domicilio: v.domicilio,
