@@ -48,7 +48,8 @@ describe('Backend PostgreSQL - HU #22: Confirmar Entrega Remito Individual', () 
         estado text NOT NULL DEFAULT 'pendiente',
         registrada_en timestamp,
         latitud numeric,
-        longitud numeric
+        longitud numeric,
+        observacion text
       );
 
       CREATE TABLE IF NOT EXISTS remito (
@@ -62,7 +63,8 @@ describe('Backend PostgreSQL - HU #22: Confirmar Entrega Remito Individual', () 
         entregado_en timestamp,
         entregado_por bigint,
         latitud numeric,
-        longitud numeric
+        longitud numeric,
+        observacion text
       );
 
       -- Datos de prueba
@@ -220,5 +222,141 @@ describe('Backend PostgreSQL - HU #22: Confirmar Entrega Remito Individual', () 
     const remitoDb = (await db.query('SELECT entregado_en as "entregadoEn" FROM remito WHERE id = 101')).rows[0];
     const fechaGuardada = new Date(remitoDb.entregadoEn).toISOString();
     assert.equal(fechaGuardada, timestampOriginalOffline);
+  });
+
+  describe('HU #23: Confirmar Entrega Remitos Multimarca', () => {
+    it('ESCENARIO 1: Confirmación multimarca exitosa de toda la visita', async () => {
+      // Visita 1 tiene 2 remitos pendientes de distintas marcas: 101 (Marca 1) y 102 (Marca 2)
+      const timestamp = '2026-10-17T20:30:00.000Z';
+      const lat = -34.6037;
+      const lng = -58.3815;
+
+      const res = await transportistaService.confirmarTodaLaVisita('1', {
+        timestamp,
+        transportistaId: '2',
+        latitud: lat,
+        longitud: lng,
+      });
+
+      assert.equal(res.success, true);
+      assert.equal(res.visitaCerrada, true);
+      assert.equal(res.visitaEstado, 'completada');
+      assert.equal(res.conExcepciones, false);
+      assert.equal(res.totalConfirmados, 2);
+
+      // Verificar que ambos remitos pasaron a entregado con trazabilidad individual
+      const r1 = (await db.query('SELECT * FROM remito WHERE id = 101')).rows[0];
+      const r2 = (await db.query('SELECT * FROM remito WHERE id = 102')).rows[0];
+      assert.equal(r1.estado, 'entregado');
+      assert.equal(r2.estado, 'entregado');
+      assert.equal(new Date(r1.entregado_en).toISOString(), timestamp);
+      assert.equal(new Date(r2.entregado_en).toISOString(), timestamp);
+      assert.equal(String(r1.entregado_por), '2');
+      assert.equal(String(r2.entregado_por), '2');
+
+      // Verificar que la visita quedó completada
+      const visitaDb = (await db.query('SELECT * FROM visita WHERE id = 1')).rows[0];
+      assert.equal(visitaDb.estado, 'completada');
+    });
+
+    it('ESCENARIO 2: Confirmación multimarca con remitos previamente aprobados (Regla 1)', async () => {
+      // El remito 101 fue confirmado previamente de forma individual
+      const timestampPrevio = '2026-10-17T17:00:00.000Z';
+      await db.query(
+        `UPDATE remito SET estado = 'entregado', entregado_en = $1::timestamptz, latitud = -34.111, longitud = -58.111, entregado_por = 2 WHERE id = 101`,
+        [timestampPrevio]
+      );
+
+      // Ahora se presiona "Confirmar toda la visita"
+      const timestampMasivo = '2026-10-17T20:00:00.000Z';
+      const res = await transportistaService.confirmarTodaLaVisita('1', {
+        timestamp: timestampMasivo,
+        transportistaId: '2',
+        latitud: -34.222,
+        longitud: -58.222,
+      });
+
+      assert.equal(res.success, true);
+      assert.equal(res.visitaCerrada, true);
+      assert.equal(res.visitaEstado, 'completada');
+      assert.equal(res.totalConfirmados, 1); // Solo el 102 que estaba pendiente
+
+      // El remito 101 conserva su timestamp y coordenadas originales (Regla 1)
+      const r1 = (await db.query('SELECT * FROM remito WHERE id = 101')).rows[0];
+      assert.equal(r1.estado, 'entregado');
+      assert.equal(new Date(r1.entregado_en).toISOString(), timestampPrevio);
+      assert.equal(Number(r1.latitud), -34.111);
+
+      // El remito 102 se confirmó con los datos masivos
+      const r2 = (await db.query('SELECT * FROM remito WHERE id = 102')).rows[0];
+      assert.equal(r2.estado, 'entregado');
+      assert.equal(new Date(r2.entregado_en).toISOString(), timestampMasivo);
+      assert.equal(Number(r2.latitud), -34.222);
+    });
+
+    it('REGLA 1 y 2: Remito rechazado previo conserva estado y visita cierra como "Entregada con excepciones"', async () => {
+      // Remito 101 fue marcado como 'no_entregado'
+      await db.query(`UPDATE remito SET estado = 'no_entregado' WHERE id = 101`);
+
+      // Se confirma la visita masivamente
+      const res = await transportistaService.confirmarTodaLaVisita('1', {
+        timestamp: '2026-10-17T20:45:00.000Z',
+        transportistaId: '2',
+        latitud: -34.60,
+        longitud: -58.38,
+      });
+
+      assert.equal(res.success, true);
+      assert.equal(res.visitaCerrada, true);
+      assert.equal(res.visitaEstado, 'completada');
+      assert.equal(res.conExcepciones, true);
+
+      // El remito rechazado NO cambió a entregado
+      const r1 = (await db.query('SELECT * FROM remito WHERE id = 101')).rows[0];
+      assert.equal(r1.estado, 'no_entregado');
+
+      // El remito 102 sí se entregó
+      const r2 = (await db.query('SELECT * FROM remito WHERE id = 102')).rows[0];
+      assert.equal(r2.estado, 'entregado');
+
+      // La visita registra la observación de excepciones
+      const visitaDb = (await db.query('SELECT * FROM visita WHERE id = 1')).rows[0];
+      assert.equal(visitaDb.estado, 'completada');
+      assert.equal(visitaDb.observacion, 'Entregada con excepciones');
+    });
+
+    it('REGLA 3: Trazabilidad individual por documento con timestamps específicos', async () => {
+      const res = await transportistaService.confirmarTodaLaVisita('1', {
+        timestamp: '2026-10-17T20:00:00.000Z',
+        transportistaId: '2',
+        latitud: -34.50,
+        longitud: -58.50,
+        entregas: [
+          { remitoId: '101', timestamp: '2026-10-17T20:01:00.000Z', latitud: -34.501, longitud: -58.501 },
+          { remitoId: '102', timestamp: '2026-10-17T20:02:00.000Z', latitud: -34.502, longitud: -58.502 },
+        ],
+      });
+
+      assert.equal(res.success, true);
+      const r1 = (await db.query('SELECT * FROM remito WHERE id = 101')).rows[0];
+      const r2 = (await db.query('SELECT * FROM remito WHERE id = 102')).rows[0];
+      assert.equal(new Date(r1.entregado_en).toISOString(), '2026-10-17T20:01:00.000Z');
+      assert.equal(new Date(r2.entregado_en).toISOString(), '2026-10-17T20:02:00.000Z');
+      assert.equal(Number(r1.latitud), -34.501);
+      assert.equal(Number(r2.latitud), -34.502);
+      assert.equal(String(r1.marca_id), '1');
+      assert.equal(String(r2.marca_id), '2');
+    });
+
+    it('Validación: Requiere GPS y transportista obligatorios', async () => {
+      const res = await transportistaService.confirmarTodaLaVisita('1', {
+        timestamp: '2026-10-17T20:00:00.000Z',
+        transportistaId: '2',
+        latitud: undefined as any,
+        longitud: -58.50,
+      });
+      assert.equal(res.success, false);
+      assert.match(res.error || '', /latitud/);
+    });
   });
 });

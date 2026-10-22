@@ -1,11 +1,19 @@
 /// <reference types="node" />
-// Reglas de cobro de la app (HU #25 a #29). Se corren con: npm test
+// Reglas de cobro de la app (HU #25 a #29) y entregas (HU #22, #23). Se corren con: npm test
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { importeRestante, PagoEnCarga, validarCobro } from '../dominio/cobro';
+import { calcularImporteVisitaLocal, importeRestante, PagoEnCarga, validarCobro } from '../dominio/cobro';
 import { centavosATexto, formatearPesos, parsearPesos } from '../dominio/dinero';
-import { armarEntrega, puedeConfirmarse } from '../dominio/entrega';
-import { estadoCobro, estadoEntrega, resumenEntregas } from '../dominio/estadoVisita';
+import { armarEntrega, armarEntregaLote, armarRechazo, MOTIVOS_RECHAZO_PREESTABLECIDOS, puedeConfirmarse } from '../dominio/entrega';
+import {
+  esRemitoRechazado,
+  esRemitoResuelto,
+  estadoCobro,
+  estadoEntrega,
+  infoEstadoRemito,
+  resumenEntregas,
+  resumenVisitaEntrega,
+} from '../dominio/estadoVisita';
 import type { ItemCola } from '../sincronizacion/cola';
 import type { Remito, Visita } from '../tipos';
 
@@ -159,5 +167,214 @@ describe('Estado del cobro en el celular', () => {
 
   it('una visita cerrada por la entrega (HU #22) sigue sin cobrar', () => {
     assert.equal(estadoCobro(visita(false, 'completada'), new Map()), 'pendiente');
+  });
+});
+
+describe('HU #23 · Confirmación de entrega multimarca', () => {
+  const remito = (id: string, estado = 'pendiente', marca = 'Marca A'): Remito => ({
+    id, numero: `R-${id}`, marca, importeCentavos: 1000, estado,
+  });
+
+  const ubicacion = { latitud: -34.92, longitud: -57.95, precisionMetros: 10 };
+  const ahora = new Date('2026-10-20T10:00:00.000Z');
+
+  it('armarEntregaLote solo incluye remitos en estado pendiente (Regla 1)', () => {
+    const remitos = [
+      remito('1', 'pendiente', 'Arcor'),
+      remito('2', 'entregado', 'Bagley'),
+      remito('3', 'no_entregado', 'Quilmes'),
+      remito('4', 'pendiente', 'La Serenísima'),
+    ];
+
+    const lote = armarEntregaLote(remitos, ubicacion, ahora);
+    assert.ok(lote);
+    assert.equal(lote.entregas.length, 2);
+    assert.deepEqual(lote.entregas.map((e) => e.remitoId), ['1', '4']);
+  });
+
+  it('armarEntregaLote asigna timestamp y coordenadas GPS a cada remito del lote (Regla 3)', () => {
+    const remitos = [remito('1', 'pendiente', 'Arcor'), remito('2', 'pendiente', 'Bagley')];
+    const lote = armarEntregaLote(remitos, ubicacion, ahora);
+    assert.ok(lote);
+    assert.equal(lote.cuerpoGeneral.timestamp, '2026-10-20T10:00:00.000Z');
+    assert.equal(lote.cuerpoGeneral.latitud, -34.92);
+    assert.equal(lote.cuerpoGeneral.longitud, -57.95);
+
+    assert.equal(lote.entregas[0].cuerpo.timestamp, '2026-10-20T10:00:00.000Z');
+    assert.equal(lote.entregas[0].cuerpo.latitud, -34.92);
+    assert.equal(lote.entregas[1].cuerpo.timestamp, '2026-10-20T10:00:00.000Z');
+    assert.equal(lote.entregas[1].cuerpo.latitud, -34.92);
+  });
+
+  it('sin GPS armarEntregaLote devuelve null', () => {
+    assert.equal(armarEntregaLote([remito('1')], null, ahora), null);
+  });
+
+  it('si no hay remitos pendientes armarEntregaLote devuelve null', () => {
+    const remitos = [remito('1', 'entregado'), remito('2', 'devuelto')];
+    assert.equal(armarEntregaLote(remitos, ubicacion, ahora), null);
+  });
+
+  it('resumenVisitaEntrega marca como Completada cuando todos están entregados (Regla 2)', () => {
+    const visita: Visita = {
+      id: '1', orden: 1, estado: 'en_curso', cobrada: false,
+      comercio: { razonSocial: 'X', nombreFantasia: null, domicilio: 'Y', localidad: null, ventanaDesde: null, ventanaHasta: null, telefono: null },
+      remitos: [remito('1', 'entregado'), remito('2', 'entregado')],
+      importe: { totalCentavos: 2000, subtotalesPorMarca: [], remitosExcluidos: [], sinCobroEnDestino: false },
+    };
+
+    const resumen = resumenVisitaEntrega(visita, new Map());
+    assert.equal(resumen.completada, true);
+    assert.equal(resumen.conExcepciones, false);
+    assert.equal(resumen.etiqueta, 'Completada');
+  });
+
+  it('resumenVisitaEntrega marca como Entregada con excepciones si existían rechazos previos (Regla 2)', () => {
+    const visita: Visita = {
+      id: '1', orden: 1, estado: 'en_curso', cobrada: false,
+      comercio: { razonSocial: 'X', nombreFantasia: null, domicilio: 'Y', localidad: null, ventanaDesde: null, ventanaHasta: null, telefono: null },
+      remitos: [remito('1', 'entregado'), remito('2', 'no_entregado')],
+      importe: { totalCentavos: 1000, subtotalesPorMarca: [], remitosExcluidos: ['R-2'], sinCobroEnDestino: false },
+    };
+
+    const resumen = resumenVisitaEntrega(visita, new Map());
+    assert.equal(resumen.completada, true);
+    assert.equal(resumen.conExcepciones, true);
+    assert.equal(resumen.etiqueta, 'Entregada con excepciones');
+  });
+
+  it('resumenVisitaEntrega indica entregas pendientes si aún no finalizó', () => {
+    const visita: Visita = {
+      id: '1', orden: 1, estado: 'en_curso', cobrada: false,
+      comercio: { razonSocial: 'X', nombreFantasia: null, domicilio: 'Y', localidad: null, ventanaDesde: null, ventanaHasta: null, telefono: null },
+      remitos: [remito('1', 'entregado'), remito('2', 'pendiente'), remito('3', 'pendiente')],
+      importe: { totalCentavos: 3000, subtotalesPorMarca: [], remitosExcluidos: [], sinCobroEnDestino: false },
+    };
+
+    const resumen = resumenVisitaEntrega(visita, new Map());
+    assert.equal(resumen.completada, false);
+    assert.equal(resumen.confirmados, 1);
+    assert.equal(resumen.total, 3);
+    assert.equal(resumen.etiqueta, '1/3 entregados');
+  });
+});
+
+describe('HU: Registro de rechazo de un remito (Dominio)', () => {
+  it('armarRechazo con motivo preestablecido genera RechazoDto válido', () => {
+    const motivo = MOTIVOS_RECHAZO_PREESTABLECIDOS[0]; // 'Comercio cerrado'
+    const ahora = new Date('2026-10-20T15:30:00.000Z');
+    const u = { latitud: -34.60, longitud: -58.38, precisionMetros: 5 };
+
+    const dto = armarRechazo(motivo, u, ahora);
+    assert.ok(dto);
+    assert.equal(dto?.motivo, 'Comercio cerrado');
+    assert.equal(dto?.timestamp, '2026-10-20T15:30:00.000Z');
+    assert.equal(dto?.latitud, -34.60);
+    assert.equal(dto?.longitud, -58.38);
+  });
+
+  it('armarRechazo con motivo manual genera RechazoDto válido y permite sin GPS', () => {
+    const motivoManual = 'El encargado avisó que no tiene fondos para recibir el pedido';
+    const ahora = new Date('2026-10-20T15:35:00.000Z');
+
+    const dto = armarRechazo(motivoManual, null, ahora);
+    assert.ok(dto);
+    assert.equal(dto?.motivo, motivoManual);
+    assert.equal(dto?.timestamp, '2026-10-20T15:35:00.000Z');
+    assert.equal(dto?.latitud, null);
+    assert.equal(dto?.longitud, null);
+  });
+
+  it('REGLA: armarRechazo con motivo vacío devuelve null (bloquea confirmación)', () => {
+    assert.equal(armarRechazo('', null), null);
+    assert.equal(armarRechazo('   ', null), null);
+    assert.equal(armarRechazo(undefined as any, null), null);
+  });
+
+  it('infoEstadoRemito muestra estado local para remito encolado sin sincronizar', () => {
+    const r: Remito = { id: '10', numero: 'R-01', marca: 'Marca A', importeCentavos: 1000, estado: 'pendiente' };
+    const cola: Map<string, ItemCola> = new Map([
+      ['rechazo:10', {
+        tipo: 'rechazo',
+        visitaId: '1',
+        remitoId: '10',
+        cuerpo: { motivo: 'Mercadería dañada', timestamp: '2026-10-20T10:00:00.000Z' },
+        estado: 'pendiente',
+      }],
+    ]);
+
+    const info = infoEstadoRemito(r, cola);
+    assert.equal(info.texto, 'Rechazado · sin sincronizar');
+    assert.equal(info.puedeOperar, false);
+    assert.equal(info.esRechazado, true);
+    assert.equal(info.motivo, 'Mercadería dañada');
+  });
+
+  it('resumenVisitaEntrega reconoce rechazos encolados localmente y cierra con excepciones', () => {
+    const r1: Remito = { id: '1', numero: 'R-1', marca: 'A', importeCentavos: 1000, estado: 'entregado' };
+    const r2: Remito = { id: '2', numero: 'R-2', marca: 'B', importeCentavos: 2000, estado: 'pendiente' };
+
+    const visita: Visita = {
+      id: '1', orden: 1, estado: 'en_curso', cobrada: false,
+      comercio: { razonSocial: 'X', nombreFantasia: null, domicilio: 'Y', localidad: null, ventanaDesde: null, ventanaHasta: null, telefono: null },
+      remitos: [r1, r2],
+      importe: { totalCentavos: 3000, subtotalesPorMarca: [], remitosExcluidos: [], sinCobroEnDestino: false },
+    };
+
+    const cola: Map<string, ItemCola> = new Map([
+      ['rechazo:2', {
+        tipo: 'rechazo',
+        visitaId: '1',
+        remitoId: '2',
+        cuerpo: { motivo: 'Comercio cerrado', timestamp: '2026-10-20T10:00:00.000Z' },
+        estado: 'pendiente',
+      }],
+    ]);
+
+    const resumen = resumenVisitaEntrega(visita, cola);
+    assert.equal(resumen.completada, true);
+    assert.equal(resumen.conExcepciones, true);
+    assert.equal(resumen.etiqueta, 'Entregada con excepciones');
+  });
+
+  it('calcularImporteVisitaLocal descuenta remitos rechazados en la cola local', () => {
+    const r1: Remito = { id: '1', numero: 'R-1', marca: 'Marca A', importeCentavos: 500000, estado: 'pendiente' };
+    const r2: Remito = { id: '2', numero: 'R-2', marca: 'Marca B', importeCentavos: 300000, estado: 'pendiente' };
+
+    const visita: Visita = {
+      id: '1', orden: 1, estado: 'en_curso', cobrada: false,
+      comercio: { razonSocial: 'X', nombreFantasia: null, domicilio: 'Y', localidad: null, ventanaDesde: null, ventanaHasta: null, telefono: null },
+      remitos: [r1, r2],
+      importe: { totalCentavos: 800000, subtotalesPorMarca: [], remitosExcluidos: [], sinCobroEnDestino: false },
+    };
+
+    // Rechazamos r2 en cola local
+    const cola: Map<string, ItemCola> = new Map([
+      ['rechazo:2', {
+        tipo: 'rechazo',
+        visitaId: '1',
+        remitoId: '2',
+        cuerpo: { motivo: 'Mercadería dañada', timestamp: '2026-10-20T10:00:00.000Z' },
+        estado: 'pendiente',
+      }],
+    ]);
+
+    const importeActualizado = calcularImporteVisitaLocal(visita, cola);
+    assert.equal(importeActualizado.totalCentavos, 500000);
+    assert.deepEqual(importeActualizado.remitosExcluidos, ['R-2']);
+    assert.equal(importeActualizado.sinCobroEnDestino, false);
+
+    // Si también se rechaza r1, pasa a ser $0,00 sin cobro en destino
+    cola.set('rechazo:1', {
+      tipo: 'rechazo',
+      visitaId: '1',
+      remitoId: '1',
+      cuerpo: { motivo: 'Comercio cerrado', timestamp: '2026-10-20T10:05:00.000Z' },
+      estado: 'pendiente',
+    });
+
+    const importeCero = calcularImporteVisitaLocal(visita, cola);
+    assert.equal(importeCero.totalCentavos, 0);
+    assert.equal(importeCero.sinCobroEnDestino, true);
   });
 });

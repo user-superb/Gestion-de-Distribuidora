@@ -1,6 +1,6 @@
 // Cliente HTTP de la API móvil.
 import { ErrorApi, ErrorRed } from './errores';
-import type { CobroDto, EntregaDto, HojaDeRuta, Sesion } from './tipos';
+import type { CobroDto, EntregaDto, HojaDeRuta, ItemEntregaLote, RechazoDto, Sesion } from './tipos';
 
 // En el celular, "localhost" es el propio teléfono: hay que poner la IP de la PC en mobile/.env
 export const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001/api';
@@ -53,6 +53,20 @@ export function obtenerHojaDeRuta(token: string): Promise<HojaDeRuta> {
 /** HU #22: confirma la entrega de un remito (API de backend/src/routes/transportistaRoutes.ts). */
 export async function confirmarEntrega(token: string, remitoId: string, cuerpo: EntregaDto): Promise<void> {
   await pedir(`/transportista/remitos/${remitoId}/confirmar`, { method: 'POST', body: JSON.stringify(cuerpo) }, token);
+}
+
+/** HU: registra el rechazo de un remito (API de backend/src/routes/transportistaRoutes.ts). */
+export async function rechazarRemito(token: string, remitoId: string, cuerpo: RechazoDto): Promise<void> {
+  await pedir(`/transportista/remitos/${remitoId}/rechazar`, { method: 'POST', body: JSON.stringify(cuerpo) }, token);
+}
+
+/** HU #23: confirma la entrega masiva de remitos multimarca de toda la visita. */
+export async function confirmarTodaLaVisita(
+  token: string,
+  visitaId: string,
+  cuerpo: { timestamp: string; latitud: number; longitud: number; entregas: ItemEntregaLote[] }
+): Promise<void> {
+  await pedir(`/transportista/visitas/${visitaId}/confirmar-todo`, { method: 'POST', body: JSON.stringify(cuerpo) }, token);
 }
 
 export async function enviarCobro(token: string, visitaId: string, cuerpo: CobroDto): Promise<void> {
