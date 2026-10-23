@@ -6,6 +6,7 @@ export class ErrorApi extends Error {
     public detalles: Record<string, unknown> = {}
   ) {
     super(message);
+    this.name = 'ErrorApi';
   }
 }
 
@@ -13,5 +14,7 @@ export class ErrorApi extends Error {
 export class ErrorRed extends Error {
   constructor(message = 'Sin conexión con el servidor.') {
     super(message);
+    this.name = 'ErrorRed';
   }
 }
+

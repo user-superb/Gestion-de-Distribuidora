@@ -3,7 +3,7 @@ import { ActivityIndicator, Alert, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { useNetInfo } from '@react-native-community/netinfo';
-import { cerrarSesion, obtenerHojaDeRuta } from './src/api';
+import { cerrarSesion, leerApiUrlGuardada, obtenerHojaDeRuta } from './src/api';
 import { borrarHoja, colaOperaciones, guardarHoja, guardarSesion, leerSesion } from './src/almacenamiento';
 import { verificarParadaActiva } from './src/dominio/parada';
 import { estilos, marca } from './src/estilos';
@@ -26,7 +26,7 @@ export default function App() {
   const enLinea = red.isConnected === true && red.isInternetReachable !== false;
 
   useEffect(() => {
-    leerSesion().then((guardada) => {
+    Promise.all([leerSesion(), leerApiUrlGuardada()]).then(([guardada]) => {
       setSesion(guardada);
       setIniciando(false);
     });
