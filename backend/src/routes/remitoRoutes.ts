@@ -131,6 +131,9 @@ remitoRouter.delete('/hojas-de-ruta/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await remitoService.eliminarHojaDeRuta(id);
+    if (!result.success) {
+      return res.status(result.status || 409).json(result);
+    }
     res.json(result);
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

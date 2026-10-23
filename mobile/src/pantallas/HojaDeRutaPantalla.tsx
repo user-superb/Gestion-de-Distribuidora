@@ -175,53 +175,56 @@ export function HojaDeRutaPantalla({
         const estiloBadge = ESTILO_BADGE_ESTADO[parada.estadoOperativo];
 
         return (
-          <Pressable
-            style={estilos.tarjeta}
-            onPress={() => manejarApertura(parada)}
-            accessibilityRole="button"
-            accessibilityLabel={`Parada ${parada.orden} ${parada.comercio.razonSocial}, estado ${parada.estadoOperativo}`}
-          >
-            {/* Cabecera de la Parada: Secuencia, Nombre y Estado Operativo */}
-            <View style={estilos.fila}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                <View style={estilos.secuenciaBadge}>
-                  <Text style={estilos.secuenciaTexto}>#{parada.orden}</Text>
+          <View style={estilos.tarjeta}>
+            {/* Cabecera y Resumen clickeable para abrir la parada */}
+            <Pressable
+              onPress={() => manejarApertura(parada)}
+              accessibilityRole="button"
+              accessibilityLabel={`Parada ${parada.orden} ${parada.comercio.razonSocial}, estado ${parada.estadoOperativo}`}
+              style={{ gap: 6 }}
+            >
+              {/* Cabecera de la Parada: Secuencia, Nombre y Estado Operativo */}
+              <View style={estilos.fila}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                  <View style={estilos.secuenciaBadge}>
+                    <Text style={estilos.secuenciaTexto}>#{parada.orden}</Text>
+                  </View>
+                  <Text style={[estilos.texto, { fontWeight: '700', flex: 1 }]} numberOfLines={1}>
+                    {parada.comercio.nombreFantasia || parada.comercio.razonSocial}
+                  </Text>
                 </View>
-                <Text style={[estilos.texto, { fontWeight: '700', flex: 1 }]} numberOfLines={1}>
-                  {parada.comercio.nombreFantasia || parada.comercio.razonSocial}
-                </Text>
+
+                <View style={[estilos.badge, estiloBadge.contenedor]}>
+                  <Text style={[estilos.badgeTexto, estiloBadge.texto]}>{parada.estadoOperativo}</Text>
+                </View>
               </View>
 
-              <View style={[estilos.badge, estiloBadge.contenedor]}>
-                <Text style={[estilos.badgeTexto, estiloBadge.texto]}>{parada.estadoOperativo}</Text>
+              {/* Dirección y Localidad */}
+              <Text style={estilos.textoSuave}>
+                {parada.comercio.domicilio}
+                {parada.comercio.localidad ? `, ${parada.comercio.localidad}` : ''}
+              </Text>
+
+              {/* Resumen Consolidado de Carga */}
+              <View style={estilos.resumenCarga}>
+                <View style={estilos.resumenCargaFila}>
+                  <Text style={estilos.resumenCargaTexto}>
+                    📄 {parada.totalRemitos} remito{parada.totalRemitos !== 1 ? 's' : ''}
+                  </Text>
+                  <Text style={[estilos.texto, { fontWeight: '700' }]}>
+                    {parada.sinCobroEnDestino
+                      ? 'Sin cobro en destino'
+                      : formatearPesos(parada.totalImporteCentavos)}
+                  </Text>
+                </View>
+
+                {parada.marcas.length > 0 ? (
+                  <Text style={[estilos.resumenCargaTexto, { fontStyle: 'italic' }]}>
+                    🏷️ Marcas: {parada.marcas.join(', ')}
+                  </Text>
+                ) : null}
               </View>
-            </View>
-
-            {/* Dirección y Localidad */}
-            <Text style={estilos.textoSuave}>
-              {parada.comercio.domicilio}
-              {parada.comercio.localidad ? `, ${parada.comercio.localidad}` : ''}
-            </Text>
-
-            {/* Resumen Consolidado de Carga */}
-            <View style={estilos.resumenCarga}>
-              <View style={estilos.resumenCargaFila}>
-                <Text style={estilos.resumenCargaTexto}>
-                  📄 {parada.totalRemitos} remito{parada.totalRemitos !== 1 ? 's' : ''}
-                </Text>
-                <Text style={[estilos.texto, { fontWeight: '700' }]}>
-                  {parada.sinCobroEnDestino
-                    ? 'Sin cobro en destino'
-                    : formatearPesos(parada.totalImporteCentavos)}
-                </Text>
-              </View>
-
-              {parada.marcas.length > 0 ? (
-                <Text style={[estilos.resumenCargaTexto, { fontStyle: 'italic' }]}>
-                  🏷️ Marcas: {parada.marcas.join(', ')}
-                </Text>
-              ) : null}
-            </View>
+            </Pressable>
 
             {/* Botón para Desglosar Documentos Asociados */}
             <Pressable
@@ -279,7 +282,7 @@ export function HojaDeRutaPantalla({
                 <Text style={estilos.botonAccionTexto}>Ver detalle de parada →</Text>
               </Pressable>
             </View>
-          </Pressable>
+          </View>
         );
       }}
     />

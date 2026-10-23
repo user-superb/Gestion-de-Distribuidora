@@ -6,9 +6,67 @@
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   color-scheme: light;
   font-size: 17px;
+  --color-marca-naranja: #F4661B;
+  --color-marca-naranja-hover: #DE5510;
+  --color-marca-azul: #123C6B;
+  --color-marca-azul-hover: #0E2E52;
+  --color-marca-crema: #FFF6EC;
+  --color-marca-carbon: #1B1B1F;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
+  color: #1B1B1F;
+  background-color: #F8FAFC;
+}
+
+/* Clases oficiales RepartoYA - Definidas directamente para garantizar renderizado inmediato */
+.bg-marca-azul,
+.bg-reparto-azul {
+  background-color: #123C6B !important;
+}
+
+.text-marca-azul,
+.text-reparto-azul {
+  color: #123C6B !important;
+}
+
+.border-marca-azul,
+.border-reparto-azul {
+  border-color: #123C6B !important;
+}
+
+.bg-marca-naranja,
+.bg-reparto-naranja {
+  background-color: #F4661B !important;
+}
+
+.hover\:bg-marca-naranja-hover:hover,
+.hover\:bg-reparto-naranja-hover:hover {
+  background-color: #DE5510 !important;
+}
+
+.text-marca-naranja,
+.text-reparto-naranja {
+  color: #F4661B !important;
+}
+
+.border-marca-naranja,
+.border-reparto-naranja {
+  border-color: #F4661B !important;
+}
+
+.bg-marca-crema,
+.bg-reparto-crema {
+  background-color: #FFF6EC !important;
+}
+
+.text-marca-crema {
+  color: #FFF6EC !important;
+}
+
+.text-marca-carbon,
+.text-reparto-carbon {
+  color: #1B1B1F !important;
 }

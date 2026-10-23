@@ -36,7 +36,7 @@ export function useJornada(sesion: Sesion | null, enLinea: boolean, onSesionVenc
         }
         try {
           const hojaServidor = await obtenerHojaDeRuta(sesion.token);
-          if (esHojaOperativaVigente(hojaServidor)) {
+          if (hojaServidor && esHojaOperativaVigente(hojaServidor)) {
             setGuardada(await guardarHoja(hojaServidor));
             setError(null);
           } else {

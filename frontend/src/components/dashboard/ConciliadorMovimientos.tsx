@@ -193,9 +193,9 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Movimientos pendientes ({movimientosVisibles.length}) · Seleccionados: {movimientosSeleccionados.size}</h3>
           <div className="max-h-64 overflow-auto rounded border border-slate-200 divide-y divide-slate-100">
             {movimientosVisibles.length === 0 ? <p className="p-3 text-xs text-slate-500">No hay movimientos pendientes para esta fecha y cuenta.</p> : movimientosVisibles.map((item) => (
-              <label key={item.id} className={`flex cursor-pointer items-center justify-between gap-3 p-3 text-xs ${movimientosSeleccionados.has(item.id) ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
+              <label key={item.id} className={`flex cursor-pointer items-center justify-between gap-3 p-3 text-xs transition-colors ${movimientosSeleccionados.has(item.id) ? 'bg-marca-crema/70 border-l-4 border-marca-naranja' : 'hover:bg-slate-50'}`}>
                 <span className="flex min-w-0 items-center gap-2">
-                  <input type="checkbox" checked={movimientosSeleccionados.has(item.id)} onChange={() => toggleSeleccion(item.id, movimientosSeleccionados, setMovimientosSeleccionados)} />
+                  <input type="checkbox" checked={movimientosSeleccionados.has(item.id)} onChange={() => toggleSeleccion(item.id, movimientosSeleccionados, setMovimientosSeleccionados)} className="rounded text-marca-naranja focus:ring-marca-naranja" />
                   <span className="min-w-0">
                     <span className="block truncate font-semibold text-slate-800">{item.ordenante || 'Ordenante no informado'}</span>
                     <span className="text-slate-500">{new Date(item.fecha_hora).toLocaleString('es-AR')} · {item.cuenta}</span>
@@ -220,9 +220,9 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
           </div>
           <div className="max-h-64 overflow-auto rounded border border-slate-200 divide-y divide-slate-100">
             {remitosVisibles.length === 0 ? <p className="p-3 text-xs text-slate-500">No se registran remitos pendientes de cobro</p> : remitosVisibles.map((item) => (
-              <label key={item.id} className={`flex cursor-pointer items-center justify-between gap-3 p-3 text-xs ${remitosSeleccionados.has(item.id) ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
+              <label key={item.id} className={`flex cursor-pointer items-center justify-between gap-3 p-3 text-xs transition-colors ${remitosSeleccionados.has(item.id) ? 'bg-marca-crema/70 border-l-4 border-marca-naranja' : 'hover:bg-slate-50'}`}>
                 <span className="flex min-w-0 items-center gap-2">
-                  <input type="checkbox" aria-label={`Seleccionar remito ${item.numero}`} checked={remitosSeleccionados.has(item.id)} onChange={() => toggleSeleccion(item.id, remitosSeleccionados, setRemitosSeleccionados)} />
+                  <input type="checkbox" aria-label={`Seleccionar remito ${item.numero}`} checked={remitosSeleccionados.has(item.id)} onChange={() => toggleSeleccion(item.id, remitosSeleccionados, setRemitosSeleccionados)} className="rounded text-marca-naranja focus:ring-marca-naranja" />
                   <span className="min-w-0">
                     <span className="block truncate font-semibold text-slate-800">{item.numero} · {item.razon_social}</span>
                     <span className="text-slate-500">{item.marca} · {item.sucursal} · Entregado: {item.fecha_entrega ? new Date(item.fecha_entrega).toLocaleDateString('es-AR') : 'Sin fecha'}</span>
@@ -251,7 +251,7 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
             </label>
           )}
           <div className="flex justify-end">
-            <button type="button" onClick={() => void ejecutar()} disabled={cargando || (diferencia > 0n && !nota.trim())} className="rounded bg-blue-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+            <button type="button" onClick={() => void ejecutar()} disabled={cargando || (diferencia > 0n && !nota.trim())} className="rounded-md bg-marca-naranja hover:bg-marca-naranja-hover px-4 py-2 text-xs font-bold text-white shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50">
               {cargando ? 'Procesando…' : diferencia > 0n ? 'Derivar discrepancia' : 'Conciliar selección'}
             </button>
           </div>

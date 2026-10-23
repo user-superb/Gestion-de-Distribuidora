@@ -109,6 +109,8 @@ function setupMemoryDb() {
       localidad text,
       contacto text,
       telefono text,
+      ventana_desde time,
+      ventana_hasta time,
       activo boolean NOT NULL DEFAULT true,
       actualizado_en timestamp DEFAULT now()
     );

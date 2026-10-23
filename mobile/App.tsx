@@ -75,7 +75,11 @@ export default function App() {
     if (enLinea && sesion) {
       try {
         const hojaServidor = await obtenerHojaDeRuta(sesion.token);
-        await guardarHoja(hojaServidor);
+        if (hojaServidor) {
+          await guardarHoja(hojaServidor);
+        } else {
+          await borrarHoja();
+        }
         await jornada.recargar();
 
         const verificacion = verificarParadaActiva(parada, hojaServidor, jornada.cola);

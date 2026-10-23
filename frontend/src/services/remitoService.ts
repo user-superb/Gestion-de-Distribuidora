@@ -221,7 +221,31 @@ export const remitoService = {
       };
     }),
 
-  eliminarHojaDeRuta: (id: string): { success: boolean } => {
+  eliminarHojaDeRuta: (id: string): { success: boolean; error?: string } => {
+    const hoja = mockHojasDeRuta.find((h) => h.id === id) || (mockHojaDeRuta.id === id ? mockHojaDeRuta : null);
+    const visitasDeHoja = mockVisitas.filter((v) => v.hojaDeRutaId === id);
+    const tieneEntregas =
+      hoja?.estado === 'en_curso' ||
+      hoja?.estado === 'cerrada' ||
+      visitasDeHoja.some(
+        (v) =>
+          v.estado === 'en_curso' ||
+          v.estado === 'completada' ||
+          v.remitos.some(
+            (r) =>
+              r.estado === 'entregado' ||
+              r.estado === 'no_entregado' ||
+              r.estado === 'devuelto'
+          )
+      );
+
+    if (tieneEntregas) {
+      return {
+        success: false,
+        error: 'No se puede eliminar la hoja de ruta: ya fue despachada o contiene entregas realizadas.',
+      };
+    }
+
     mockVisitas = mockVisitas.map((v) =>
       v.hojaDeRutaId === id ? { ...v, hojaDeRutaId: null } : v
     );
@@ -382,6 +406,30 @@ export const remitoService = {
     }
 
     const hojaActual = idx !== -1 ? mockHojasDeRuta[idx] : mockHojaDeRuta;
+
+    const visitasDeHoja = mockVisitas.filter((v) => v.hojaDeRutaId === hojaDeRutaId);
+    const tieneEntregas =
+      hojaActual.estado === 'en_curso' ||
+      hojaActual.estado === 'cerrada' ||
+      visitasDeHoja.some(
+        (v) =>
+          v.estado === 'en_curso' ||
+          v.estado === 'completada' ||
+          v.remitos.some(
+            (r) =>
+              r.estado === 'entregado' ||
+              r.estado === 'no_entregado' ||
+              r.estado === 'devuelto'
+          )
+      );
+
+    if (tieneEntregas) {
+      return {
+        success: false,
+        error: 'No se puede modificar ni desasignar el transportista: la hoja de ruta ya fue despachada o cuenta con entregas realizadas.',
+        status: 409,
+      };
+    }
 
     // Desasignación si transportistaId es null o vacío
     if (!transportistaId) {
@@ -765,6 +813,10 @@ export const remitoService = {
       });
       if (res.ok) {
         return await res.json();
+      }
+      const data = await res.json().catch(() => null);
+      if (data?.error) {
+        return { success: false, error: data.error };
       }
     } catch {
       // Fallback

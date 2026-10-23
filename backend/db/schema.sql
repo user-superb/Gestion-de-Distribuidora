@@ -189,6 +189,9 @@ CREATE TABLE remito (
     numero              text        NOT NULL,
     fecha_emision       date,
     entregado_en        timestamptz,
+    entregado_por       bigint      REFERENCES usuario(id),
+    latitud             numeric(9,6),
+    longitud            numeric(9,6),
     importe_centavos    bigint      NOT NULL,
     estado              text        NOT NULL DEFAULT 'pendiente',
     motivo_no_entrega   text,
@@ -203,14 +206,6 @@ CREATE TABLE remito (
         CHECK (estado <> 'no_entregado' OR motivo_no_entrega IS NOT NULL)
 );
 
-ALTER TABLE remito ADD COLUMN IF NOT EXISTS entregado_en timestamptz;
-ALTER TABLE remito ADD COLUMN IF NOT EXISTS entregado_por bigint REFERENCES usuario(id);
-ALTER TABLE remito ADD COLUMN IF NOT EXISTS latitud numeric(9,6);
-ALTER TABLE remito ADD COLUMN IF NOT EXISTS longitud numeric(9,6);
-ALTER TABLE remito DROP CONSTRAINT IF EXISTS remito_estado_valido;
-ALTER TABLE remito ADD CONSTRAINT remito_estado_valido
-    CHECK (estado IN ('pendiente','en_ruta','entregado','no_entregado','anulado','devuelto'));
-
 CREATE OR REPLACE FUNCTION registrar_entrega_remito() RETURNS trigger AS $$
 BEGIN
     IF NEW.estado = 'entregado' THEN
@@ -224,10 +219,6 @@ DROP TRIGGER IF EXISTS remito_entrega_fecha ON remito;
 CREATE TRIGGER remito_entrega_fecha
     BEFORE INSERT OR UPDATE ON remito
     FOR EACH ROW EXECUTE FUNCTION registrar_entrega_remito();
-
-UPDATE remito r
-SET entregado_en = COALESCE((SELECT v.registrada_en FROM visita v WHERE v.id = r.visita_id), r.actualizado_en, now())
-WHERE r.estado = 'entregado' AND r.entregado_en IS NULL;
 
 CREATE INDEX remito_comercio_idx ON remito (comercio_id);
 CREATE INDEX remito_marca_idx    ON remito (marca_id);

@@ -226,6 +226,23 @@ describe('Historia de Usuario #15 - Asignar Fecha a la Hoja de Ruta', () => {
     expect(remitoService.getVisitas().filter((v) => !v.hojaDeRutaId).length).toBe(1);
     expect(remitoService.getVisitas().filter((v) => v.hojaDeRutaId === hoja2Id).length).toBe(1);
   });
+
+  it('BLOQUEO: No permite eliminar la hoja de ruta si ya fue despachada o cuenta con entregas realizadas', () => {
+    remitoService.agruparEnVisita(['rem-1']);
+    const prog = remitoService.asignarFechaHojaDeRuta('2026-10-25', '2026-10-20');
+    const hojaId = prog.hojaDeRuta!.id;
+
+    // Despachamos la hoja de ruta
+    remitoService.cambiarEstadoHojaDeRuta('en_curso', hojaId);
+
+    // Intentamos eliminarla
+    const res = remitoService.eliminarHojaDeRuta(hojaId);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/ya fue despachada o contiene entregas realizadas/i);
+
+    // La hoja debe seguir existiendo en el listado
+    expect(remitoService.getHojasDeRuta().some((h) => h.id === hojaId)).toBe(true);
+  });
 });
 
 describe('Historia de Usuario #14 - Asignar Hoja de Ruta a Transportista', () => {
@@ -300,6 +317,28 @@ describe('Historia de Usuario #14 - Asignar Hoja de Ruta a Transportista', () =>
     expect(desasig.success).toBe(true);
     expect(desasig.hojaDeRuta?.transportistaId).toBeNull();
     expect(desasig.hojaDeRuta?.transportistaNombre).toBeNull();
+  });
+
+  it('BLOQUEO: No permite desasignar ni modificar el transportista si la hoja ya fue despachada o cuenta con entregas', () => {
+    remitoService.agruparEnVisita(['rem-1']);
+    const prog = remitoService.asignarFechaHojaDeRuta('2026-10-25', '2026-10-20');
+    const hojaId = prog.hojaDeRuta!.id;
+    remitoService.asignarTransportistaHojaDeRuta(hojaId, '2');
+
+    // Despachamos la hoja de ruta
+    remitoService.cambiarEstadoHojaDeRuta('en_curso', hojaId);
+
+    // Intentamos desasignar
+    const desasig = remitoService.asignarTransportistaHojaDeRuta(hojaId, null);
+    expect(desasig.success).toBe(false);
+    expect(desasig.status).toBe(409);
+    expect(desasig.error).toMatch(/ya fue despachada o cuenta con entregas/i);
+
+    // Intentamos reasignar a otro chofer
+    const reasig = remitoService.asignarTransportistaHojaDeRuta(hojaId, '1');
+    expect(reasig.success).toBe(false);
+    expect(reasig.status).toBe(409);
+    expect(reasig.error).toMatch(/ya fue despachada o cuenta con entregas/i);
   });
 });
 

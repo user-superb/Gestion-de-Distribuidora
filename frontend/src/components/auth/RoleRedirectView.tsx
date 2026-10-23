@@ -20,6 +20,7 @@ import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { ConciliacionCentro } from '../dashboard/ConciliacionCentro';
 import { Configuracion } from '../dashboard/Configuracion';
 import { ProfileMenu } from './ProfileMenu';
+import { RepartoYaLogo } from '../common/RepartoYaLogo';
 
 interface RoleRedirectViewProps {
   session: UserSession;
@@ -144,12 +145,14 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
     ];
 
     return (
-      <div className="min-h-screen bg-slate-100">
-        <header className="bg-slate-900 text-white shadow-sm">
-          <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center gap-x-8 gap-y-3 px-4 py-3 sm:px-6">
-            <div className="flex shrink-0 items-center gap-2 text-xs font-bold tracking-[0.16em]">
-              <Package className="h-5 w-5 text-emerald-400" />
-              <span>DISTRIBUIDORA</span>
+      <div className="min-h-screen bg-[#F8FAFC]">
+        <header
+          className="bg-[#123C6B] bg-marca-azul text-white shadow-md border-b border-white/10"
+          style={{ backgroundColor: '#123C6B' }}
+        >
+          <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center gap-x-8 gap-y-3 px-4 py-2.5 sm:px-6">
+            <div className="flex shrink-0 items-center">
+              <RepartoYaLogo variant="admin" size="sm" />
             </div>
 
             <nav aria-label="Navegación principal" className="order-3 flex w-full gap-1 overflow-x-auto sm:order-2 sm:w-auto">
@@ -159,10 +162,10 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
                   href={path}
                   aria-current={seccion === id ? 'page' : undefined}
                   onClick={(event) => { event.preventDefault(); navigate(id); }}
-                  className={`flex shrink-0 items-center gap-2 border-b-2 px-3 py-2 text-sm transition-colors ${
+                  className={`flex shrink-0 items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
                     seccion === id
-                      ? 'border-emerald-400 text-white'
-                      : 'border-transparent text-slate-400 hover:border-slate-500 hover:text-white'
+                      ? 'border-marca-naranja text-white font-bold'
+                      : 'border-transparent text-slate-200 hover:border-marca-naranja/50 hover:text-white'
                   }`}
                 >
                   <Icon className="h-4 w-4" />
@@ -173,7 +176,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
                 { label: 'Efectivo', icon: Banknote },
                 { label: 'Reportes', icon: ChartNoAxesCombined },
               ].map(({ label, icon: Icon }) => (
-                <span key={label} aria-disabled="true" title="Módulo aún no disponible" className="flex shrink-0 cursor-not-allowed items-center gap-2 border-b-2 border-transparent px-3 py-2 text-sm text-slate-600">
+                <span key={label} aria-disabled="true" title="Módulo aún no disponible" className="flex shrink-0 cursor-not-allowed items-center gap-2 border-b-2 border-transparent px-3 py-2 text-sm text-slate-400">
                   <Icon className="h-4 w-4" />
                   {label}
                 </span>
@@ -181,8 +184,8 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
             </nav>
 
             <div className="ml-auto flex items-center gap-4 sm:order-3">
-              <div className="hidden items-center gap-2 text-xs text-slate-300 md:flex">
-                <Building2 className="h-4 w-4 text-slate-400" />
+              <div className="hidden items-center gap-2 text-xs text-marca-crema md:flex bg-white/10 px-3 py-1.5 rounded-full border border-white/15">
+                <Building2 className="h-4 w-4 text-marca-naranja" />
                 <span>{session.branch}</span>
               </div>
               <ProfileMenu session={session} onLogout={onLogout} />
@@ -192,10 +195,10 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
 
         <main className="mx-auto max-w-screen-2xl px-4 py-6 sm:px-6 lg:py-8">
           <div className="mb-5">
-            <h1 className="text-xl font-semibold text-slate-900">
+            <h1 className="text-2xl font-extrabold text-marca-azul">
               {seccion === 'hojas' ? 'Armado de hoja de ruta' : seccion === 'conciliacion' ? 'Conciliación de transferencias' : 'Configuración'}
             </h1>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm text-slate-600">
               {seccion === 'hojas'
                 ? 'Organizá los remitos y las visitas de reparto.'
                 : seccion === 'conciliacion' ? 'Imputá los movimientos de la cuenta a los remitos pendientes.' : 'Administrá usuarios, marcas, comercios, sucursales y permisos.'}
@@ -212,19 +215,16 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 selection:bg-slate-900 selection:text-white">
+    <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center p-4 selection:bg-marca-azul selection:text-white">
       <div
         className={`w-full ${
           isAdmin ? 'max-w-5xl' : 'max-w-2xl'
-        } bg-white border border-slate-200 rounded-md shadow-sm overflow-hidden`}
+        } bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden`}
       >
         {/* Cabecera institucional con Menú de Perfil (Escenario 1) */}
-        <div className="bg-slate-900 text-white px-6 py-3.5 flex items-center justify-between border-b border-slate-800">
+        <div className="bg-marca-azul text-white px-6 py-3.5 flex items-center justify-between border-b border-white/10">
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
-            <span className="text-sm font-semibold tracking-wide">
-              Gestión de Distribuidora
-            </span>
+            <RepartoYaLogo variant="admin" size="xs" />
           </div>
           <ProfileMenu session={session} onLogout={onLogout} />
         </div>

@@ -128,4 +128,21 @@ describe('Backend PostgreSQL - HU #15: Asignar Fecha a la Hoja de Ruta', () => {
     const vArmadoTrasEliminar = await db.query(`SELECT id FROM visita WHERE hoja_de_ruta_id IS NULL ORDER BY id ASC`);
     assert.equal(vArmadoTrasEliminar.rows.length, 2);
   });
+
+  it('BLOQUEO: No permite eliminar la hoja de ruta si ya fue despachada o cuenta con entregas realizadas', async () => {
+    // Insertamos visita y programamos hoja de ruta
+    await db.query(`INSERT INTO visita (hoja_de_ruta_id, comercio_id, orden) VALUES (NULL, 1, 1)`);
+    const r = await remitoService.asignarFechaHojaDeRuta('2026-10-28', undefined, '2026-10-20');
+    assert.equal(r.success, true);
+    const hojaId = r.hojaDeRuta!.id;
+
+    // Despachar la hoja (estado = 'en_curso')
+    await db.query(`UPDATE hoja_de_ruta SET estado = 'en_curso' WHERE id = $1`, [hojaId]);
+
+    // Intentar eliminarla
+    const delRes = await remitoService.eliminarHojaDeRuta(hojaId);
+    assert.equal(delRes.success, false);
+    assert.equal(delRes.status, 409);
+    assert.match(delRes.error || '', /ya fue despachada o contiene entregas realizadas/i);
+  });
 });

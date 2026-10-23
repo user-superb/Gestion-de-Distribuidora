@@ -17,7 +17,7 @@ export interface Remito {
   comercioId: string;
   marcaId: string;
   importe: number;
-  estado: 'PENDIENTE' | 'AGRUPADO';
+  estado: 'PENDIENTE' | 'AGRUPADO' | 'pendiente' | 'en_ruta' | 'entregado' | 'no_entregado' | 'anulado' | 'devuelto' | string;
 }
 
 export interface Visita {

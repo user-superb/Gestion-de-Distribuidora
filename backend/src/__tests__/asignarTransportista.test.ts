@@ -173,4 +173,21 @@ describe('Backend PostgreSQL - HU #14: Asignar Hoja de Ruta a Transportista', ()
     assert.equal(desasignar.hojaDeRuta?.transportistaId, null);
     assert.equal(desasignar.hojaDeRuta?.transportistaNombre, null);
   });
+
+  it('BLOQUEO: No permite desasignar ni modificar el transportista si la hoja ya fue despachada o cuenta con entregas', async () => {
+    // Hoja 300 tiene asignado a Carlos (10). La marcamos en ejecución (despachada)
+    await db.query(`UPDATE hoja_de_ruta SET estado = 'en_curso' WHERE id = 300`);
+
+    // Intentar desasignar
+    const intentoDesasignar = await remitoService.asignarTransportistaHojaDeRuta('300', null);
+    assert.equal(intentoDesasignar.success, false);
+    assert.equal(intentoDesasignar.status, 409);
+    assert.match(intentoDesasignar.error || '', /ya fue despachada o cuenta con entregas/i);
+
+    // Intentar reasignar a Mario (20)
+    const intentoReasignar = await remitoService.asignarTransportistaHojaDeRuta('300', '20');
+    assert.equal(intentoReasignar.success, false);
+    assert.equal(intentoReasignar.status, 409);
+    assert.match(intentoReasignar.error || '', /ya fue despachada o cuenta con entregas/i);
+  });
 });

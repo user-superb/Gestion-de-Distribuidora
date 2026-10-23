@@ -58,7 +58,7 @@ export const ConciliacionCentro: React.FC<{ session: UserSession }> = ({ session
     <section className="space-y-4">
       <nav aria-label="Vistas de conciliación" role="tablist" className="flex gap-1 overflow-x-auto border-b border-slate-200">
         {tabs.map((tab) => (
-          <button key={tab.id} role="tab" aria-selected={vista === tab.id} type="button" onClick={() => setVista(tab.id)} className={`shrink-0 border-b-2 px-3 py-2 text-sm ${vista === tab.id ? 'border-blue-700 font-semibold text-blue-800' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+          <button key={tab.id} role="tab" aria-selected={vista === tab.id} type="button" onClick={() => setVista(tab.id)} className={`shrink-0 border-b-2 px-3.5 py-2.5 text-sm transition-colors ${vista === tab.id ? 'border-marca-azul font-extrabold text-marca-azul' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
             {tab.label}
           </button>
         ))}
@@ -151,7 +151,7 @@ const SugerenciasImputacion: React.FC<{
                 <p className="mt-1 text-xs text-slate-600">{item.motivo}</p>
               </div>
               {item.tipo === 'exacta' ? (
-                <button type="button" onClick={() => void accept(item)} disabled={!!accepting} className="rounded bg-blue-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{accepting === item.movimiento_id ? 'Aceptando…' : 'Aceptar sugerencia'}</button>
+                <button type="button" onClick={() => void accept(item)} disabled={!!accepting} className="rounded-md bg-marca-naranja hover:bg-marca-naranja-hover px-3.5 py-2 text-xs font-bold text-white shadow-sm transition-colors disabled:opacity-50">{accepting === item.movimiento_id ? 'Aceptando…' : 'Aceptar sugerencia'}</button>
               ) : (
                 <button type="button" onClick={() => onReview(item)} className="rounded border border-amber-400 px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-50">Revisar manualmente</button>
               )}

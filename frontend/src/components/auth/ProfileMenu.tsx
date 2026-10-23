@@ -73,20 +73,20 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ session, onLogout }) =
         onClick={() => setIsOpen(!isOpen)}
         aria-expanded={isOpen}
         aria-haspopup="true"
-        className="flex items-center gap-2.5 p-1.5 pl-2.5 rounded-md bg-slate-800 hover:bg-slate-750 text-white border border-slate-700/80 transition-colors focus:outline-none focus:ring-2 focus:ring-slate-400"
+        className="flex items-center gap-2.5 p-1.5 pl-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-white border border-white/20 transition-colors focus:outline-none focus:ring-2 focus:ring-marca-naranja"
       >
-        <div className="w-6 h-6 rounded bg-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center font-mono">
+        <div className="w-6 h-6 rounded-md bg-marca-naranja text-white text-xs font-bold flex items-center justify-center font-mono shadow-sm">
           {initials || 'U'}
         </div>
         <div className="text-left hidden sm:block leading-tight">
-          <span className="text-xs font-medium block truncate max-w-[130px]">
+          <span className="text-xs font-semibold block truncate max-w-[130px]">
             {session.name}
           </span>
-          <span className="text-[10px] text-slate-400 block font-mono">
+          <span className="text-[10px] text-marca-crema/80 block font-mono">
             {session.role}
           </span>
         </div>
-        <ChevronDown className="w-3.5 h-3.5 text-slate-400 ml-0.5" />
+        <ChevronDown className="w-3.5 h-3.5 text-white/70 ml-0.5" />
       </button>
 
       {/* Menú desplegable institucional */}

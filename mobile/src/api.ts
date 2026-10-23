@@ -46,8 +46,16 @@ export async function cerrarSesion(token: string): Promise<void> {
   await pedir('/auth/logout', { method: 'POST', body: JSON.stringify({ reason: 'manual' }) }, token).catch(() => undefined);
 }
 
-export function obtenerHojaDeRuta(token: string): Promise<HojaDeRuta> {
-  return pedir<HojaDeRuta>('/movil/hoja-de-ruta', {}, token);
+export async function obtenerHojaDeRuta(token: string): Promise<HojaDeRuta | null> {
+  try {
+    const resultado = await pedir<HojaDeRuta | null>('/movil/hoja-de-ruta', {}, token);
+    return resultado || null;
+  } catch (error) {
+    if (error instanceof ErrorApi && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 /** HU #22: confirma la entrega de un remito (API de backend/src/routes/transportistaRoutes.ts). */

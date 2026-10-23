@@ -104,15 +104,15 @@ export const LoginForm: React.FC<LoginFormProps> = ({
     <div className="w-full max-w-md mx-auto space-y-6">
       {/* Header Institucional */}
       <div className="space-y-1.5">
-        <div className="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide uppercase text-slate-500">
-          <span className="w-2 h-2 rounded-full bg-slate-900 inline-block"></span>
-          Sistema de Gestión de Distribución
+        <div className="inline-flex items-center gap-1.5 text-xs font-bold tracking-wide uppercase text-marca-azul">
+          <span className="w-2 h-2 rounded-full bg-marca-naranja inline-block"></span>
+          RepartoYA · Acceso Corporativo
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+        <h1 className="text-2xl font-extrabold tracking-tight text-marca-azul">
           Iniciar sesión en la plataforma
         </h1>
-        <p className="text-sm text-slate-500">
-          Ingresa tus credenciales autorizadas para acceder a tu sucursal y funciones de rol.
+        <p className="text-sm text-slate-600">
+          Ingresá tus credenciales autorizadas para acceder a tu sucursal y funciones operativas.
         </p>
       </div>
 
@@ -159,7 +159,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
               value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
               placeholder="ej. admin@tutucas.com.ar o usuario"
-              className={`w-full pl-9 pr-3 py-2 text-sm text-slate-900 bg-white border rounded-md transition-colors placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed ${
+              className={`w-full pl-9 pr-3 py-2 text-sm text-slate-900 bg-white border rounded-lg transition-colors placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-marca-azul focus:border-marca-azul disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed ${
                 errorMessage && !isLocked ? 'border-red-300' : 'border-slate-300'
               }`}
             />
@@ -171,7 +171,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
           <div className="flex items-center justify-between">
             <label
               htmlFor="password"
-              className="block text-xs font-medium text-slate-700"
+              className="block text-xs font-semibold text-slate-700"
             >
               Contraseña
             </label>
@@ -179,7 +179,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
               type="button"
               disabled={isLoading || isLocked}
               onClick={() => setShowRecoveryModal(true)}
-              className="text-xs text-slate-500 hover:text-slate-900 transition-colors disabled:text-slate-400 disabled:cursor-not-allowed"
+              className="text-xs text-slate-500 hover:text-marca-azul transition-colors disabled:text-slate-400 disabled:cursor-not-allowed"
             >
               ¿Olvidó su clave?
             </button>
@@ -198,7 +198,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••••••"
-              className={`w-full pl-9 pr-10 py-2 text-sm text-slate-900 bg-white border rounded-md transition-colors placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed ${
+              className={`w-full pl-9 pr-10 py-2 text-sm text-slate-900 bg-white border rounded-lg transition-colors placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-marca-azul focus:border-marca-azul disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed ${
                 errorMessage && !isLocked ? 'border-red-300' : 'border-slate-300'
               }`}
             />
@@ -219,12 +219,16 @@ export const LoginForm: React.FC<LoginFormProps> = ({
           </div>
         </div>
 
-        {/* Botón de Submit Principal */}
+        {/* Botón de Submit Principal (Naranja YA #F4661B) */}
         <div className="pt-2">
           <button
             type="submit"
             disabled={isLoading || isLocked || !identifier || !password}
-            className="w-full py-2.5 px-4 bg-slate-900 text-white rounded-md text-sm font-medium hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 transition-colors flex items-center justify-center gap-2 shadow-sm disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed"
+            style={{
+              backgroundColor: !isLoading && !isLocked && identifier && password ? '#F4661B' : '#CBD5E1',
+              color: !isLoading && !isLocked && identifier && password ? '#FFFFFF' : '#64748B',
+            }}
+            className="w-full py-2.5 px-4 bg-[#F4661B] text-white rounded-lg text-sm font-bold hover:bg-[#DE5510] focus:outline-none focus:ring-2 focus:ring-[#F4661B] focus:ring-offset-2 transition-all flex items-center justify-center gap-2 shadow-sm disabled:cursor-not-allowed cursor-pointer"
           >
             {isLoading ? (
               <>

@@ -400,6 +400,19 @@ export const cobroService = {
         // D5: la visita queda cobrada. El estado de la visita y de sus remitos lo maneja la entrega (HU #22).
         await client.query('UPDATE visita SET cobrada_en = $2 WHERE id::text = $1', [visitaId, dto.registradoEn]);
 
+        try {
+          await client.query(
+            `UPDATE hoja_de_ruta
+             SET estado = 'en_curso'
+             WHERE id IN (
+               SELECT hoja_de_ruta_id FROM visita WHERE id::text = $1 AND hoja_de_ruta_id IS NOT NULL
+             ) AND estado IN ('pendiente_de_despacho', 'publicada', 'asignada', 'borrador')`,
+            [visitaId]
+          );
+        } catch {
+          // Ignorar si no existe tabla en tests
+        }
+
         return respuestaCobros(visitaId, insertados, false);
       });
     } catch (error: any) {

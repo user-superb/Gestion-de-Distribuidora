@@ -71,6 +71,23 @@ if (process.env.NODE_ENV !== 'test') {
         await db.query('ALTER TABLE hoja_de_ruta DROP CONSTRAINT IF EXISTS hoja_unica_por_transportista_y_fecha;');
         await db.query('ALTER TABLE usuario ADD COLUMN IF NOT EXISTS dispositivo_conectado boolean NOT NULL DEFAULT true;');
         await db.query('ALTER TABLE visita ADD COLUMN IF NOT EXISTS sincronizacion_pendiente boolean NOT NULL DEFAULT false;');
+        await db.query('ALTER TABLE visita ADD COLUMN IF NOT EXISTS cobrada_en timestamptz;');
+        await db.query('ALTER TABLE cobro ADD COLUMN IF NOT EXISTS referencia_transferencia text;');
+        await db.query('ALTER TABLE remito ADD COLUMN IF NOT EXISTS entregado_por bigint REFERENCES usuario(id);');
+        await db.query('ALTER TABLE remito ADD COLUMN IF NOT EXISTS latitud numeric(9,6);');
+        await db.query('ALTER TABLE remito ADD COLUMN IF NOT EXISTS longitud numeric(9,6);');
+        await db.query(`
+          UPDATE hoja_de_ruta
+          SET estado = 'en_curso'
+          WHERE estado IN ('pendiente_de_despacho', 'publicada', 'asignada', 'borrador')
+            AND id IN (
+              SELECT DISTINCT v.hoja_de_ruta_id
+              FROM visita v
+              JOIN remito r ON r.visita_id = v.id
+              WHERE v.hoja_de_ruta_id IS NOT NULL
+                AND (r.estado = 'entregado' OR r.estado = 'no_entregado' OR v.estado = 'completada' OR v.estado = 'en_curso')
+            );
+        `);
       } catch (e: any) {
         console.warn('⚠️  Aviso de sincronización DDL al inicio:', e.message);
       }

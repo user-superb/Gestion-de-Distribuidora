@@ -36,7 +36,7 @@ movilRouter.get('/hoja-de-ruta', async (req, res) => {
   try {
     const hoja = await cobroService.getHojaDelDia(getUsuarioId(req), fecha);
     if (!hoja) {
-      return res.status(404).json({ error: 'SIN_HOJA', message: 'No tenés una hoja de ruta publicada para esta fecha.' });
+      return res.json(null);
     }
     return res.json(hoja);
   } catch (error) {
