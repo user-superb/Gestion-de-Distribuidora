@@ -235,7 +235,10 @@ function setupMemoryDb() {
             r.marca_id,
             r.importe_centavos,
             COALESCE(SUM(i.importe_centavos), 0) AS imputado_centavos,
-            r.importe_centavos - COALESCE(SUM(i.importe_centavos), 0) AS saldo_centavos,
+            CASE
+                WHEN SUM(i.importe_centavos) IS NULL OR SUM(i.importe_centavos) = 0 THEN r.importe_centavos
+                ELSE r.importe_centavos - SUM(i.importe_centavos)
+            END AS saldo_centavos,
             CASE
                 WHEN r.importe_centavos = COALESCE(SUM(i.importe_centavos), 0) THEN 'saldado'
                 WHEN COALESCE(SUM(i.importe_centavos), 0) > 0 THEN 'parcial'
@@ -342,8 +345,9 @@ export const db = {
     return activePool;
   },
 
-  setPool(newPool: pg.Pool) {
+  setPool(newPool: pg.Pool, isMem = true) {
     activePool = newPool;
+    isMemoryFallback = isMem;
   },
 
   async checkConnection(): Promise<boolean> {

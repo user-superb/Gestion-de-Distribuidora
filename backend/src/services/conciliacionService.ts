@@ -73,6 +73,10 @@ function parsearIds(value: unknown, entidad: string): string[] {
   return ids;
 }
 
+function marcadores(cantidad: number, desde = 1): string {
+  return Array.from({ length: cantidad }, (_, i) => `$${i + desde}`).join(', ');
+}
+
 async function validarSeleccion(
   client: PoolClient,
   movimientoIds: string[],
@@ -80,7 +84,8 @@ async function validarSeleccion(
 ) {
   const movimientoRes = await client.query(
     `SELECT mb.id::text AS id, mb.cuenta_id::text AS cuenta_id,
-            (mb.importe_centavos - COALESCE(i.imputado_centavos, 0))::text AS importe_disponible_centavos,
+            mb.importe_centavos::text AS total_centavos,
+            COALESCE(i.imputado_centavos, 0)::text AS imputado_centavos,
             mb.estado, mb.ordenante, mb.ordenante_cuit, mb.fecha_hora,
             cr.sucursal_id
      FROM movimiento_bancario mb
@@ -89,10 +94,10 @@ async function validarSeleccion(
        SELECT movimiento_bancario_id, SUM(importe_centavos) AS imputado_centavos
        FROM imputacion WHERE movimiento_bancario_id IS NOT NULL GROUP BY movimiento_bancario_id
      ) i ON i.movimiento_bancario_id = mb.id
-     WHERE mb.id = ANY($1::bigint[])
+     WHERE mb.id IN (${marcadores(movimientoIds.length)})
      ORDER BY mb.id
-     FOR UPDATE OF mb`,
-    [movimientoIds]
+     FOR UPDATE`,
+    movimientoIds
   );
   if (movimientoRes.rowCount !== movimientoIds.length) {
     const encontrados = new Set(movimientoRes.rows.map((row) => String(row.id)));
@@ -100,7 +105,13 @@ async function validarSeleccion(
       movimientosNoElegibles: movimientoIds.filter((id) => !encontrados.has(id)),
     });
   }
-  const movimientosPorId = new Map(movimientoRes.rows.map((item) => [String(item.id), item]));
+  const movimientosPorId = new Map(movimientoRes.rows.map((item) => [
+    String(item.id),
+    {
+      ...item,
+      importe_disponible_centavos: (BigInt(item.total_centavos) - BigInt(item.imputado_centavos)).toString(),
+    }
+  ]));
   const movimientos = movimientoIds.map((id) => movimientosPorId.get(id)!);
   const noPendientes = movimientos.filter((item) => !['sin_imputar', 'parcial'].includes(item.estado) || BigInt(item.importe_disponible_centavos) <= 0n);
   if (noPendientes.length) {
@@ -113,8 +124,8 @@ async function validarSeleccion(
   }
 
   const remitosBloqueados = await client.query(
-    'SELECT id FROM remito WHERE id = ANY($1::bigint[]) ORDER BY id FOR UPDATE',
-    [remitoIds]
+    `SELECT id FROM remito WHERE id IN (${marcadores(remitoIds.length)}) ORDER BY id FOR UPDATE`,
+    remitoIds
   );
   if (remitosBloqueados.rowCount !== remitoIds.length) {
     const encontrados = new Set(remitosBloqueados.rows.map((row) => String(row.id)));
@@ -132,9 +143,9 @@ async function validarSeleccion(
      JOIN comercio c ON c.id = r.comercio_id
      LEFT JOIN visita v ON v.id = r.visita_id
      JOIN remito_saldo rs ON rs.remito_id = r.id
-     WHERE r.id = ANY($1::bigint[])
+     WHERE r.id IN (${marcadores(remitoIds.length)})
      ORDER BY r.id`,
-    [remitoIds]
+    remitoIds
   );
   const remitosPorId = new Map(remitosRes.rows.map((item) => [String(item.id), item]));
   const remitos = remitoIds.map((id) => remitosPorId.get(id)!);
@@ -225,7 +236,8 @@ export const conciliacionService = {
     }
     const result = await db.query(
       `SELECT mb.id::text AS id, mb.fecha_hora, mb.ordenante,
-              (mb.importe_centavos - COALESCE(i.imputado_centavos, 0))::text AS importe_centavos,
+              mb.importe_centavos::text AS total_centavos,
+              COALESCE(i.imputado_centavos, 0)::text AS imputado_centavos,
               mb.cuenta_id::text AS cuenta_id, cr.alias AS cuenta
        FROM movimiento_bancario mb
        JOIN cuenta_recepcion cr ON cr.id = mb.cuenta_id
@@ -238,14 +250,22 @@ export const conciliacionService = {
        ORDER BY mb.fecha_hora DESC, mb.id DESC`,
       params
     );
-    return result.rows;
+    return result.rows.map((row) => ({
+      id: row.id,
+      fecha_hora: row.fecha_hora,
+      ordenante: row.ordenante,
+      importe_centavos: (BigInt(row.total_centavos) - BigInt(row.imputado_centavos)).toString(),
+      cuenta_id: row.cuenta_id,
+      cuenta: row.cuenta,
+    }));
   },
 
   async getSugerencias() {
     const [movimientosRes, remitosRes] = await Promise.all([
       db.query(
         `SELECT mb.id::text AS movimiento_id, mb.fecha_hora, mb.ordenante, mb.ordenante_cuit,
-                (mb.importe_centavos - COALESCE(i.imputado_centavos, 0))::text AS importe_disponible_centavos,
+                mb.importe_centavos::text AS total_centavos,
+                COALESCE(i.imputado_centavos, 0)::text AS imputado_centavos,
                 mb.cuenta_id::text AS cuenta_id, cr.alias AS cuenta, cr.sucursal_id::text AS sucursal_id
          FROM movimiento_bancario mb
          JOIN cuenta_recepcion cr ON cr.id = mb.cuenta_id AND cr.activa = true
@@ -253,12 +273,10 @@ export const conciliacionService = {
            SELECT movimiento_bancario_id, SUM(importe_centavos) AS imputado_centavos
            FROM imputacion WHERE movimiento_bancario_id IS NOT NULL GROUP BY movimiento_bancario_id
          ) i ON i.movimiento_bancario_id = mb.id
+         LEFT JOIN discrepancia_conciliacion dc ON ${db.isMemory() ? 'dc.movimiento_id = mb.id' : '(dc.movimiento_id = mb.id OR mb.id = ANY(dc.movimiento_ids))'} AND dc.estado = 'pendiente'
          WHERE mb.estado IN ('sin_imputar', 'parcial')
            AND mb.importe_centavos > COALESCE(i.imputado_centavos, 0)
-           AND NOT EXISTS (
-             SELECT 1 FROM discrepancia_conciliacion dc
-             WHERE dc.estado = 'pendiente' AND mb.id = ANY(dc.movimiento_ids)
-           )
+           AND dc.id IS NULL
          ORDER BY mb.fecha_hora DESC, mb.id DESC`
       ),
       db.query(
@@ -287,7 +305,11 @@ export const conciliacionService = {
     }
 
     const sugerencias: any[] = [];
-    for (const movimiento of movimientosRes.rows) {
+    const movimientos = movimientosRes.rows.map((row) => ({
+      ...row,
+      importe_disponible_centavos: (BigInt(row.total_centavos) - BigInt(row.imputado_centavos)).toString(),
+    }));
+    for (const movimiento of movimientos) {
       const fechaMovimiento = new Date(movimiento.fecha_hora).getTime();
       const remitos = remitosPorSucursal.get(String(movimiento.sucursal_id)) || [];
       for (const remito of remitos) {
@@ -311,7 +333,8 @@ export const conciliacionService = {
     const cutoff = new Date(Date.now() - HORAS_PARA_HUERFANO * 3_600_000);
     const result = await db.query(
       `SELECT mb.id::text AS id, mb.fecha_hora, mb.ordenante,
-              (mb.importe_centavos - COALESCE(i.imputado_centavos, 0))::text AS importe_centavos,
+              mb.importe_centavos::text AS total_centavos,
+              COALESCE(i.imputado_centavos, 0)::text AS imputado_centavos,
               mb.cuenta_id::text AS cuenta_id, cr.alias AS cuenta,
               cr.sucursal_id::text AS sucursal_id, s.nombre AS sucursal
        FROM movimiento_bancario mb
@@ -321,13 +344,11 @@ export const conciliacionService = {
          SELECT movimiento_bancario_id, SUM(importe_centavos) AS imputado_centavos
          FROM imputacion WHERE movimiento_bancario_id IS NOT NULL GROUP BY movimiento_bancario_id
        ) i ON i.movimiento_bancario_id = mb.id
+       LEFT JOIN discrepancia_conciliacion dc ON ${db.isMemory() ? 'dc.movimiento_id = mb.id' : '(dc.movimiento_id = mb.id OR mb.id = ANY(dc.movimiento_ids))'} AND dc.estado = 'pendiente'
        WHERE mb.estado IN ('sin_imputar', 'parcial')
          AND mb.importe_centavos > COALESCE(i.imputado_centavos, 0)
          AND mb.fecha_hora <= $1
-         AND NOT EXISTS (
-           SELECT 1 FROM discrepancia_conciliacion dc
-           WHERE dc.estado = 'pendiente' AND mb.id = ANY(dc.movimiento_ids)
-         )
+         AND dc.id IS NULL
        ORDER BY mb.fecha_hora DESC, mb.id DESC`,
       [cutoff]
     );
@@ -337,14 +358,18 @@ export const conciliacionService = {
       return (!filters.sucursalId || item.sucursal_id === filters.sucursalId) &&
         (!filters.cuentaId || item.cuenta_id === filters.cuentaId) &&
         (!filters.desde || fecha >= filters.desde) && (!filters.hasta || fecha <= filters.hasta);
-    }).map((item) => ({ ...item, antiguedad_horas: Math.floor((Date.now() - new Date(item.fecha_hora).getTime()) / 3_600_000) }));
+    }).map((item) => ({
+      ...item,
+      importe_centavos: (BigInt(item.total_centavos) - BigInt(item.imputado_centavos)).toString(),
+      antiguedad_horas: Math.floor((Date.now() - new Date(item.fecha_hora).getTime()) / 3_600_000)
+    }));
     return { horasUmbral: HORAS_PARA_HUERFANO, movimientos };
   },
 
   async getRemitosPendientes() {
     const result = await db.query(
       `SELECT r.id::text AS id, r.numero, r.estado,
-              COALESCE(r.entregado_en, v.registrada_en)::text AS fecha_entrega,
+              COALESCE(r.entregado_en, v.registrada_en) AS fecha_entrega,
               c.id::text AS comercio_id, c.razon_social,
               m.nombre AS marca, rs.importe_centavos::text AS importe_centavos,
               rs.saldo_centavos::text AS saldo_centavos,
@@ -438,8 +463,8 @@ export const conciliacionService = {
       }
 
       await client.query(
-        `UPDATE movimiento_bancario SET estado = 'imputado' WHERE id = ANY($1::bigint[])`,
-        [movimientoIds]
+        `UPDATE movimiento_bancario SET estado = 'imputado' WHERE id IN (${marcadores(movimientoIds.length)})`,
+        movimientoIds
       );
       await client.query(
         `UPDATE discrepancia_conciliacion SET estado = 'resuelta'
