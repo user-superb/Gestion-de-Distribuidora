@@ -26,6 +26,7 @@ export interface RemitoVisita {
   marca: string;
   importeCentavos: number;
   estado: string;
+  motivoNoEntrega?: string | null;
 }
 
 export interface ImporteVisita {
@@ -193,7 +194,7 @@ async function enTransaccion<T>(action: (client: PoolClient) => Promise<T>): Pro
 
 async function getRemitosVisita(client: { query: typeof db.query }, visitaId: string): Promise<RemitoVisita[]> {
   const result = await client.query(
-    `SELECT r.id::text AS id, r.numero, m.nombre AS marca, r.importe_centavos, r.estado
+    `SELECT r.id::text AS id, r.numero, m.nombre AS marca, r.importe_centavos, r.estado, r.motivo_no_entrega
      FROM remito r
      JOIN marca m ON m.id = r.marca_id
      WHERE r.visita_id::text = $1
@@ -206,6 +207,7 @@ async function getRemitosVisita(client: { query: typeof db.query }, visitaId: st
     marca: row.marca,
     importeCentavos: Number(row.importe_centavos),
     estado: row.estado,
+    motivoNoEntrega: row.motivo_no_entrega ?? null, // HU #24: la app muestra el motivo del rechazo
   }));
 }
 

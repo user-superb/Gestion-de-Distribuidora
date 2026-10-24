@@ -1,12 +1,16 @@
+// Hoja de ruta del día: paradas en el orden planificado (HU #20).
+// Correcciones del cliente (24/10): dos pantallas "Por entregar" / "Entregadas", botón Actualizar
+// y sin el desglose de remitos en la lista (los remitos se ven al entrar a la parada).
 import { useMemo, useState } from 'react';
-import { FlatList, Image, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Image, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import type { HojaGuardada } from '../almacenamiento';
 import { Aviso } from '../componentes/Aviso';
 import { formatearPesos } from '../dominio/dinero';
 import type { ColaPorClave } from '../dominio/estadoVisita';
+import { faltaCobrar, separarParadas } from '../dominio/organizacion';
 import { consolidarParadas } from '../dominio/parada';
 import { colores, estilos } from '../estilos';
-import type { EstadoOperativoParada, ParadaConsolidada, Visita } from '../tipos';
+import type { EstadoOperativoParada, ParadaConsolidada } from '../tipos';
 
 interface Props {
   guardada: HojaGuardada | null;
@@ -17,171 +21,118 @@ interface Props {
   mensaje: string | null;
   onRecargar: () => void;
   onAbrirParada: (parada: ParadaConsolidada) => void;
-  onAbrirVisita?: (visita: Visita) => void;
   onCerrarSesion: () => void;
 }
 
-const ESTILO_BADGE_ESTADO: Record<
-  EstadoOperativoParada,
-  { contenedor: any; texto: any }
-> = {
+type Pestana = 'porEntregar' | 'entregadas';
+
+const ESTILO_BADGE_ESTADO: Record<EstadoOperativoParada, { contenedor: any; texto: any }> = {
   Pendiente: { contenedor: estilos.badgePendiente, texto: estilos.badgePendienteTexto },
   'En curso': { contenedor: estilos.badgeEnCurso, texto: estilos.badgeEnCursoTexto },
   Entregado: { contenedor: estilos.badgeEntregado, texto: estilos.badgeEntregadoTexto },
   Rechazado: { contenedor: estilos.badgeRechazado, texto: estilos.badgeRechazadoTexto },
 };
 
-export function HojaDeRutaPantalla({
-  guardada,
-  cola,
-  error,
-  cargando,
-  enLinea,
-  mensaje,
-  onRecargar,
-  onAbrirParada,
-  onAbrirVisita,
-  onCerrarSesion,
-}: Props) {
+export function HojaDeRutaPantalla({ guardada, cola, error, cargando, enLinea, mensaje, onRecargar, onAbrirParada, onCerrarSesion }: Props) {
   const hoja = guardada?.hoja;
   const sinSincronizar = [...cola.values()].filter((item) => item.estado === 'pendiente').length;
+  const [pestana, setPestana] = useState<Pestana>('porEntregar');
 
-  const [desglosadas, setDesglosadas] = useState<Record<string, boolean>>({});
+  const paradas = useMemo(() => consolidarParadas(hoja?.visitas || [], cola), [hoja?.visitas, cola]);
+  const { porEntregar, entregadas } = useMemo(() => separarParadas(paradas, cola), [paradas, cola]);
+  const lista = pestana === 'porEntregar' ? porEntregar : entregadas;
 
-  const manejarApertura = (parada: ParadaConsolidada) => {
-    if (onAbrirParada) {
-      onAbrirParada(parada);
-    } else if (onAbrirVisita) {
-      onAbrirVisita(parada.visitaPrincipal);
-    }
-  };
+  const encabezado = (
+    <View style={{ gap: 10 }}>
+      <View style={estilos.fila}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 }}>
+          <Image source={require('../../assets/marca/isotipo.png')} style={{ width: 56, height: 28 }} resizeMode="contain" accessibilityLabel="RepartoYA" />
+          <Text style={estilos.titulo}>Hoja de ruta</Text>
+        </View>
+        <Pressable onPress={onCerrarSesion} accessibilityRole="button" hitSlop={12}>
+          <Text style={estilos.botonSecundarioTexto}>Salir</Text>
+        </Pressable>
+      </View>
 
-  const paradas = useMemo(() => {
-    return consolidarParadas(hoja?.visitas || [], cola);
-  }, [hoja?.visitas, cola]);
+      {hoja ? (
+        <Text style={estilos.subtitulo}>
+          {hoja.fechaReparto.split('-').reverse().join('/')} · {hoja.sucursal}
+          {hoja.patente ? ` · ${hoja.patente}` : ''}
+        </Text>
+      ) : null}
 
-  const toggleDesglose = (paradaId: string) => {
-    setDesglosadas((prev) => ({
-      ...prev,
-      [paradaId]: !prev[paradaId],
-    }));
-  };
+      {/* Corrección 8: botón visible para actualizar (además de deslizar hacia abajo) */}
+      <Pressable
+        style={[estilos.botonSecundario, { paddingVertical: 10, flexDirection: 'row', gap: 8 }, cargando && { borderColor: colores.deshabilitado }]}
+        onPress={onRecargar}
+        disabled={cargando}
+        accessibilityRole="button"
+        accessibilityLabel="Actualizar hoja de ruta"
+      >
+        {cargando ? <ActivityIndicator color={colores.enlace} /> : null}
+        <Text style={estilos.botonSecundarioTexto}>{cargando ? 'Actualizando…' : '↻ Actualizar'}</Text>
+      </Pressable>
 
-  // ESCENARIO 2: Ausencia de rutas asignadas para la fecha
+      {!enLinea ? (
+        <Aviso tono="info">
+          Sin conexión. Podés seguir operando: se sincroniza solo al recuperar la señal.
+          {guardada
+            ? ` Datos guardados ${new Date(guardada.descargadaEn).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}.`
+            : ''}
+        </Aviso>
+      ) : null}
+      {sinSincronizar > 0 ? <Aviso tono="info">{sinSincronizar} operación(es) pendientes de sincronizar.</Aviso> : null}
+      {mensaje ? <Aviso tono="ok">{mensaje}</Aviso> : null}
+      {error ? <Aviso tono="error">{error}</Aviso> : null}
+
+      {/* Corrección 7: dos pantallas, por entregar y entregadas */}
+      {paradas.length > 0 ? (
+        <View style={{ flexDirection: 'row', gap: 8 }} accessibilityRole="tablist">
+          <BotonPestana texto={`Por entregar (${porEntregar.length})`} activa={pestana === 'porEntregar'} onPress={() => setPestana('porEntregar')} />
+          <BotonPestana texto={`Entregadas (${entregadas.length})`} activa={pestana === 'entregadas'} onPress={() => setPestana('entregadas')} />
+        </View>
+      ) : null}
+    </View>
+  );
+
+  // HU #20 ESCENARIO 2: sin rutas asignadas para la fecha
   if (!cargando && (!hoja || paradas.length === 0)) {
     return (
-      <ScrollView
-        contentContainerStyle={[estilos.contenido, { flexGrow: 1 }]}
-        refreshControl={<RefreshControl refreshing={cargando} onRefresh={onRecargar} />}
-      >
-        <View style={estilos.fila}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Image
-              source={require('../../assets/marca/isotipo.png')}
-              style={{ width: 64, height: 32 }}
-              resizeMode="contain"
-              accessibilityLabel="RepartoYA"
-            />
-            <Text style={estilos.titulo}>Hoja de ruta</Text>
-          </View>
-          <Pressable onPress={onCerrarSesion} accessibilityRole="button" hitSlop={12}>
-            <Text style={estilos.botonSecundarioTexto}>Salir</Text>
-          </Pressable>
-        </View>
-
-        {!enLinea ? (
-          <Aviso tono="info">
-            Sin conexión. Podés reintentar actualizar cuando recuperes la señal.
-          </Aviso>
-        ) : null}
-
-        {sinSincronizar > 0 ? (
-          <Aviso tono="info">{sinSincronizar} entrega(s) o cobro(s) pendientes de sincronizar.</Aviso>
-        ) : null}
-
-        {mensaje ? <Aviso tono="ok">{mensaje}</Aviso> : null}
-        {error ? <Aviso tono="error">{error}</Aviso> : null}
-
+      <ScrollView contentContainerStyle={[estilos.contenido, { flexGrow: 1 }]} refreshControl={<RefreshControl refreshing={cargando} onRefresh={onRecargar} />}>
+        {encabezado}
         <View style={estilos.contenedorSinActividad} testID="pantalla-sin-actividad">
           <View style={estilos.tarjetaSinActividad} accessibilityLabel="Sin actividad programada">
             <Text style={estilos.iconoSinActividad}>📋</Text>
             <Text style={estilos.tituloSinActividad}>Sin actividad programada</Text>
-            <Text style={estilos.subtituloSinActividad}>
-              No tenés hojas de ruta asignadas o en curso para la fecha operativa actual.
-            </Text>
-            <Pressable
-              style={estilos.botonRecargar}
-              onPress={onRecargar}
-              accessibilityRole="button"
-              accessibilityLabel="Actualizar hoja de ruta"
-            >
-              <Text style={estilos.botonRecargarTexto}>Actualizar</Text>
-            </Pressable>
+            <Text style={estilos.subtituloSinActividad}>No tenés hojas de ruta asignadas o en curso para la fecha operativa actual.</Text>
           </View>
         </View>
       </ScrollView>
     );
   }
 
-  // ESCENARIO 1: Visualización correcta con paradas ordenadas según secuencia planificada
   return (
     <FlatList
       contentContainerStyle={estilos.contenido}
-      data={paradas}
+      data={lista}
       keyExtractor={(parada) => parada.id}
       refreshControl={<RefreshControl refreshing={cargando} onRefresh={onRecargar} />}
-      ListHeaderComponent={
-        <View style={{ gap: 10 }}>
-          <View style={estilos.fila}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <Image
-                source={require('../../assets/marca/isotipo.png')}
-                style={{ width: 64, height: 32 }}
-                resizeMode="contain"
-                accessibilityLabel="RepartoYA"
-              />
-              <Text style={estilos.titulo}>Hoja de ruta</Text>
-            </View>
-            <Pressable onPress={onCerrarSesion} accessibilityRole="button" hitSlop={12}>
-              <Text style={estilos.botonSecundarioTexto}>Salir</Text>
-            </Pressable>
-          </View>
-          {hoja ? (
-            <Text style={estilos.subtitulo}>
-              {hoja.fechaReparto.split('-').reverse().join('/')} · {hoja.sucursal}
-              {hoja.patente ? ` · ${hoja.patente}` : ''}
-            </Text>
-          ) : null}
-          {!enLinea ? (
-            <Aviso tono="info">
-              Sin conexión. Podés seguir operando: se sincroniza solo al recuperar la señal.
-              {guardada
-                ? ` Datos guardados ${new Date(guardada.descargadaEn).toLocaleTimeString('es-AR', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}.`
-                : ''}
-            </Aviso>
-          ) : null}
-          {sinSincronizar > 0 ? (
-            <Aviso tono="info">{sinSincronizar} entrega(s) o cobro(s) pendientes de sincronizar.</Aviso>
-          ) : null}
-          {mensaje ? <Aviso tono="ok">{mensaje}</Aviso> : null}
-          {error && !hoja ? <Aviso tono="error">{error}</Aviso> : null}
-        </View>
+      ListHeaderComponent={encabezado}
+      ListEmptyComponent={
+        <Text style={[estilos.textoSuave, { textAlign: 'center', marginTop: 24 }]}>
+          {pestana === 'porEntregar' ? 'No quedan paradas por entregar.' : 'Todavía no hay paradas entregadas.'}
+        </Text>
       }
       renderItem={({ item: parada }) => {
-        const expandida = !!desglosadas[parada.id];
-        const estiloBadge = ESTILO_BADGE_ESTADO[parada.estadoOperativo];
-
+        const falta = faltaCobrar(parada, cola);
+        const badge = falta ? ESTILO_BADGE_ESTADO['En curso'] : ESTILO_BADGE_ESTADO[parada.estadoOperativo];
         return (
           <Pressable
             style={estilos.tarjeta}
-            onPress={() => manejarApertura(parada)}
+            onPress={() => onAbrirParada(parada)}
             accessibilityRole="button"
-            accessibilityLabel={`Parada ${parada.orden} ${parada.comercio.razonSocial}, estado ${parada.estadoOperativo}`}
+            accessibilityLabel={`Parada ${parada.orden} ${parada.comercio.razonSocial}, ${falta ? 'falta cobrar' : parada.estadoOperativo}`}
           >
-            {/* Cabecera de la Parada: Secuencia, Nombre y Estado Operativo */}
             <View style={estilos.fila}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
                 <View style={estilos.secuenciaBadge}>
@@ -191,97 +142,48 @@ export function HojaDeRutaPantalla({
                   {parada.comercio.nombreFantasia || parada.comercio.razonSocial}
                 </Text>
               </View>
-
-              <View style={[estilos.badge, estiloBadge.contenedor]}>
-                <Text style={[estilos.badgeTexto, estiloBadge.texto]}>{parada.estadoOperativo}</Text>
+              <View style={[estilos.badge, badge.contenedor]}>
+                <Text style={[estilos.badgeTexto, badge.texto]}>{falta ? 'Falta cobrar' : parada.estadoOperativo}</Text>
               </View>
             </View>
 
-            {/* Dirección y Localidad */}
             <Text style={estilos.textoSuave}>
               {parada.comercio.domicilio}
               {parada.comercio.localidad ? `, ${parada.comercio.localidad}` : ''}
             </Text>
 
-            {/* Resumen Consolidado de Carga */}
-            <View style={estilos.resumenCarga}>
-              <View style={estilos.resumenCargaFila}>
-                <Text style={estilos.resumenCargaTexto}>
-                  📄 {parada.totalRemitos} remito{parada.totalRemitos !== 1 ? 's' : ''}
-                </Text>
-                <Text style={[estilos.texto, { fontWeight: '700' }]}>
-                  {parada.sinCobroEnDestino
-                    ? 'Sin cobro en destino'
-                    : formatearPesos(parada.totalImporteCentavos)}
-                </Text>
-              </View>
-
-              {parada.marcas.length > 0 ? (
-                <Text style={[estilos.resumenCargaTexto, { fontStyle: 'italic' }]}>
-                  🏷️ Marcas: {parada.marcas.join(', ')}
-                </Text>
-              ) : null}
-            </View>
-
-            {/* Botón para Desglosar Documentos Asociados */}
-            <Pressable
-              style={estilos.botonDesglose}
-              onPress={() => toggleDesglose(parada.id)}
-              accessibilityRole="button"
-              accessibilityLabel={`Desglose de documentos para ${parada.comercio.razonSocial}`}
-            >
-              <Text style={estilos.botonDesgloseTexto}>
-                {expandida
-                  ? '▲ Ocultar detalle de documentos'
-                  : `▼ Ver detalle de documentos (${parada.documentos.length})`}
+            <View style={estilos.fila}>
+              <Text style={estilos.resumenCargaTexto}>
+                {parada.totalRemitos} remito{parada.totalRemitos !== 1 ? 's' : ''}
+                {parada.marcas.length ? ` · ${parada.marcas.join(', ')}` : ''}
               </Text>
-            </Pressable>
-
-            {/* Acordeón de Documentos Asociados */}
-            {expandida ? (
-              <View style={estilos.contenedorDocumentos}>
-                {parada.documentos.map((doc) => {
-                  const colorDoc =
-                    doc.estadoOperativo === 'Entregado'
-                      ? colores.ok
-                      : doc.estadoOperativo === 'Rechazado'
-                      ? colores.error
-                      : colores.textoSuave;
-
-                  return (
-                    <View key={doc.id} style={estilos.documentoFila}>
-                      <View style={{ flex: 1, gap: 2 }}>
-                        <Text style={[estilos.texto, { fontWeight: '600', fontSize: 14 }]}>
-                          Remito #{doc.numero} · {doc.marca}
-                        </Text>
-                        <Text style={{ fontSize: 12, color: colores.textoSuave }}>
-                          {formatearPesos(doc.importeCentavos)}
-                          {doc.motivoNoEntrega ? ` · Motivo: ${doc.motivoNoEntrega}` : ''}
-                        </Text>
-                      </View>
-                      <Text style={{ fontWeight: '700', fontSize: 13, color: colorDoc }}>
-                        {doc.estadoOperativo}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </View>
-            ) : null}
-
-            {/* Botón de acción para acceder al detalle de la parada */}
-            <View style={{ marginTop: 6, alignItems: 'flex-end' }}>
-              <Pressable
-                style={estilos.botonAccion}
-                onPress={() => manejarApertura(parada)}
-                accessibilityRole="button"
-                accessibilityLabel={`Ver detalle de la parada ${parada.comercio.razonSocial}`}
-              >
-                <Text style={estilos.botonAccionTexto}>Ver detalle de parada →</Text>
-              </Pressable>
+              <Text style={[estilos.texto, { fontWeight: '700' }]}>
+                {parada.sinCobroEnDestino ? 'Sin cobro' : formatearPesos(parada.totalImporteCentavos)}
+              </Text>
             </View>
+            <Text style={[estilos.botonDesgloseTexto, { alignSelf: 'flex-end', fontSize: 15 }]}>Abrir ›</Text>
           </Pressable>
         );
       }}
     />
+  );
+}
+
+function BotonPestana({ texto, activa, onPress }: { texto: string; activa: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      style={[
+        estilos.botonSecundario,
+        { flex: 1, paddingVertical: 10 },
+        activa ? { backgroundColor: colores.titulo, borderColor: colores.titulo } : { borderColor: colores.borde },
+      ]}
+      onPress={onPress}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: activa }}
+    >
+      <Text style={[estilos.botonSecundarioTexto, { fontSize: 15 }, activa && { color: colores.tarjeta }]} numberOfLines={1} adjustsFontSizeToFit>
+        {texto}
+      </Text>
+    </Pressable>
   );
 }

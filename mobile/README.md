@@ -7,12 +7,12 @@ Las reglas, decisiones y preguntas pendientes están en [`docs/requerimientos/ep
 ## Qué hace
 
 1. **Login** con el mismo usuario del sistema (solo rol Transportista).
-2. **Hoja de ruta del día**: las visitas en orden, con el importe a cobrar de cada una. Se guarda en el celular para trabajar sin señal.
-3. **Entrega de remitos** (HU #22): cada remito se confirma por separado, con la hora y el GPS. Sin GPS no se puede confirmar.
+2. **Hoja de ruta del día** (HU #20): las paradas en orden, en dos pestañas, "Por entregar" y "Entregadas", con un botón "↻ Actualizar". Se guarda en el celular para trabajar sin señal.
+3. **Entrega de remitos** (HU #22, #23 y #24): al tocar una parada se ven primero sus remitos, todos marcados. Se desmarcan los que no se entregan, se confirman los marcados (con hora y GPS) y los restantes se rechazan con un motivo. Los resueltos quedan abajo.
 4. **Cobro de una visita**: importe de solo lectura con el desglose por marca, y registro en efectivo, por transferencia (con referencia obligatoria), por QR, o combinando varios medios. La suma tiene que ser exacta.
 5. **Sin conexión**: la entrega y el cobro se guardan en el celular y se envían solos cuando vuelve la señal. El QR se deshabilita sin conexión. Los reenvíos no duplican cobros, porque cada pago lleva una clave de idempotencia.
 
-Cobrar en efectivo por el total lleva 3 toques: abrir la visita → *Efectivo* (precarga el total) → *Confirmar*.
+Entregar todo y cobrar en efectivo lleva 4 toques: abrir la parada → *Confirmar entrega* → *Efectivo* (precarga el total) → *Confirmar cobro*. Para volver a la hoja: "‹ Hoja de ruta" arriba o el botón atrás de Android.
 
 ## Identidad visual
 
@@ -81,7 +81,7 @@ src/api.ts                   llamadas a /api/auth, /api/movil y /api/transportis
 src/almacenamiento.ts        sesión, hoja guardada y cola (AsyncStorage)
 src/useJornada.ts            carga la hoja y sincroniza al abrir o al volver la señal
 src/ubicacion.ts             GPS del registro, con 4 s de espera máxima
-src/dominio/                 reglas puras (sin React): importes, validación de cobro, estado de visita
+src/dominio/                 reglas puras (sin React): importes, cobro, estado de visita, paradas y organización de la hoja
 src/sincronizacion/cola.ts   cola de entregas y cobros sin conexión
-src/pantallas/               Login, HojaDeRuta, Visita (entrega + cobro)
+src/pantallas/               Login, HojaDeRuta, Visita (remitos + cobro)
 ```

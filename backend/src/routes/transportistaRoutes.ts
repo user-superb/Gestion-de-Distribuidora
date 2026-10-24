@@ -2,6 +2,8 @@
 import { Router, Request, Response } from 'express';
 import { transportistaService } from '../services/transportistaService.js';
 import { authService } from '../services/authService.js';
+import { RechazoError, rechazoService } from '../services/rechazoService.js';
+import { requireAuth } from './authRoutes.js';
 
 export const transportistaRouter = Router();
 
@@ -97,6 +99,25 @@ transportistaRouter.post('/visitas/:id/confirmar-todo', async (req: Request, res
 
     return res.status(200).json(resultado);
   } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/transportista/remitos/:id/rechazar
+ * HU #24: registrar el rechazo de un remito con su motivo. Exige sesión de transportista.
+ */
+transportistaRouter.post('/remitos/:id/rechazar', requireAuth, async (req: Request, res: Response) => {
+  const sesion = (req as any).userSession;
+  if (sesion?.role !== 'Transportista') {
+    return res.status(403).json({ success: false, error: 'Solo un transportista puede rechazar remitos.' });
+  }
+  try {
+    const usuarioId = Number(String(sesion.id).replace(/^usr_/, ''));
+    const resultado = await rechazoService.rechazarRemito(usuarioId, String(req.params.id), req.body);
+    return res.status(resultado.duplicado ? 200 : 201).json(resultado);
+  } catch (error: any) {
+    if (error instanceof RechazoError) return res.status(error.status).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: error.message });
   }
 });

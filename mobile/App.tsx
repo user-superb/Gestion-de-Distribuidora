@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, View } from 'react-native';
+import { ActivityIndicator, Alert, BackHandler, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { useNetInfo } from '@react-native-community/netinfo';
@@ -7,7 +7,6 @@ import { cerrarSesion, obtenerHojaDeRuta } from './src/api';
 import { borrarHoja, colaOperaciones, guardarHoja, guardarSesion, leerSesion } from './src/almacenamiento';
 import { verificarParadaActiva } from './src/dominio/parada';
 import { estilos, marca } from './src/estilos';
-import { DetalleParadaPantalla } from './src/pantallas/DetalleParadaPantalla';
 import { VisitaPantalla } from './src/pantallas/VisitaPantalla';
 import { HojaDeRutaPantalla } from './src/pantallas/HojaDeRutaPantalla';
 import { LoginPantalla } from './src/pantallas/LoginPantalla';
@@ -19,11 +18,20 @@ export default function App() {
   const [sesion, setSesion] = useState<Sesion | null>(null);
   const [avisoLogin, setAvisoLogin] = useState<string | null>(null);
   const [visitaAbierta, setVisitaAbierta] = useState<string | null>(null);
-  const [paradaDetalle, setParadaDetalle] = useState<ParadaConsolidada | null>(null);
   const [mensaje, setMensaje] = useState<string | null>(null);
 
   const red = useNetInfo();
   const enLinea = red.isConnected === true && red.isInternetReachable !== false;
+
+  // Corrección 6: el botón atrás de Android vuelve de la parada a la hoja de ruta.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!visitaAbierta) return false;
+      setVisitaAbierta(null);
+      return true;
+    });
+    return () => sub.remove();
+  }, [visitaAbierta]);
 
   useEffect(() => {
     leerSesion().then((guardada) => {
@@ -36,7 +44,6 @@ export default function App() {
   const onSesionVencida = useCallback(() => {
     guardarSesion(null);
     setSesion(null);
-    setParadaDetalle(null);
     setVisitaAbierta(null);
     setAvisoLogin('Tu sesión venció. Volvé a ingresar: lo guardado en el celular se envía después.');
   }, []);
@@ -56,8 +63,7 @@ export default function App() {
       await borrarHoja();
       await guardarSesion(null);
       setSesion(null);
-      setParadaDetalle(null);
-      setVisitaAbierta(null);
+        setVisitaAbierta(null);
     };
     if (pendientes > 0) {
       Alert.alert('Operaciones sin sincronizar', `Tenés ${pendientes} entrega(s) o cobro(s) sin enviar. Quedan guardados y se envían al volver a ingresar.`, [
@@ -69,7 +75,7 @@ export default function App() {
     }
   }
 
-  // Al intentar abrir la parada, se verifica que la visita siga activa
+  // Al abrir la parada se verifica que la visita siga activa (HU #21) y se va directo a sus remitos (corrección 2).
   async function abrirParada(parada: ParadaConsolidada) {
     setMensaje(null);
     if (enLinea && sesion) {
@@ -87,13 +93,12 @@ export default function App() {
             [{ text: 'Entendido' }]
           );
           setMensaje('La parada fue cancelada o modificada por administración y se actualizó la hoja de ruta.');
-          setParadaDetalle(null);
-          setVisitaAbierta(null);
+                setVisitaAbierta(null);
           return;
         }
 
         // ESCENARIO 1: Despliegue exitoso
-        setParadaDetalle(verificacion.paradaActualizada || parada);
+        setVisitaAbierta((verificacion.paradaActualizada || parada).visitaPrincipal.id);
       } catch {
         // En caso de error de red puntual al consultar, verificar contra la copia local
         const verificacionLocal = verificarParadaActiva(parada, jornada.guardada?.hoja, jornada.cola);
@@ -103,11 +108,10 @@ export default function App() {
             verificacionLocal.motivo || 'Esta parada o sus remitos fueron cancelados por administración.',
             [{ text: 'Entendido' }]
           );
-          setParadaDetalle(null);
-          setVisitaAbierta(null);
+                setVisitaAbierta(null);
           return;
         }
-        setParadaDetalle(verificacionLocal.paradaActualizada || parada);
+        setVisitaAbierta((verificacionLocal.paradaActualizada || parada).visitaPrincipal.id);
       }
     } else {
       // Modo sin conexión: verificar contra la copia local
@@ -118,11 +122,10 @@ export default function App() {
           verificacion.motivo || 'Esta parada no está activa.',
           [{ text: 'Entendido' }]
         );
-        setParadaDetalle(null);
-        setVisitaAbierta(null);
+            setVisitaAbierta(null);
         return;
       }
-      setParadaDetalle(verificacion.paradaActualizada || parada);
+      setVisitaAbierta((verificacion.paradaActualizada || parada).visitaPrincipal.id);
     }
   }
 
@@ -149,18 +152,7 @@ export default function App() {
             onListo={(texto) => {
               setMensaje(texto);
               setVisitaAbierta(null);
-              setParadaDetalle(null);
-              jornada.recargar();
-            }}
-          />
-        ) : paradaDetalle ? (
-          <DetalleParadaPantalla
-            parada={paradaDetalle}
-            cola={jornada.cola}
-            enLinea={enLinea}
-            onVolver={() => setParadaDetalle(null)}
-            onIniciarEntrega={(v) => {
-              setVisitaAbierta(v.id);
+                        jornada.recargar();
             }}
           />
         ) : (
@@ -170,10 +162,6 @@ export default function App() {
             mensaje={mensaje}
             onRecargar={jornada.recargar}
             onAbrirParada={abrirParada}
-            onAbrirVisita={(v) => {
-              setMensaje(null);
-              setVisitaAbierta(v.id);
-            }}
             onCerrarSesion={salir}
           />
         )}
