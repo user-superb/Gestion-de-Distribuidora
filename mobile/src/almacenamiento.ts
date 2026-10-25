@@ -40,17 +40,32 @@ export async function leerHoja(): Promise<HojaGuardada | null> {
   return guardada ? JSON.parse(guardada) : null;
 }
 
+export function fijarSesionActual(sesion: Sesion | null): void {
+  sesionActual = sesion;
+}
+
+export function obtenerSesionActual(): Sesion | null {
+  return sesionActual;
+}
+
 /** Cola única de la app (entregas y cobros). Envía con el token de la sesión vigente al momento de sincronizar. */
 export const colaOperaciones = new ColaOperaciones(AsyncStorage, async (operacion) => {
-  if (!sesionActual) throw new ErrorApi('Iniciá sesión para sincronizar.', 401);
+  let sesion = sesionActual;
+  if (!sesion) {
+    sesion = await leerSesion();
+  }
+  if (!sesion) {
+    // Si no hay sesión activa en el celular, posponer el envío sin considerar vencida la sesión.
+    throw new Error('Sin sesión activa para sincronizar.');
+  }
   if (operacion.tipo === 'entrega') {
-    await confirmarEntrega(sesionActual.token, operacion.remitoId, operacion.cuerpo);
+    await confirmarEntrega(sesion.token, operacion.remitoId, operacion.cuerpo);
   } else if (operacion.tipo === 'entrega_lote') {
-    await confirmarTodaLaVisita(sesionActual.token, operacion.visitaId, {
+    await confirmarTodaLaVisita(sesion.token, operacion.visitaId, {
       ...operacion.cuerpoGeneral,
       entregas: operacion.entregas,
     });
   } else if (operacion.tipo === 'rechazo') {
-    await rechazarRemito(sesionActual.token, operacion.remitoId, operacion.cuerpo);
-  } else await enviarCobro(sesionActual.token, operacion.visitaId, operacion.cuerpo);
+    await rechazarRemito(sesion.token, operacion.remitoId, operacion.cuerpo);
+  } else await enviarCobro(sesion.token, operacion.visitaId, operacion.cuerpo);
 });

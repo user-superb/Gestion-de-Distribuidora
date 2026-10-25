@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, View } from 'react-native';
+import { ActivityIndicator, Alert, BackHandler, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { useNetInfo } from '@react-native-community/netinfo';
 import { cerrarSesion, leerApiUrlGuardada, obtenerHojaDeRuta } from './src/api';
-import { borrarHoja, colaOperaciones, guardarHoja, guardarSesion, leerSesion } from './src/almacenamiento';
+import { borrarHoja, colaOperaciones, fijarSesionActual, guardarHoja, guardarSesion, leerSesion } from './src/almacenamiento';
 import { verificarParadaActiva } from './src/dominio/parada';
 import { estilos, marca } from './src/estilos';
 import { DetalleParadaPantalla } from './src/pantallas/DetalleParadaPantalla';
@@ -25,6 +25,22 @@ export default function App() {
   const red = useNetInfo();
   const enLinea = red.isConnected === true && red.isInternetReachable !== false;
 
+  // Botón atrás de Android: vuelve de la visita al detalle o del detalle a la hoja de ruta.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (visitaAbierta) {
+        setVisitaAbierta(null);
+        return true;
+      }
+      if (paradaDetalle) {
+        setParadaDetalle(null);
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [visitaAbierta, paradaDetalle]);
+
   useEffect(() => {
     Promise.all([leerSesion(), leerApiUrlGuardada()]).then(([guardada]) => {
       setSesion(guardada);
@@ -34,6 +50,7 @@ export default function App() {
 
   // Supuesto S5: la sesión venció. Los cobros sin enviar quedan guardados y salen después del nuevo login.
   const onSesionVencida = useCallback(() => {
+    fijarSesionActual(null);
     guardarSesion(null);
     setSesion(null);
     setParadaDetalle(null);
@@ -44,6 +61,7 @@ export default function App() {
   const jornada = useJornada(sesion, enLinea, onSesionVencida);
 
   async function ingresar(nueva: Sesion) {
+    fijarSesionActual(nueva);
     await guardarSesion(nueva);
     setAvisoLogin(null);
     setSesion(nueva);
@@ -54,6 +72,7 @@ export default function App() {
     const cerrar = async () => {
       if (sesion) await cerrarSesion(sesion.token);
       await borrarHoja();
+      fijarSesionActual(null);
       await guardarSesion(null);
       setSesion(null);
       setParadaDetalle(null);
@@ -69,7 +88,7 @@ export default function App() {
     }
   }
 
-  // Al intentar abrir la parada, se verifica que la visita siga activa
+  // Al abrir la parada se verifica que la visita siga activa (HU #21) y se despliega su detalle clasificado por marca.
   async function abrirParada(parada: ParadaConsolidada) {
     setMensaje(null);
     if (enLinea && sesion) {
@@ -174,10 +193,6 @@ export default function App() {
             mensaje={mensaje}
             onRecargar={jornada.recargar}
             onAbrirParada={abrirParada}
-            onAbrirVisita={(v) => {
-              setMensaje(null);
-              setVisitaAbierta(v.id);
-            }}
             onCerrarSesion={salir}
           />
         )}

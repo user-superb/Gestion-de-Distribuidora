@@ -3,8 +3,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ErrorApi, ErrorRed } from './errores';
 import type { CobroDto, EntregaDto, HojaDeRuta, ItemEntregaLote, RechazoDto, Sesion } from './tipos';
 
-// En el celular, "localhost" es el propio teléfono: hay que poner la IP de la PC en mobile/.env
-export const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001/api';
+// Servidor predeterminado configurado para acceso desde celular / túnel
+export const DEFAULT_API_URL =
+  process.env.EXPO_PUBLIC_API_URL || 'https://p4jhdp6h-3001.brs.devtunnels.ms/api';
 export let API_URL = DEFAULT_API_URL;
 const CLAVE_STORAGE_API_URL = 'api-url-personalizada';
 const TIMEOUT_MS = 10000;
@@ -33,7 +34,7 @@ export function configurarApiUrl(nuevaUrl: string): string {
 export async function leerApiUrlGuardada(): Promise<string> {
   try {
     const guardada = await AsyncStorage.getItem(CLAVE_STORAGE_API_URL);
-    if (guardada) {
+    if (guardada && !guardada.includes('localhost')) {
       API_URL = normalizarApiUrl(guardada);
       return API_URL;
     }

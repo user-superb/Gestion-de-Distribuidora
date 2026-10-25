@@ -50,6 +50,30 @@ Florencia implementó la HU #22 en la rama `mobile` como una pantalla web dentro
 3. **¿Se puede cobrar antes de confirmar la entrega?** Ninguna HU lo prohíbe y hoy se permite.
 4. **Dos endpoints de hoja de ruta:** `/api/transportista/hoja-activa` (Florencia) y `/api/movil/hoja-de-ruta` (cobro, con importes por marca). La app usa el segundo. Se podrían unificar.
 
+## Correcciones de Martín (revisión del 24/10/2026)
+
+Pedidos del cliente sobre la app y cómo quedaron. Las interpretaciones de los puntos ambiguos (2, 3, 5, 6 y 7) las decidió el equipo; conviene confirmarlas con Martín.
+
+| # | Pedido | Cómo quedó |
+|---|--------|------------|
+| 1 | Sacar el detalle de remitos de la hoja de ruta | Las tarjetas de la hoja ya no tienen el desplegable de documentos: muestran la cantidad de remitos, las marcas y el total. |
+| 2 | Al entrar, ver primero los remitos | Al tocar una parada se va directo a su pantalla, con los remitos arriba y el cobro abajo. Se sacó la pantalla intermedia "Detalle de parada". |
+| 3 | En la pantalla de pagos, sacar la info del local | La pantalla de la parada muestra solo el nombre del comercio, sin domicilio ni otros datos. El cobro muestra el total y el desglose por marca. |
+| 4 | Los remitos entregados, abajo | Los remitos por entregar van arriba y los resueltos (entregados o rechazados) abajo. |
+| 5 | Elegir cuáles se entregan y rechazar los restantes | Cada remito pendiente tiene una casilla. Arrancan todos marcados y se desmarcan los que no se entregan. "Confirmar entrega (N)" confirma los marcados y "Rechazar restantes (M)" pide un motivo, el mismo para todos. |
+| 6 | Navegar más fácil | Encabezado fijo con "‹ Hoja de ruta" y "↻ Actualizar", y el botón atrás de Android vuelve a la hoja. |
+| 7 | Separar entregados y no entregados (2 pantallas) | La hoja de ruta tiene dos pestañas, "Por entregar" y "Entregadas". Una parada pasa a "Entregadas" cuando sus remitos están resueltos y ya se cobró, o no tiene nada que cobrar. Si se entregó pero falta el cobro, queda en "Por entregar" con la etiqueta "Falta cobrar". |
+| 8 | Botón para actualizar | Botón "↻ Actualizar" en la hoja de ruta y en la parada, además de deslizar hacia abajo. |
+
+Detalles de implementación:
+- **Punto 5:** la API de entrega en lote (`/visitas/:id/confirmar-todo`, HU #23) confirma *todos* los pendientes de la visita, no solo los que se le mandan. Por eso la app la usa solo cuando están todos marcados. Si se eligió una parte, confirma cada remito por separado (`/remitos/:id/confirmar`, HU #22). Las reglas están en `mobile/src/dominio/organizacion.ts`.
+- **HU #24 (rechazo):** la app enviaba `POST /api/transportista/remitos/:id/rechazar`, pero ese endpoint **no existía** y el servidor respondía 403, así que ningún rechazo llegaba a la base. Se implementó en `backend/src/services/rechazoService.ts`:
+  - exige sesión de transportista y que el remito sea de su hoja;
+  - guarda el motivo y la ubicación;
+  - un reenvío no cambia el motivo original;
+  - no permite rechazar un remito ya entregado;
+  - cierra la visita como "Entregada con excepciones" (o `no_realizada` si se rechazó todo).
+
 ## Preguntas pendientes para la próxima entrevista con Martín
 
 1. ¿Existen comercios en cuenta corriente o con pago anticipado? La HU #25 E2 lo da por hecho, pero la Visión v2 lo descarta. Si existen, ¿la condición va en el comercio, en el remito o en la visita?
@@ -57,6 +81,8 @@ Florencia implementó la HU #22 en la rama `mobile` como una pantalla web dentro
 3. Si una transferencia cargada sin conexión resulta duplicada al sincronizar, ¿el transportista la corrige desde la app o lo resuelve un administrativo?
 4. QR: ¿hace falta guardar algún dato del pago de Mercado Pago (por ejemplo, el número de operación) para conciliarlo después?
 5. ¿El transportista puede cobrar más de lo exigido (por ejemplo, un vuelto o una deuda anterior)? Hoy se rechaza.
+6. Correcciones del 24/10: ¿las interpretaciones de los puntos 2, 3, 5, 6 y 7 (tabla de arriba) son lo que esperaba? En particular, ¿una parada entregada pero sin cobrar debe seguir en "Por entregar"?
+7. ¿El domicilio del comercio debe verse en algún lado de la pantalla de la parada, o alcanza con verlo en la hoja de ruta?
 
 ## Cambios en la base
 

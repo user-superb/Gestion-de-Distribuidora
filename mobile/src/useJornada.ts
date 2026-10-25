@@ -1,7 +1,7 @@
 // Estado de la jornada: hoja de ruta (del servidor o guardada en el celular) y cola de entregas y cobros.
 import { useCallback, useEffect, useState } from 'react';
 import { obtenerHojaDeRuta } from './api';
-import { borrarHoja, colaOperaciones, guardarHoja, HojaGuardada, leerHoja } from './almacenamiento';
+import { borrarHoja, colaOperaciones, fijarSesionActual, guardarHoja, HojaGuardada, leerHoja } from './almacenamiento';
 import { esHojaOperativaVigente } from './dominio/parada';
 import { ErrorApi, ErrorRed } from './errores';
 import type { ColaPorClave } from './dominio/estadoVisita';
@@ -18,6 +18,7 @@ export function useJornada(sesion: Sesion | null, enLinea: boolean, onSesionVenc
       setGuardada(null);
       return;
     }
+    fijarSesionActual(sesion);
     setCargando(true);
     try {
       const local = await leerHoja();
@@ -29,11 +30,7 @@ export function useJornada(sesion: Sesion | null, enLinea: boolean, onSesionVenc
       }
 
       if (enLinea) {
-        const sincronizacion = await colaOperaciones.sincronizar();
-        if (sincronizacion.sesionVencida) {
-          onSesionVencida();
-          return;
-        }
+        // 1. Validar la sesión con el servidor y refrescar la hoja de ruta
         try {
           const hojaServidor = await obtenerHojaDeRuta(sesion.token);
           if (hojaServidor && esHojaOperativaVigente(hojaServidor)) {
@@ -57,6 +54,17 @@ export function useJornada(sesion: Sesion | null, enLinea: boolean, onSesionVenc
           } else if (!(e instanceof ErrorRed)) {
             setError((e as Error).message);
           }
+        }
+
+        // 2. Una vez confirmada la validez de la sesión activa, procesar la cola de operaciones pendientes
+        try {
+          const sincronizacion = await colaOperaciones.sincronizar();
+          if (sincronizacion.sesionVencida) {
+            onSesionVencida();
+            return;
+          }
+        } catch {
+          // Errores de sincronización de cola se reintentan en el siguiente ciclo
         }
       }
       setCola(await colaOperaciones.estadoPorClave());

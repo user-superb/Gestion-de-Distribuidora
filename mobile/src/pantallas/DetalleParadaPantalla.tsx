@@ -1,4 +1,5 @@
-// Detalle de parada: visualización de remitos y carga clasificados por marca antes de iniciar la entrega.
+// Detalle de parada: visualización de remitos y carga asociada antes de iniciar la entrega.
+// Información detallada de los remitos arriba y totalizadores abajo.
 import { useMemo } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Aviso } from '../componentes/Aviso';
@@ -96,77 +97,22 @@ export function DetalleParadaPantalla({
         ) : null}
       </View>
 
-      {/* Totalizador General de la Parada */}
-      <Text style={estilos.seccionTitulo}>Total General de la Parada</Text>
-      <View style={estilos.tarjetaTotalizador} testID="totalizador-general">
-        <View style={estilos.tarjetaTotalizadorFila}>
-          <Text style={estilos.resumenCargaTexto}>📦 Total Bultos / Unidades:</Text>
-          <Text style={estilos.totalizadorValor}>
-            {parada.totalBultos} {parada.totalBultos === 1 ? 'bulto' : 'bultos'}
-          </Text>
-        </View>
-
-        <View style={estilos.tarjetaTotalizadorFila}>
-          <Text style={estilos.resumenCargaTexto}>📄 Total Remitos:</Text>
-          <Text style={estilos.totalizadorValor}>
-            {parada.totalRemitos} {parada.totalRemitos === 1 ? 'remito' : 'remitos'}
-          </Text>
-        </View>
-
-        <View style={estilos.tarjetaTotalizadorFila}>
-          <Text style={estilos.resumenCargaTexto}>💰 Importe Consolidado:</Text>
-          <Text style={[estilos.totalizadorValor, { color: colores.titulo }]}>
-            {parada.sinCobroEnDestino
-              ? 'Sin cobro en destino'
-              : formatearPesos(parada.totalImporteCentavos)}
-          </Text>
-        </View>
-      </View>
-
-      {/* Totalizador de Carga por Marca */}
-      <Text style={estilos.seccionTitulo}>Totalizador de Carga por Marca</Text>
-      <View style={{ gap: 8 }} testID="totalizador-marcas">
-        {parada.resumenPorMarca.map((item) => (
-          <View key={item.marca} style={estilos.tarjeta}>
-            <View style={estilos.marcaCabecera}>
-              <View style={estilos.marcaBadge}>
-                <Text style={estilos.marcaBadgeTexto}>🏷️ {item.marca}</Text>
-              </View>
-              <Text style={[estilos.texto, { fontWeight: '700' }]}>
-                {item.totalImporteCentavos > 0
-                  ? formatearPesos(item.totalImporteCentavos)
-                  : 'Sin cargo'}
-              </Text>
-            </View>
-
-            <View style={estilos.resumenCargaFila}>
-              <Text style={estilos.textoSuave}>
-                📦 {item.totalBultos} {item.totalBultos === 1 ? 'bulto' : 'bultos'}
-              </Text>
-              <Text style={estilos.textoSuave}>
-                📄 {item.totalRemitos} {item.totalRemitos === 1 ? 'remito' : 'remitos'}
-              </Text>
-            </View>
-          </View>
-        ))}
-      </View>
-
-      {/* Listado de Remitos Clasificados por Marca */}
-      <Text style={estilos.seccionTitulo}>Remitos Clasificados por Marca</Text>
+      {/* ARRIBA: Listado Detallado de Remitos */}
+      <Text style={estilos.seccionTitulo}>Remitos</Text>
       <View style={{ gap: 14 }} testID="remitos-clasificados">
         {gruposMarca.map((grupo) => (
           <View key={grupo.marca} style={estilos.tarjetaMarca}>
             {/* Cabecera del Grupo de Marca */}
             <View style={estilos.marcaCabecera}>
               <View style={estilos.marcaBadge}>
-                <Text style={estilos.marcaBadgeTexto}>🏷️ Marca: {grupo.marca}</Text>
+                <Text style={estilos.marcaBadgeTexto}>🏷️ {grupo.marca}</Text>
               </View>
               <Text style={[estilos.textoSuave, { fontWeight: '600', fontSize: 13 }]}>
-                {grupo.totalBultos} bulto{grupo.totalBultos !== 1 ? 's' : ''} · {grupo.totalRemitos} remito{grupo.totalRemitos !== 1 ? 's' : ''}
+                {grupo.totalBultos} {grupo.totalBultos === 1 ? 'bulto' : 'bultos'} · {grupo.totalRemitos} {grupo.totalRemitos === 1 ? 'remito' : 'remitos'}
               </Text>
             </View>
 
-            {/* Lista de Remitos de esta Marca */}
+            {/* Lista de Remitos */}
             <View style={{ gap: 8 }}>
               {grupo.documentos.map((doc) => {
                 const colorEstado =
@@ -180,11 +126,11 @@ export function DetalleParadaPantalla({
                   <View
                     key={doc.id}
                     style={estilos.remitoItemDetalle}
-                    accessibilityLabel={`Remito ${doc.numero}, marca ${doc.marca}, ${doc.bultos} bultos, estado ${doc.estadoOperativo}`}
+                    accessibilityLabel={`${doc.numero}, ${doc.marca}, ${doc.bultos} bultos, estado ${doc.estadoOperativo}`}
                   >
                     <View style={estilos.remitoItemDetalleFila}>
                       <Text style={[estilos.texto, { fontWeight: '700', fontSize: 15 }]}>
-                        Remito #{doc.numero}
+                        {doc.numero}
                       </Text>
                       <View
                         style={[
@@ -207,7 +153,7 @@ export function DetalleParadaPantalla({
 
                     <View style={estilos.remitoItemDetalleFila}>
                       <Text style={estilos.textoSuave}>
-                        📦 Cantidad: {doc.bultos} {doc.bultos === 1 ? 'bulto / unidad' : 'bultos / unidades'}
+                        📦 {doc.bultos} {doc.bultos === 1 ? 'bulto' : 'bultos'}
                       </Text>
                       <Text style={[estilos.texto, { fontWeight: '600' }]}>
                         {formatearPesos(doc.importeCentavos)}
@@ -225,6 +171,35 @@ export function DetalleParadaPantalla({
             </View>
           </View>
         ))}
+      </View>
+
+      {/* ABAJO: Totalizador General de la Parada */}
+      <Text style={estilos.seccionTitulo}>Total General de la Parada</Text>
+      <View style={estilos.tarjetaTotalizador} testID="totalizador-general">
+        <View style={estilos.tarjetaTotalizadorFila}>
+          <Text style={estilos.resumenCargaTexto}>📦 Total Bultos:</Text>
+          <Text style={estilos.totalizadorValor}>
+            {parada.totalBultos} {parada.totalBultos === 1 ? 'bulto' : 'bultos'}
+          </Text>
+        </View>
+
+        <View style={estilos.tarjetaTotalizadorFila}>
+          <Text style={estilos.resumenCargaTexto}>📄 Total Remitos:</Text>
+          <Text style={estilos.totalizadorValor}>
+            {parada.totalRemitos} {parada.totalRemitos === 1 ? 'remito' : 'remitos'}
+          </Text>
+        </View>
+
+        <View style={estilos.tarjetaTotalizadorFila}>
+          <Text style={estilos.resumenCargaTexto}>💰 Importe Consolidado:</Text>
+          <Text style={[estilos.totalizadorValor, { color: colores.texto }]}>
+            {parada.sinCobroEnDestino
+              ? 'Sin cobro en destino'
+              : parada.totalImporteCentavos > 0
+              ? formatearPesos(parada.totalImporteCentavos)
+              : 'Sin cargo'}
+          </Text>
+        </View>
       </View>
 
       {/* Botón de Acción para Iniciar Entrega */}
