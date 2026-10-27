@@ -917,11 +917,12 @@ export const remitoService = {
     }
 
     // 2. Verificar que el transportista exista y esté habilitado en la flota (Regla de negocio)
+    const cleanTransId = String(transportistaId).replace(/^usr_/, '').trim();
     const transRes = await db.query(
       `SELECT id::text as id, nombre, activo, es_transportista as "esTransportista", rol 
        FROM usuario 
        WHERE id::text = $1`,
-      [String(transportistaId)]
+      [cleanTransId]
     );
 
     if (transRes.rows.length === 0) {
@@ -950,7 +951,7 @@ export const remitoService = {
          AND fecha_reparto = $2::date 
          AND id::text != $3 
          AND estado NOT IN ('anulada')`,
-      [String(transportistaId), fechaReparto, String(hojaDeRutaId)]
+      [cleanTransId, fechaReparto, String(hojaDeRutaId)]
     );
 
     if (solapadas.rows.length > 0) {
@@ -965,7 +966,7 @@ export const remitoService = {
     try {
       await db.query(
         'UPDATE hoja_de_ruta SET transportista_id = $1 WHERE id::text = $2',
-        [String(transportistaId), String(hojaDeRutaId)]
+        [cleanTransId, String(hojaDeRutaId)]
       );
     } catch (err: any) {
       if (err?.code === '23505' || String(err?.message || '').includes('hoja_unica_por_transportista_y_fecha')) {

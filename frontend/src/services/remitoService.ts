@@ -440,7 +440,10 @@ export const remitoService = {
     }
 
     // Regla: Solo transportista habilitado en la flota
-    const transportista = cachedTransportistas.find((t) => t.id === transportistaId);
+    const cleanTransId = String(transportistaId || '').replace(/^usr_/, '').trim();
+    const transportista = cachedTransportistas.find(
+      (t) => String(t.id).replace(/^usr_/, '').trim() === cleanTransId
+    );
     if (!transportista) {
       return { success: false, error: 'El transportista seleccionado no existe.', status: 404 };
     }
@@ -458,11 +461,12 @@ export const remitoService = {
     }
 
     // Criterio de Aceptación Escenario 2: Fallo por solapamiento de asignación
+    const fechaActualNorm = (hojaActual.fechaReparto || '').slice(0, 10);
     const solapada = mockHojasDeRuta.find(
       (h) =>
         h.id !== hojaDeRutaId &&
-        h.transportistaId === transportistaId &&
-        h.fechaReparto === hojaActual.fechaReparto &&
+        String(h.transportistaId || '').replace(/^usr_/, '').trim() === cleanTransId &&
+        (h.fechaReparto || '').slice(0, 10) === fechaActualNorm &&
         h.estado !== 'anulada'
     );
 

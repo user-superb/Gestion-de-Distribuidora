@@ -297,6 +297,32 @@ describe('Historia de Usuario #14 - Asignar Hoja de Ruta a Transportista', () =>
     expect(hoja2?.transportistaId).toBeNull();
   });
 
+  it('DISPONIBILIDAD MÚLTIPLES DÍAS: Un transportista asignado en una fecha (2026-10-25) puede ser asignado sin problemas a otra hoja en una fecha distinta (2026-10-26)', () => {
+    // 1. Armamos y programamos primera hoja para fecha 2026-10-25 con Carlos (id '2')
+    remitoService.agruparEnVisita(['rem-1']);
+    const prog1 = remitoService.asignarFechaHojaDeRuta('2026-10-25', '2026-10-20');
+    const hoja1Id = prog1.hojaDeRuta!.id;
+    const asig1 = remitoService.asignarTransportistaHojaDeRuta(hoja1Id, '2');
+    expect(asig1.success).toBe(true);
+
+    // 2. Armamos y programamos segunda hoja para OTRA fecha (2026-10-26) también con Carlos (id '2')
+    remitoService.agruparEnVisita(['rem-2']);
+    const prog2 = remitoService.asignarFechaHojaDeRuta('2026-10-26', '2026-10-20');
+    const hoja2Id = prog2.hojaDeRuta!.id;
+    const asig2 = remitoService.asignarTransportistaHojaDeRuta(hoja2Id, '2');
+    expect(asig2.success).toBe(true);
+    expect(asig2.hojaDeRuta?.transportistaId).toBe('2');
+
+    // 3. Verificamos que ambas hojas tienen asignado a Carlos sin interferir entre sí
+    const hojas = remitoService.getHojasDeRuta();
+    const h1 = hojas.find((h) => h.id === hoja1Id);
+    const h2 = hojas.find((h) => h.id === hoja2Id);
+    expect(h1?.transportistaId).toBe('2');
+    expect(h1?.fechaReparto).toBe('2026-10-25');
+    expect(h2?.transportistaId).toBe('2');
+    expect(h2?.fechaReparto).toBe('2026-10-26');
+  });
+
   it('REGLAS A CONSIDERAR: Rechaza si el transportista no existe o no está habilitado', () => {
     remitoService.agruparEnVisita(['rem-1']);
     const prog = remitoService.asignarFechaHojaDeRuta('2026-10-25', '2026-10-20');

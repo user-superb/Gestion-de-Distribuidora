@@ -130,6 +130,32 @@ describe('Backend PostgreSQL - HU #14: Asignar Hoja de Ruta a Transportista', ()
     assert.equal(checkDb.rows[0].transportista_id, null);
   });
 
+  it('DISPONIBILIDAD MÚLTIPLES DÍAS: Un transportista puede trabajar y ser asignado a múltiples hojas de ruta en días distintos sin solapamiento', async () => {
+    // Carlos (10) ya tiene asignada la hoja 300 el 2026-10-26 (en el seed del beforeEach)
+    // Asignamos Carlos a la hoja 100 el 2026-10-25
+    const asigDia1 = await remitoService.asignarTransportistaHojaDeRuta('100', '10');
+    assert.equal(asigDia1.success, true);
+    assert.equal(asigDia1.hojaDeRuta?.transportistaId, '10');
+
+    // Creamos y asignamos a Carlos una nueva hoja 400 para un tercer día: 2026-10-27
+    await db.query(`
+      INSERT INTO hoja_de_ruta (id, sucursal_id, transportista_id, fecha_reparto, estado)
+      VALUES (400, 1, NULL, '2026-10-27', 'pendiente_de_despacho');
+    `);
+    const asigDia3 = await remitoService.asignarTransportistaHojaDeRuta('400', '10');
+    assert.equal(asigDia3.success, true);
+    assert.equal(asigDia3.hojaDeRuta?.transportistaId, '10');
+
+    // Verificamos que Carlos está efectivamente asignado a las tres hojas en los tres días distintos
+    const checkHojas = await db.query(
+      'SELECT id, fecha_reparto as "fechaReparto", transportista_id FROM hoja_de_ruta WHERE transportista_id = 10 ORDER BY fecha_reparto ASC'
+    );
+    assert.equal(checkHojas.rows.length, 3);
+    assert.equal(checkHojas.rows[0].id, 100); // 2026-10-25
+    assert.equal(checkHojas.rows[1].id, 300); // 2026-10-26
+    assert.equal(checkHojas.rows[2].id, 400); // 2026-10-27
+  });
+
   it('REGLAS A CONSIDERAR: Rechaza la asignación si el transportista no se encuentra habilitado en la flota (inactivo)', async () => {
     const resultado = await remitoService.asignarTransportistaHojaDeRuta('100', '30'); // chofer_inactivo (activo = false)
 
