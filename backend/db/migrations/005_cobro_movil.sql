@@ -11,6 +11,7 @@ ALTER TABLE visita ADD COLUMN IF NOT EXISTS cobrada_en timestamptz;
 ALTER TABLE remito ADD COLUMN IF NOT EXISTS entregado_por bigint REFERENCES usuario(id);
 ALTER TABLE remito ADD COLUMN IF NOT EXISTS latitud numeric(9,6);
 ALTER TABLE remito ADD COLUMN IF NOT EXISTS longitud numeric(9,6);
+ALTER TABLE remito ADD COLUMN IF NOT EXISTS motivo_no_entrega text;
 
 ALTER TABLE cobro DROP CONSTRAINT IF EXISTS cobro_referencia_si_transferencia;
 ALTER TABLE cobro ADD CONSTRAINT cobro_referencia_si_transferencia CHECK (

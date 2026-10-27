@@ -157,6 +157,7 @@ function setupMemoryDb() {
       entregado_por bigint,
       latitud numeric,
       longitud numeric,
+      motivo_no_entrega text,
       actualizado_en timestamp DEFAULT now()
     );
 
