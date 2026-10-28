@@ -266,7 +266,8 @@ describe('Backend PostgreSQL - HU #19: Anexar una Entrega a una Ruta', () => {
     // 1. Verificar persistencia en PostgreSQL de remito y visita
     const remitoDb = await db.query('SELECT visita_id, estado FROM remito WHERE id = 5003');
     assert.equal(remitoDb.rows[0].estado, 'en_ruta');
-    assert.equal(String(remitoDb.rows[0].visita_id), resultado.parada.id);
+    assert.ok(resultado.parada);
+    assert.equal(String(remitoDb.rows[0].visita_id), resultado.parada!.id);
 
     // 2. Verificar que el transportista al consultar su hoja del día desde el móvil recibe la nueva parada
     const hojaMovil = await cobroService.getHojaDelDia(10, '2026-10-28');
@@ -275,7 +276,7 @@ describe('Backend PostgreSQL - HU #19: Anexar una Entrega a una Ruta', () => {
     // Tenía 2 paradas iniciales, ahora tiene 3
     assert.equal(hojaMovil.visitas.length, 3);
     const ultimaParada = hojaMovil.visitas[2];
-    assert.equal(ultimaParada.id, resultado.parada.id);
+    assert.equal(ultimaParada.id, resultado.parada!.id);
     assert.equal(ultimaParada.orden, 3);
     assert.equal(ultimaParada.remitos.length, 1);
     assert.equal(ultimaParada.remitos[0].id, '5003');

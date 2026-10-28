@@ -71,6 +71,19 @@ CREATE TABLE sesion_usuario (
     motivo_cierre   text -- 'manual' | 'inactividad' | 'expirado'
 );
 
+CREATE TABLE token_recuperacion_contrasena (
+    id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    usuario_id      bigint NOT NULL REFERENCES usuario(id) ON DELETE CASCADE,
+    token_hash      text NOT NULL UNIQUE,
+    expira_en       timestamptz NOT NULL,
+    usado           boolean NOT NULL DEFAULT false,
+    usado_en        timestamptz,
+    creado_en       timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_token_recuperacion_hash ON token_recuperacion_contrasena (token_hash);
+CREATE INDEX idx_token_recuperacion_usuario ON token_recuperacion_contrasena (usuario_id);
+
 -- Catálogo de acciones. Se agrega una fila por cada permiso nuevo del
 -- sistema; no hace falta tocar código para asignarlo.
 CREATE TABLE permiso (

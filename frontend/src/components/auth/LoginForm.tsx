@@ -1,5 +1,6 @@
+import { ForgotPasswordModal } from './ForgotPasswordModal';
 import React, { useState, useRef, useEffect } from 'react';
-import { Eye, EyeOff, Loader2, ArrowRight, Lock, User, HelpCircle } from 'lucide-react';
+import { Eye, EyeOff, Loader2, ArrowRight, Lock, User } from 'lucide-react';
 import { authService } from '../../services/authService';
 import { AuthResult, LoginCredentials } from '../../types/auth';
 import { AlertBanner } from '../common/AlertBanner';
@@ -252,33 +253,12 @@ export const LoginForm: React.FC<LoginFormProps> = ({
         </p>
       </div>
 
-      {/* Modal / Diálogo simple de recuperación de clave */}
-      {showRecoveryModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-none">
-          <div className="bg-white border border-slate-300 rounded-md shadow-lg max-w-sm w-full p-5 space-y-4">
-            <div className="flex items-center gap-2 text-slate-900 font-semibold text-sm">
-              <HelpCircle className="w-4 h-4 text-slate-700" />
-              <span>Restablecimiento de Credenciales</span>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Por políticas de seguridad en logística de mercaderías, los restablecimientos de contraseña se gestionan mediante el Administrador de sucursal o contactando al Centro de Cómputos:
-            </p>
-            <div className="bg-slate-50 p-2.5 rounded border border-slate-200 text-xs font-mono text-slate-700 space-y-1">
-              <div>Email: <strong>soporte@distribuidora.com.ar</strong></div>
-              <div>Tel: <strong>+54 (221) 456-7890</strong></div>
-            </div>
-            <div className="flex justify-end pt-2">
-              <button
-                type="button"
-                onClick={() => setShowRecoveryModal(false)}
-                className="px-3 py-1.5 text-xs font-medium bg-slate-900 text-white rounded hover:bg-slate-800"
-              >
-                Entendido
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Modal interactivo de recuperación de contraseña */}
+      <ForgotPasswordModal
+        isOpen={showRecoveryModal}
+        onClose={() => setShowRecoveryModal(false)}
+        initialEmail={identifier.includes('@') ? identifier : ''}
+      />
     </div>
   );
 };

@@ -225,6 +225,76 @@ class AuthService {
       // Ignorar fallback
     }
   }
+
+  /**
+   * ESCENARIO 1: Solicitud de restablecimiento de contraseña
+   */
+  public async requestPasswordReset(email: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const data = await response.json();
+      return {
+        success: data.success,
+        message: data.message || 'Si el correo electrónico coincide con una cuenta activa, recibirá las instrucciones para restablecer su contraseña en su casilla de correo.',
+      };
+    } catch {
+      return {
+        success: false,
+        message: 'No se pudo conectar con el servidor backend.',
+      };
+    }
+  }
+
+  /**
+   * ESCENARIOS 2 y 3: Pre-validación del token de restablecimiento
+   */
+  public async validateResetToken(token: string): Promise<{ valid: boolean; error?: string; message: string }> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/reset-password/validate?token=${encodeURIComponent(token.trim())}`);
+      const data = await response.json();
+      return {
+        valid: response.ok && !!data.valid,
+        error: data.error,
+        message: data.message || (response.ok ? 'Token válido.' : 'El enlace de recuperación es inválido o ha caducado.'),
+      };
+    } catch {
+      return {
+        valid: false,
+        error: 'NETWORK_ERROR',
+        message: 'No se pudo conectar con el servidor backend.',
+      };
+    }
+  }
+
+  /**
+   * ESCENARIOS 2 y 3: Restablecimiento de contraseña con token
+   */
+  public async resetPassword(token: string, newPassword: string): Promise<{ success: boolean; error?: string; message: string }> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token.trim(), newPassword }),
+      });
+      const data = await response.json();
+      return {
+        success: response.ok && !!data.success,
+        error: data.error,
+        message: data.message || (response.ok ? 'Contraseña actualizada exitosamente.' : 'No se pudo actualizar la contraseña.'),
+      };
+    } catch {
+      return {
+        success: false,
+        error: 'NETWORK_ERROR',
+        message: 'No se pudo conectar con el servidor backend.',
+      };
+    }
+  }
+
 }
 
 export const authService = new AuthService();

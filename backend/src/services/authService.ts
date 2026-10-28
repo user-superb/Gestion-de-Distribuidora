@@ -1,3 +1,4 @@
+import { sendPasswordResetEmail } from './emailService.js';
 // backend/src/services/authService.ts
 import crypto from 'node:crypto';
 import bcryptjs from 'bcryptjs';
@@ -339,5 +340,265 @@ export const authService = {
       failedAttempts: attempts.count,
       maxAttempts: MAX_FAILED_ATTEMPTS,
     };
+  },
+
+  /**
+   * Valida la política de robustez de contraseñas
+   */
+  validatePasswordPolicy(password: string): { valid: boolean; error?: string } {
+    if (!password || typeof password !== 'string') {
+      return { valid: false, error: 'La contraseña es obligatoria.' };
+    }
+    if (Buffer.byteLength(password, 'utf8') > 72) {
+      return { valid: false, error: 'La contraseña no puede exceder 72 bytes.' };
+    }
+    if (password.length < 12) {
+      return { valid: false, error: 'La contraseña debe contener al menos 12 caracteres.' };
+    }
+    if (!/\d/.test(password)) {
+      return { valid: false, error: 'La contraseña debe incluir al menos un número.' };
+    }
+    if (!/[^a-zA-Z0-9]/.test(password)) {
+      return { valid: false, error: 'La contraseña debe incluir al menos un carácter especial (ej. !@#$%^&*).' };
+    }
+    return { valid: true };
+  },
+
+  /**
+   * ESCENARIO 1: Solicitud de restablecimiento de contraseña
+   * Respuesta genérica para evitar enumeración de usuarios
+   */
+  async requestPasswordReset(email: string): Promise<{ success: boolean; message: string }> {
+    const genericResponse = {
+      success: true,
+      message: 'Si el correo electrónico coincide con una cuenta activa, recibirá las instrucciones para restablecer su contraseña en su casilla de correo.',
+    };
+
+    if (!email || typeof email !== 'string') {
+      return genericResponse;
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    try {
+      const userResult = await db.query(
+        'SELECT id, email, activo FROM usuario WHERE LOWER(email) = $1 LIMIT 1',
+        [cleanEmail]
+      );
+      const user = userResult.rows[0];
+
+      if (!user || !user.activo) {
+        return genericResponse;
+      }
+
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+      const expiresAt = new Date(Date.now() + 20 * 60 * 1000);
+
+      await db.query(
+        'INSERT INTO token_recuperacion_contrasena (usuario_id, token_hash, expira_en, usado) VALUES ($1, $2, $3, false)',
+        [user.id, tokenHash, expiresAt]
+      );
+
+      const frontendBaseUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+      const resetUrl = `${frontendBaseUrl}/reset-password?token=${rawToken}`;
+
+      await sendPasswordResetEmail({
+        to: user.email,
+        resetUrl,
+      });
+
+      return genericResponse;
+    } catch (error: any) {
+      console.error('Error al solicitar restablecimiento de contraseña:', error?.message || error);
+      return genericResponse;
+    }
+  },
+
+  /**
+   * ESCENARIO 2 y 3: Validación previa del token de recuperación
+   */
+  async validateResetToken(rawToken: string): Promise<{
+    valid: boolean;
+    error?: 'TOKEN_INVALIDO' | 'TOKEN_EXPIRADO' | 'TOKEN_YA_UTILIZADO' | 'USUARIO_INACTIVO';
+    message: string;
+  }> {
+    if (!rawToken || typeof rawToken !== 'string') {
+      return {
+        valid: false,
+        error: 'TOKEN_INVALIDO',
+        message: 'El enlace de recuperación es inválido.',
+      };
+    }
+
+    try {
+      const tokenHash = crypto.createHash('sha256').update(rawToken.trim()).digest('hex');
+      const result = await db.query(
+        'SELECT t.id, t.expira_en, t.usado, u.activo FROM token_recuperacion_contrasena t JOIN usuario u ON u.id = t.usuario_id WHERE t.token_hash = $1 LIMIT 1',
+        [tokenHash]
+      );
+
+      const record = result.rows[0];
+      if (!record) {
+        return {
+          valid: false,
+          error: 'TOKEN_INVALIDO',
+          message: 'El enlace de recuperación no es válido o no existe.',
+        };
+      }
+
+      if (record.usado) {
+        return {
+          valid: false,
+          error: 'TOKEN_YA_UTILIZADO',
+          message: 'El enlace de recuperación ya ha sido utilizado. Por favor genere uno nuevo.',
+        };
+      }
+
+      const now = new Date();
+      if (now > new Date(record.expira_en)) {
+        return {
+          valid: false,
+          error: 'TOKEN_EXPIRADO',
+          message: 'El enlace de recuperación ha caducado por superar el tiempo límite de 20 minutos. Por favor genere uno nuevo.',
+        };
+      }
+
+      if (!record.activo) {
+        return {
+          valid: false,
+          error: 'USUARIO_INACTIVO',
+          message: 'El usuario asociado se encuentra inactivo.',
+        };
+      }
+
+      return {
+        valid: true,
+        message: 'Token válido.',
+      };
+    } catch (error: any) {
+      console.error('Error al validar token de recuperación:', error?.message || error);
+      return {
+        valid: false,
+        error: 'TOKEN_INVALIDO',
+        message: 'Error al comprobar la validez del enlace.',
+      };
+    }
+  },
+
+  /**
+   * ESCENARIOS 2 y 3: Consumo del token y restablecimiento atómico de contraseña
+   */
+  async resetPasswordWithToken(rawToken: string, newPassword: string): Promise<{
+    success: boolean;
+    error?: 'POLITICA_NO_CUMPLIDA' | 'TOKEN_INVALIDO' | 'TOKEN_EXPIRADO' | 'TOKEN_YA_UTILIZADO' | 'USUARIO_INACTIVO';
+    message: string;
+  }> {
+    const policy = authService.validatePasswordPolicy(newPassword);
+    if (!policy.valid) {
+      return {
+        success: false,
+        error: 'POLITICA_NO_CUMPLIDA',
+        message: policy.error || 'La contraseña no cumple con los requisitos de seguridad.',
+      };
+    }
+
+    if (!rawToken || typeof rawToken !== 'string') {
+      return {
+        success: false,
+        error: 'TOKEN_INVALIDO',
+        message: 'El enlace de recuperación es inválido.',
+      };
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(rawToken.trim()).digest('hex');
+    const client = await db.getPool().connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const tokenResult = await client.query(
+        'SELECT t.id, t.usuario_id, t.expira_en, t.usado, u.activo FROM token_recuperacion_contrasena t JOIN usuario u ON u.id = t.usuario_id WHERE t.token_hash = $1 FOR UPDATE',
+        [tokenHash]
+      );
+
+      const record = tokenResult.rows[0];
+      if (!record) {
+        await client.query('ROLLBACK');
+        return {
+          success: false,
+          error: 'TOKEN_INVALIDO',
+          message: 'El enlace de recuperación no es válido o no existe.',
+        };
+      }
+
+      if (record.usado) {
+        await client.query('ROLLBACK');
+        return {
+          success: false,
+          error: 'TOKEN_YA_UTILIZADO',
+          message: 'El enlace de recuperación ya ha sido utilizado. Por favor genere uno nuevo.',
+        };
+      }
+
+      const now = new Date();
+      if (now > new Date(record.expira_en)) {
+        await client.query('ROLLBACK');
+        return {
+          success: false,
+          error: 'TOKEN_EXPIRADO',
+          message: 'El enlace de recuperación ha caducado por superar el tiempo límite de 20 minutos. Por favor genere uno nuevo.',
+        };
+      }
+
+      if (!record.activo) {
+        await client.query('ROLLBACK');
+        return {
+          success: false,
+          error: 'USUARIO_INACTIVO',
+          message: 'El usuario asociado se encuentra inactivo.',
+        };
+      }
+
+      // Invalidación atómica del token de un solo uso
+      const updateTokenResult = await client.query(
+        'UPDATE token_recuperacion_contrasena SET usado = true, usado_en = now() WHERE id = $1 AND usado = false RETURNING id',
+        [record.id]
+      );
+
+      if (!updateTokenResult.rowCount || updateTokenResult.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return {
+          success: false,
+          error: 'TOKEN_YA_UTILIZADO',
+          message: 'El enlace de recuperación ya ha sido utilizado. Por favor genere uno nuevo.',
+        };
+      }
+
+      const newHash = await bcryptjs.hash(newPassword, 10);
+
+      await client.query(
+        'UPDATE usuario SET password_hash = $1, actualizado_en = now() WHERE id = $2',
+        [newHash, record.usuario_id]
+      );
+
+      await client.query(
+        'UPDATE sesion_usuario SET revocado = true, revocado_en = now(), motivo_cierre = \'manual\' WHERE usuario_id = $1 AND revocado = false',
+        [record.usuario_id]
+      );
+
+      await client.query('COMMIT');
+
+      return {
+        success: true,
+        message: 'Contraseña actualizada exitosamente.',
+      };
+    } catch (error: any) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      console.error('Error restableciendo contraseña:', error?.message || error);
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 };
