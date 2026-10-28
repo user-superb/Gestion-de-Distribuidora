@@ -123,6 +123,11 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
   const [hojaParaEliminarId, setHojaParaEliminarId] = useState<string | null>(null);
   const [textoConfirmacionEliminar, setTextoConfirmacionEliminar] = useState<string>('');
   const [isEliminando, setIsEliminando] = useState<boolean>(false);
+  // Confirmación deliberada por tipeo para quitar una visita de una hoja de ruta
+  const [visitaParaQuitarId, setVisitaParaQuitarId] = useState<string | null>(null);
+  const [hojaDeVisitaParaQuitarId, setHojaDeVisitaParaQuitarId] = useState<string | null>(null);
+  const [textoConfirmacionQuitarVisita, setTextoConfirmacionQuitarVisita] = useState<string>('');
+  const [isQuitandoVisita, setIsQuitandoVisita] = useState<boolean>(false);
 
   const getComercio = (id: string) =>
     comercios.find((c) => c.id === id) || remitoService.getComercioById(id);
@@ -527,6 +532,74 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
       }
     } finally {
       setIsEliminando(false);
+    }
+  };
+
+  const handleSolicitarQuitarVisita = (visita: Visita, hoja: HojaDeRuta) => {
+    const estadoVisita = String(visita.estado || '').toLowerCase();
+    const esVisitaEntregada =
+      estadoVisita === 'completada' ||
+      estadoVisita === 'entregado' ||
+      (visita.remitos || []).some(
+        (r) => r.estado === 'entregado' || r.estado === 'no_entregado' || r.estado === 'devuelto'
+      ) ||
+      hoja.estado === 'cerrada';
+
+    if (esVisitaEntregada) {
+      setMensaje({
+        tipo: 'error',
+        texto: 'No se puede quitar la visita: ya fue entregada o se encuentra completada en la ruta histórica.',
+      });
+      return;
+    }
+
+    setVisitaParaQuitarId(visita.id);
+    setHojaDeVisitaParaQuitarId(hoja.id);
+    setTextoConfirmacionQuitarVisita('');
+  };
+
+  const handleCancelarQuitarVisita = () => {
+    setVisitaParaQuitarId(null);
+    setHojaDeVisitaParaQuitarId(null);
+    setTextoConfirmacionQuitarVisita('');
+  };
+
+  const handleConfirmarQuitarVisita = async (visita: Visita, hoja: HojaDeRuta) => {
+    const comercio = getComercio(visita.comercioId);
+    const nombreEsperado = (comercio?.razonSocial || `Parada ${visita.orden || ''}`).trim().toLowerCase();
+    const textoLimpio = textoConfirmacionQuitarVisita.trim().toLowerCase();
+    const paradaIdentificador = `parada ${visita.orden || ''}`.trim().toLowerCase();
+
+    if (textoLimpio !== nombreEsperado && textoLimpio !== paradaIdentificador) {
+      setMensaje({
+        tipo: 'error',
+        texto: `El texto ingresado no coincide con "${comercio?.razonSocial || 'el nombre'}". Escribilo exactamente para confirmar.`,
+      });
+      return;
+    }
+
+    setIsQuitandoVisita(true);
+    setMensaje(null);
+
+    try {
+      const res = await remitoService.quitarVisitaDeHojaDeRutaAsync(visita.id, hoja.id);
+      if (res.success) {
+        await recargarDatos();
+        setVisitaParaQuitarId(null);
+        setHojaDeVisitaParaQuitarId(null);
+        setTextoConfirmacionQuitarVisita('');
+        setMensaje({
+          tipo: 'exito',
+          texto: `La parada (${comercio?.razonSocial || 'visita'}) fue removida de la hoja de ruta y sus remitos volvieron a la bandeja de pendientes.`,
+        });
+      } else {
+        setMensaje({
+          tipo: 'error',
+          texto: res.error || 'No se pudo quitar la visita de la hoja de ruta.',
+        });
+      }
+    } finally {
+      setIsQuitandoVisita(false);
     }
   };
 
@@ -2026,29 +2099,136 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                           <div className="px-3 py-1.5 bg-slate-100 text-[11px] font-bold text-slate-700 uppercase">
                             Cronograma de paradas ({visitasHoja.length})
                           </div>
-                          <div className="divide-y divide-slate-200 max-h-48 overflow-y-auto">
+                          <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
                             {visitasHoja.map((visita, idx) => {
                               const comercio = getComercio(visita.comercioId);
                               const ordenNumero = visita.orden ?? idx + 1;
+                              const estadoVisita = String(visita.estado || '').toLowerCase();
+                              const esVisitaEntregada =
+                                estadoVisita === 'completada' ||
+                                estadoVisita === 'entregado' ||
+                                (visita.remitos || []).some(
+                                  (r) => r.estado === 'entregado' || r.estado === 'no_entregado' || r.estado === 'devuelto'
+                                ) ||
+                                hoja.estado === 'cerrada';
+
+                              const esParaQuitar = visitaParaQuitarId === visita.id && hojaDeVisitaParaQuitarId === hoja.id;
+                              const nombreComercio = comercio?.razonSocial || `Parada ${ordenNumero}`;
+                              const textoLimpio = textoConfirmacionQuitarVisita.trim().toLowerCase();
+                              const esTextoCoincidente =
+                                textoLimpio === nombreComercio.trim().toLowerCase() ||
+                                textoLimpio === `parada ${ordenNumero}`.toLowerCase();
+
                               return (
-                                <div
-                                  key={visita.id}
-                                  className="p-2.5 flex items-center justify-between text-xs hover:bg-slate-50"
-                                >
-                                  <div>
-                                    <div className="flex items-center gap-2">
-                                      <span className="px-1.5 py-0.5 rounded bg-blue-700 text-white font-mono font-bold text-[10px]">
-                                        Parada {ordenNumero}
-                                      </span>
-                                      <strong className="text-slate-900">{comercio?.razonSocial}</strong>
+                                <div key={visita.id} className="transition-colors">
+                                  <div
+                                    className={`p-2.5 flex items-center justify-between text-xs hover:bg-slate-50 ${
+                                      esParaQuitar ? 'bg-amber-50/60' : ''
+                                    }`}
+                                  >
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <span className="px-1.5 py-0.5 rounded bg-blue-700 text-white font-mono font-bold text-[10px]">
+                                          Parada {ordenNumero}
+                                        </span>
+                                        <strong className="text-slate-900">{comercio?.razonSocial}</strong>
+                                        {esVisitaEntregada && (
+                                          <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-semibold text-[10px]">
+                                            Entregado / Histórica
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-[11px] text-slate-500 mt-0.5">
+                                        {comercio?.domicilio} • {visita.remitos.length} remito(s)
+                                      </div>
                                     </div>
-                                    <div className="text-[11px] text-slate-500 mt-0.5">
-                                      {comercio?.domicilio} • {visita.remitos.length} remito(s)
+                                    <div className="flex items-center gap-3">
+                                      <span className="font-mono font-bold text-slate-900">
+                                        ${visita.importeTotal.toLocaleString('es-AR')}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        disabled={esVisitaEntregada}
+                                        onClick={() => handleSolicitarQuitarVisita(visita, hoja)}
+                                        className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded border transition-colors ${
+                                          esVisitaEntregada
+                                            ? 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400 border-slate-200'
+                                            : esParaQuitar
+                                            ? 'bg-amber-100 border-amber-400 text-amber-900'
+                                            : 'text-red-700 bg-white hover:bg-red-50 border-red-300 cursor-pointer'
+                                        }`}
+                                        title={
+                                          esVisitaEntregada
+                                            ? 'No se puede quitar: la visita ya fue entregada o completada.'
+                                            : 'Quitar esta parada de la hoja de ruta y reprogramar remitos'
+                                        }
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                        <span>Quitar</span>
+                                      </button>
                                     </div>
                                   </div>
-                                  <span className="font-mono font-bold text-slate-900">
-                                    ${visita.importeTotal.toLocaleString('es-AR')}
-                                  </span>
+
+                                  {/* Cuadro de Confirmación Deliberada por Tipeo para Quitar Visita */}
+                                  {esParaQuitar && (
+                                    <div className="p-3 bg-red-50/95 border-t border-b border-red-200 text-xs text-red-900 space-y-2 animate-in fade-in duration-150">
+                                      <div className="flex items-start gap-2">
+                                        <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                                        <div className="space-y-0.5">
+                                          <strong className="text-xs font-bold text-red-950 block">
+                                            ¿Deseás quitar la Parada {ordenNumero} ({nombreComercio}) de la hoja de ruta?
+                                          </strong>
+                                          <p className="text-[11px] text-red-800">
+                                            Se eliminará la parada y sus {visita.remitos.length} remito(s) volverán a la bandeja de pendientes para reprogramarlos en otra secuencia.
+                                            Para confirmar, escribí el nombre del comercio{' '}
+                                            <span className="font-mono font-bold bg-red-100 text-red-950 px-1 py-0.5 rounded border border-red-300 select-all">
+                                              {nombreComercio}
+                                            </span>{' '}
+                                            a continuación:
+                                          </p>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                                        <input
+                                          type="text"
+                                          autoFocus
+                                          placeholder={`Escribí "${nombreComercio}"`}
+                                          value={textoConfirmacionQuitarVisita}
+                                          onChange={(e) => setTextoConfirmacionQuitarVisita(e.target.value)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                              e.preventDefault();
+                                              if (esTextoCoincidente && !isQuitandoVisita) {
+                                                void handleConfirmarQuitarVisita(visita, hoja);
+                                              }
+                                            }
+                                          }}
+                                          className="bg-white border border-red-300 rounded px-2.5 py-1 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 w-52 placeholder-slate-400"
+                                        />
+                                        <button
+                                          type="button"
+                                          disabled={!esTextoCoincidente || isQuitandoVisita}
+                                          onClick={() => void handleConfirmarQuitarVisita(visita, hoja)}
+                                          className={`px-2.5 py-1 text-xs font-bold rounded flex items-center gap-1 transition-all ${
+                                            esTextoCoincidente && !isQuitandoVisita
+                                              ? 'bg-red-600 hover:bg-red-700 text-white cursor-pointer shadow-xs'
+                                              : 'bg-red-200 text-red-400 cursor-not-allowed opacity-70'
+                                          }`}
+                                        >
+                                          <Trash2 className="w-3 h-3" />
+                                          <span>{isQuitandoVisita ? 'Quitando...' : 'Confirmar remoción'}</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={handleCancelarQuitarVisita}
+                                          className="px-2 py-1 text-xs text-slate-600 hover:text-slate-800 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors cursor-pointer"
+                                        >
+                                          Cancelar
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}

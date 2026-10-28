@@ -490,15 +490,102 @@ export const remitoService = {
     return { success: true, hojaDeRuta: actualizada };
   },
 
-  desagruparVisita: (visitaId: string): void => {
-    const visita = mockVisitas.find((v) => v.id === visitaId);
-    if (!visita) return;
+  quitarVisitaDeHojaDeRuta: (
+    visitaId: string,
+    hojaDeRutaId?: string
+  ): { success: boolean; error?: string; status?: number; remitosLiberados?: Remito[] } => {
+    if (!visitaId) {
+      return { success: false, error: 'Debe especificar el ID de la visita.', status: 400 };
+    }
 
-    const idsEnVisita = visita.remitos.map((r) => r.id);
-    mockRemitos = mockRemitos.map((r) =>
-      idsEnVisita.includes(r.id) ? { ...r, estado: 'PENDIENTE' } : r
+    const visita = mockVisitas.find((v) => v.id === visitaId);
+    if (!visita) {
+      return { success: false, error: 'La visita especificada no existe.', status: 404 };
+    }
+
+    if (hojaDeRutaId && visita.hojaDeRutaId && visita.hojaDeRutaId !== hojaDeRutaId) {
+      return { success: false, error: 'La visita no pertenece a la hoja de ruta indicada.', status: 400 };
+    }
+
+    // ESCENARIO 2: Fallo por visita completada: Se intenta quitar una visita cuyo estado es "Entregado"
+    const estadoVisita = String(visita.estado || '').toLowerCase();
+    const esVisitaEntregada = estadoVisita === 'completada' || estadoVisita === 'entregado';
+    const tieneRemitoEntregado = (visita.remitos || []).some(
+      (r) => r.estado === 'entregado' || r.estado === 'no_entregado' || r.estado === 'devuelto'
     );
+    const parentHoja = visita.hojaDeRutaId ? mockHojasDeRuta.find((h) => h.id === visita.hojaDeRutaId) : null;
+    const esHojaCerrada = parentHoja?.estado === 'cerrada';
+
+    if (esVisitaEntregada || tieneRemitoEntregado || esHojaCerrada) {
+      return {
+        success: false,
+        error: 'No se puede quitar la visita: ya fue entregada o se encuentra completada.',
+        status: 409,
+      };
+    }
+
+    // ESCENARIO 1: Remoción exitosa: Se elimina la parada. Los remitos vuelven a la bandeja de pendientes de asignación.
+    const idsEnVisita = (visita.remitos || []).map((r) => r.id);
+    const liberados: Remito[] = [];
+
+    mockRemitos = mockRemitos.map((r) => {
+      if (idsEnVisita.includes(r.id)) {
+        const actualizado: Remito = { ...r, estado: 'PENDIENTE', visitaId: undefined };
+        liberados.push(actualizado);
+        return actualizado;
+      }
+      return r;
+    });
+
     mockVisitas = mockVisitas.filter((v) => v.id !== visitaId);
+
+    const targetHojaId = visita.hojaDeRutaId;
+    if (targetHojaId) {
+      let nuevoOrden = 1;
+      mockVisitas = mockVisitas.map((v) => {
+        if (v.hojaDeRutaId === targetHojaId) {
+          return { ...v, orden: nuevoOrden++ };
+        }
+        return v;
+      });
+
+      const visitasRestantes = mockVisitas.filter((v) => v.hojaDeRutaId === targetHojaId);
+      mockHojasDeRuta = mockHojasDeRuta.map((h) => {
+        if (h.id === targetHojaId) {
+          return {
+            ...h,
+            visitas: visitasRestantes,
+            cantidadVisitas: visitasRestantes.length,
+            cantidadRemitos: visitasRestantes.reduce((acc, v) => acc + (v.remitos?.length || 0), 0),
+            importeTotal: visitasRestantes.reduce((acc, v) => acc + v.importeTotal, 0),
+          };
+        }
+        return h;
+      });
+      if (mockHojaDeRuta.id === targetHojaId) {
+        mockHojaDeRuta = {
+          ...mockHojaDeRuta,
+          visitas: visitasRestantes,
+          cantidadVisitas: visitasRestantes.length,
+          cantidadRemitos: visitasRestantes.reduce((acc, v) => acc + (v.remitos?.length || 0), 0),
+          importeTotal: visitasRestantes.reduce((acc, v) => acc + v.importeTotal, 0),
+        };
+      }
+    }
+
+    return {
+      success: true,
+      remitosLiberados: liberados,
+    };
+  },
+
+  desagruparVisita: (visitaId: string): void => {
+    const res = remitoService.quitarVisitaDeHojaDeRuta(visitaId);
+    if (!res.success) {
+      const err: any = new Error(res.error || 'Error al desagrupar la visita.');
+      err.status = res.status || 409;
+      throw err;
+    }
   },
 
 
@@ -758,17 +845,43 @@ export const remitoService = {
     return remitoService.agruparEnVisita(remitosIds);
   },
 
-  async desagruparVisitaAsync(visitaId: string): Promise<void> {
+  async quitarVisitaDeHojaDeRutaAsync(
+    visitaId: string,
+    hojaDeRutaId?: string
+  ): Promise<{ success: boolean; error?: string; status?: number; remitosLiberados?: Remito[] }> {
     try {
-      const res = await fetch(`${API_BASE}/visitas/${encodeURIComponent(visitaId)}`, {
+      const url = hojaDeRutaId
+        ? `${API_BASE}/hojas-de-ruta/${encodeURIComponent(hojaDeRutaId)}/visitas/${encodeURIComponent(visitaId)}`
+        : `${API_BASE}/visitas/${encodeURIComponent(visitaId)}`;
+      const res = await fetch(url, {
         method: 'DELETE',
         signal: AbortSignal.timeout(3000),
       });
-      if (res.ok) return;
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
+        remitoService.quitarVisitaDeHojaDeRuta(visitaId, hojaDeRutaId);
+        return data;
+      }
+      if (data?.error) {
+        return {
+          success: false,
+          error: data.error,
+          status: res.status,
+        };
+      }
     } catch {
-      // Fallback
+      // Fallback a lógica en memoria
     }
-    remitoService.desagruparVisita(visitaId);
+    return remitoService.quitarVisitaDeHojaDeRuta(visitaId, hojaDeRutaId);
+  },
+
+  async desagruparVisitaAsync(visitaId: string): Promise<void> {
+    const res = await remitoService.quitarVisitaDeHojaDeRutaAsync(visitaId);
+    if (!res.success) {
+      const err: any = new Error(res.error || 'Error al desagrupar la visita.');
+      err.status = res.status || 409;
+      throw err;
+    }
   },
 
   async resetearDatosAsync(): Promise<void> {

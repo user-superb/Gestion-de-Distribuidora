@@ -19,7 +19,7 @@ export function fechaOperativaHoy(ahora = new Date()): string {
 export function esHojaOperativaVigente(hoja: HojaDeRuta | null | undefined, fechaHoy = fechaOperativaHoy()): boolean {
   if (!hoja) return false;
   if (hoja.fechaReparto !== fechaHoy) return false;
-  const estadosHabilitados = ['publicada', 'asignada', 'en_curso'];
+  const estadosHabilitados = ['publicada', 'asignada', 'en_curso', 'pendiente_de_despacho'];
   return estadosHabilitados.includes(hoja.estado.toLowerCase().trim());
 }
 

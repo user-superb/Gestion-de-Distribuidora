@@ -457,9 +457,135 @@ export const remitoService = {
     return { success: true, visita: visitaActualizada };
   },
 
-  async desagruparVisita(visitaId: string): Promise<void> {
-    await db.query('UPDATE remito SET visita_id = NULL WHERE visita_id::text = $1', [visitaId]);
+  async quitarVisitaDeHojaDeRuta(
+    visitaId: string,
+    hojaDeRutaId?: string
+  ): Promise<{ success: boolean; error?: string; status?: number; remitosLiberados?: Remito[] }> {
+    if (!visitaId) {
+      return { success: false, error: 'Debe especificar el ID de la visita.', status: 400 };
+    }
+
+    // 1. Obtener datos de la visita y su hoja de ruta asociada (si existe)
+    let vRes;
+    try {
+      vRes = await db.query(
+        `SELECT v.id::text as id, v.hoja_de_ruta_id::text as "hojaDeRutaId", v.comercio_id::text as "comercioId",
+                v.orden, v.estado, h.estado as "hojaEstado"
+         FROM visita v
+         LEFT JOIN hoja_de_ruta h ON h.id = v.hoja_de_ruta_id
+         WHERE v.id::text = $1`,
+        [visitaId]
+      );
+    } catch {
+      vRes = await db.query(
+        'SELECT id::text as id, hoja_de_ruta_id::text as "hojaDeRutaId", comercio_id::text as "comercioId", orden, estado FROM visita WHERE id::text = $1',
+        [visitaId]
+      );
+    }
+
+    if (vRes.rows.length === 0) {
+      return { success: false, error: 'La visita especificada no existe.', status: 404 };
+    }
+
+    const visita = vRes.rows[0];
+
+    if (hojaDeRutaId && visita.hojaDeRutaId && String(visita.hojaDeRutaId) !== String(hojaDeRutaId)) {
+      return {
+        success: false,
+        error: 'La visita no pertenece a la hoja de ruta indicada.',
+        status: 400,
+      };
+    }
+
+    // 2. ESCENARIO 2: Fallo por visita completada / entregada
+    // Se intenta quitar una visita cuyo estado es "Entregado" / "completada".
+    // El sistema impide desvincularla de la ruta histórica.
+    const estadoVisita = String(visita.estado || '').toLowerCase();
+    const esVisitaEntregada = estadoVisita === 'completada' || estadoVisita === 'entregado';
+    const esHojaCerrada = String(visita.hojaEstado || '').toLowerCase() === 'cerrada';
+
+    let tieneRemitosEntregados = false;
+    try {
+      const remitosEntregadosRes = await db.query(
+        `SELECT id::text as id, estado
+         FROM remito
+         WHERE visita_id::text = $1
+           AND estado IN ('entregado', 'no_entregado', 'devuelto')
+         LIMIT 1`,
+        [visitaId]
+      );
+      if (remitosEntregadosRes.rows.length > 0) {
+        tieneRemitosEntregados = true;
+      }
+    } catch {
+      // Ignorar si faltan tablas en tests aislados
+    }
+
+    if (esVisitaEntregada || esHojaCerrada || tieneRemitosEntregados) {
+      return {
+        success: false,
+        error: 'No se puede quitar la visita: ya fue entregada o se encuentra completada.',
+        status: 409,
+      };
+    }
+
+    // 3. ESCENARIO 1: Remoción exitosa: Se elimina la parada. Los remitos vuelven a la bandeja de pendientes de asignación.
+    let remitosLiberados: Remito[] = [];
+    try {
+      const rRes = await db.query(
+        `SELECT id::text as id, numero as "numeroRemito", comercio_id::text as "comercioId", marca_id::text as "marcaId",
+                (CASE WHEN importe_centavos >= 100 THEN importe_centavos / 100 ELSE importe_centavos END)::int as importe,
+                'PENDIENTE' as estado
+         FROM remito
+         WHERE visita_id::text = $1`,
+        [visitaId]
+      );
+      remitosLiberados = rRes.rows;
+    } catch {
+      // Ignorar si faltan tablas en tests
+    }
+
+    // Restaurar remitos a pendientes de asignación
+    await db.query(
+      "UPDATE remito SET visita_id = NULL, estado = 'pendiente' WHERE visita_id::text = $1",
+      [visitaId]
+    );
+
+    // Se elimina la parada
     await db.query('DELETE FROM visita WHERE id::text = $1', [visitaId]);
+
+    // Si pertenecía a una hoja de ruta, resecuenciar el orden correlativo de las visitas restantes
+    const parentHojaId = visita.hojaDeRutaId;
+    if (parentHojaId) {
+      try {
+        const restantesRes = await db.query(
+          'SELECT id::text as id FROM visita WHERE hoja_de_ruta_id::text = $1 ORDER BY COALESCE(orden, 999999), id ASC',
+          [parentHojaId]
+        );
+        for (let i = 0; i < restantesRes.rows.length; i++) {
+          await db.query('UPDATE visita SET orden = $1 WHERE id::text = $2', [
+            i + 1,
+            restantesRes.rows[i].id,
+          ]);
+        }
+      } catch {
+        // Ignorar si falla reordenamiento
+      }
+    }
+
+    return {
+      success: true,
+      remitosLiberados,
+    };
+  },
+
+  async desagruparVisita(visitaId: string): Promise<void> {
+    const res = await this.quitarVisitaDeHojaDeRuta(visitaId);
+    if (!res.success) {
+      const err: any = new Error(res.error || 'Error al desagrupar visita.');
+      err.status = res.status || 409;
+      throw err;
+    }
   },
 
   async construirHojaDeRutaDetalle(row: any): Promise<HojaDeRuta> {

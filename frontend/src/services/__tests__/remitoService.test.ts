@@ -566,3 +566,102 @@ describe('Historia de Usuario #19 - Anexar una Entrega a una Ruta', () => {
     expect(resAnulada.error).toMatch(/no se encuentra abierta/i);
   });
 });
+
+describe('Historia de Usuario - Quitar una visita de una hoja de ruta para reprogramarla en otra secuencia', () => {
+  beforeEach(() => {
+    remitoService.resetearDatosMock();
+  });
+
+  it('ESCENARIO 1: Remoción exitosa: Se elimina la parada. Los remitos vuelven a la bandeja de pendientes de asignación.', () => {
+    // 1. Armamos dos visitas con remitos
+    const v1Res = remitoService.agruparEnVisita(['rem-1', 'rem-2']);
+    const v2Res = remitoService.agruparEnVisita(['rem-3', 'rem-4']);
+    expect(v1Res.success).toBe(true);
+    expect(v2Res.success).toBe(true);
+
+    const visita2Id = v2Res.visita!.id;
+
+    // 2. Programamos la hoja de ruta
+    const prog = remitoService.asignarFechaHojaDeRuta('2026-10-30', '2026-10-25');
+    const hojaId = prog.hojaDeRuta!.id;
+
+    // Inicialmente los remitos no están pendientes
+    expect(remitoService.getRemitosPendientes().some((r) => r.id === 'rem-3')).toBe(false);
+
+    // 3. Quitar la visita 2 de la hoja de ruta
+    const resultado = remitoService.quitarVisitaDeHojaDeRuta(visita2Id, hojaId);
+    expect(resultado.success).toBe(true);
+    expect(resultado.remitosLiberados?.map((r) => r.id)).toEqual(
+      expect.arrayContaining(['rem-3', 'rem-4'])
+    );
+
+    // 4. Los remitos vuelven a la bandeja de pendientes de asignación
+    const pendientes = remitoService.getRemitosPendientes();
+    expect(pendientes.some((r) => r.id === 'rem-3')).toBe(true);
+    expect(pendientes.some((r) => r.id === 'rem-4')).toBe(true);
+
+    // 5. La parada fue eliminada de la lista de visitas
+    const visitas = remitoService.getVisitas();
+    expect(visitas.some((v) => v.id === visita2Id)).toBe(false);
+
+    // 6. La hoja de ruta actualiza sus totales y visitas
+    const hojas = remitoService.getHojasDeRuta();
+    const hojaActualizada = hojas.find((h) => h.id === hojaId);
+    expect(hojaActualizada?.cantidadVisitas).toBe(1);
+  });
+
+  it('ESCENARIO 2: Fallo por visita completada: Se intenta quitar una visita cuyo estado es "Entregado". El sistema impide desvincularla de la ruta histórica.', () => {
+    // 1. Armamos visita y hoja
+    const vRes = remitoService.agruparEnVisita(['rem-1']);
+    const prog = remitoService.asignarFechaHojaDeRuta('2026-10-30', '2026-10-25');
+    const hojaId = prog.hojaDeRuta!.id;
+    const visitaId = vRes.visita!.id;
+
+    // 2. Simulamos que la visita fue completada/entregada
+    const visitas = remitoService.getVisitas();
+    const target = visitas.find((v) => v.id === visitaId);
+    if (target) {
+      target.estado = 'completada';
+    }
+
+    // 3. Intentar quitar la visita completada
+    const resultado = remitoService.quitarVisitaDeHojaDeRuta(visitaId, hojaId);
+    expect(resultado.success).toBe(false);
+    expect(resultado.status).toBe(409);
+    expect(resultado.error).toMatch(/no se puede quitar/i);
+
+    // La visita sigue perteneciendo a la hoja histórica
+    expect(remitoService.getVisitas().some((v) => v.id === visitaId)).toBe(true);
+  });
+
+  it('ESCENARIO 2 (variante remito entregado): Impide quitar si la visita contiene un remito con entrega efectuada', () => {
+    const vRes = remitoService.agruparEnVisita(['rem-1', 'rem-2']);
+    const prog = remitoService.asignarFechaHojaDeRuta('2026-10-30', '2026-10-25');
+    const hojaId = prog.hojaDeRuta!.id;
+    const visitaId = vRes.visita!.id;
+
+    // Marcamos un remito de la visita como entregado
+    const visitas = remitoService.getVisitas();
+    const target = visitas.find((v) => v.id === visitaId);
+    if (target && target.remitos[0]) {
+      target.remitos[0].estado = 'entregado';
+    }
+
+    const resultado = remitoService.quitarVisitaDeHojaDeRuta(visitaId, hojaId);
+    expect(resultado.success).toBe(false);
+    expect(resultado.status).toBe(409);
+    expect(resultado.error).toMatch(/no se puede quitar/i);
+  });
+
+  it('Validaciones: Retorna 404 si la visita no existe o 400 si la visita no pertenece a la hoja indicada', () => {
+    const errInexistente = remitoService.quitarVisitaDeHojaDeRuta('vis-inexistente');
+    expect(errInexistente.success).toBe(false);
+    expect(errInexistente.status).toBe(404);
+
+    const vRes = remitoService.agruparEnVisita(['rem-1']);
+    remitoService.asignarFechaHojaDeRuta('2026-10-30', '2026-10-25');
+    const errHoja = remitoService.quitarVisitaDeHojaDeRuta(vRes.visita!.id, 'hoja-otra');
+    expect(errHoja.success).toBe(false);
+    expect(errHoja.status).toBe(400);
+  });
+});

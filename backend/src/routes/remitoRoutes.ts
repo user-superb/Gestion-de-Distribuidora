@@ -101,11 +101,28 @@ remitoRouter.post('/visitas/agrupar', async (req, res) => {
 
 remitoRouter.delete('/visitas/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    await remitoService.desagruparVisita(id);
-    res.json({ success: true, message: 'Visita desagrupada exitosamente' });
+    const id = String(req.params.id);
+    const result = await remitoService.quitarVisitaDeHojaDeRuta(id);
+    if (!result.success) {
+      return res.status(result.status || 409).json(result);
+    }
+    res.json({ message: 'Visita quitada exitosamente', ...result });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.status(error?.status || 500).json({ success: false, error: error.message });
+  }
+});
+
+remitoRouter.delete(['/hojas-de-ruta/:hojaId/visitas/:visitaId', '/hoja-de-ruta/:hojaId/visitas/:visitaId'], async (req, res) => {
+  try {
+    const hojaId = String(req.params.hojaId);
+    const visitaId = String(req.params.visitaId);
+    const result = await remitoService.quitarVisitaDeHojaDeRuta(visitaId, hojaId);
+    if (!result.success) {
+      return res.status(result.status || 409).json(result);
+    }
+    res.json({ message: 'Visita quitada de la hoja de ruta exitosamente', ...result });
+  } catch (error: any) {
+    res.status(error?.status || 500).json({ success: false, error: error.message });
   }
 });
 
