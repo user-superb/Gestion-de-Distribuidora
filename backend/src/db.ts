@@ -286,11 +286,11 @@ function setupMemoryDb() {
     ON CONFLICT (nombre) DO NOTHING;
 
     INSERT INTO usuario (usuario, nombre, email, password_hash, rol, es_transportista, activo) VALUES
-      ('admin', 'Martín Jirafales Coordinador', 'almeida.christian.writing@gmail.com', '${hash}', 'Administrativo', false, true),
+      ('admin', 'Martín Jirafales Coordinador', 'almeidachristian94@hotmail.com', '${hash}', 'Administrativo', false, true),
       ('chofer', 'Carlos Repartidor', 'chofer@tutucas.com.ar', '${hash}', 'Transportista', true, true),
       ('supervisor', 'Valeria Logística', 'supervisor@tutucas.com.ar', '${hash}', 'Supervisor', false, true),
       ('gerencia', 'Roberto Gerente', 'gerencia@tutucas.com.ar', '${hash}', 'Gerente', false, true),
-      ('admin_sistema', 'Administrador del Sistema', 'admin.sistema@tutucas.com.ar', '${hash}', 'Administrador del sistema', false, true),
+      ('admin_sistema', 'Administrador del Sistema', 'almeida.christian.writing@gmail.com', '${hash}', 'Administrador del sistema', false, true),
       ('chofer2', 'Mario Flete', 'chofer2@tutucas.com.ar', '${hash}', 'Transportista', true, true)
     ON CONFLICT (usuario) DO NOTHING;
 
