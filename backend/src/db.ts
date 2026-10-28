@@ -357,14 +357,15 @@ function setupMemoryDb() {
     WHERE numero IN ('R-0001-45120', 'R-0002-89310', 'R-0001-45121', 'R-0003-11200', 'R-0002-89315');
 
     INSERT INTO movimiento_bancario (id, cuenta_id, fecha_hora, ordenante, referencia_externa, importe_centavos, estado) VALUES
-      (101, 1, now(), 'Mayorista El Sol S.R.L.', 'DEMO-E5-04-001', 15700000, 'sin_imputar'),
-      (102, 1, now(), 'Mayorista El Sol S.R.L.', 'DEMO-E5-04-002', 15450000, 'sin_imputar'),
-      (103, 1, now(), 'Mayorista El Sol S.R.L.', 'DEMO-E5-04-003', 14700000, 'sin_imputar'),
-      (104, 1, now(), 'Autoservicio Luna', 'DEMO-E5-04-004', 6200000, 'sin_imputar'),
-      (105, 1, now(), 'Distribuidora Los Andes', 'DEMO-E5-04-005', 9400000, 'sin_imputar');
+      (101, 1, now(), 'Mayorista El Sol S.R.L.', 'DEMO-E5-04-001', 15000000, 'sin_imputar'),
+      (102, 1, now(), 'Mayorista El Sol S.R.L.', 'DEMO-E5-04-002', 14250000, 'sin_imputar'),
+      (103, 1, now(), 'Mayorista El Sol S.R.L.', 'DEMO-E5-04-003', 12500000, 'sin_imputar'),
+      (104, 1, now(), 'Mayorista El Sol S.R.L.', 'DEMO-E5-04-004', 15700000, 'sin_imputar'),
+      (105, 1, now(), 'Autoservicio Luna',       'DEMO-E5-04-005', 6200000,  'sin_imputar'),
+      (106, 1, now(), 'Distribuidora Los Andes', 'DEMO-E5-04-006', 9400000,  'sin_imputar');
 
     INSERT INTO discrepancia_conciliacion (id, movimiento_id, movimiento_ids, remito_ids, importe_movimiento, importe_seleccionado, diferencia_centavos, nota, motivo_tipificado, comprobante_nombre, dentro_de_tolerancia, estado, creada_por) VALUES
-      (1, 103, ARRAY[103]::bigint[], ARRAY[1, 2]::bigint[], 14700000, 15700000, -1000000, 'Deducción que supera el umbral operativo del 5% ($10.000 vs $5.000 permitidos)', 'Descuentos comerciales', 'Convenio_Comercial_Excedente.pdf', false, 'pendiente_aprobacion', 1);
+      (1, 103, ARRAY[103]::bigint[], ARRAY[1]::bigint[], 12500000, 15000000, -2500000, 'Desvío de $25.000 (16.67%) excede el límite operativo del 10%', 'Descuentos comerciales', 'Convenio_Comercial_Excedente.pdf', false, 'pendiente_aprobacion', 1);
   `);
 
   memDbInstance = mem.adapters.createPg().Pool;

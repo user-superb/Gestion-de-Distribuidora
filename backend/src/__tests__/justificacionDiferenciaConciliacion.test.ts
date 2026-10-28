@@ -226,10 +226,10 @@ describe('Backend PostgreSQL - HU: Registrar y Tipificar Diferencia en Conciliac
       VALUES (102, 'REM-002', 1, 1, 1, 10000000, 'entregado')
     `);
 
-    // Movimiento bancario de $90.000 (9.000.000 centavos) -> Desvío de $10.000 (10% > 5% y $10.000 > $5.000 tolerancia)
+    // Movimiento bancario de $85.000 (8.500.000 centavos) -> Desvío de $15.000 (15% > 10% tolerancia)
     await db.query(`
       INSERT INTO movimiento_bancario (id, cuenta_id, fecha_hora, ordenante, ordenante_cuit, importe_centavos, estado)
-      VALUES (202, 1, now(), 'Mayorista El Sol S.R.L.', '30112233445', 9000000, 'sin_imputar')
+      VALUES (202, 1, now(), 'Mayorista El Sol S.R.L.', '30112233445', 8500000, 'sin_imputar')
     `);
 
     const res = await conciliacionService.conciliar(
@@ -266,7 +266,7 @@ describe('Backend PostgreSQL - HU: Registrar y Tipificar Diferencia en Conciliac
     assert.equal(discDb.rows[0].motivo_tipificado, 'Descuentos comerciales');
     assert.equal(discDb.rows[0].comprobante_nombre, 'Acuerdo_Comercial_Descuento_Volumen.pdf');
     assert.equal(discDb.rows[0].dentro_de_tolerancia, false);
-    assert.equal(discDb.rows[0].diferencia_centavos, -1000000);
+    assert.equal(discDb.rows[0].diferencia_centavos, -1500000);
 
     // 4. Verificar auditoría de escalamiento gerencial
     const auditDb = await db.query("SELECT * FROM auditoria WHERE accion = 'escalamiento_gerencial'");

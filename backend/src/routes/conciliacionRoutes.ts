@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { requireAuth } from './authRoutes.js';
-import { ConciliacionError, conciliacionService, MOTIVOS_TIPIFICADOS, TOLERANCIA_NOMINAL_MAX_CENTAVOS, TOLERANCIA_PORCENTUAL_MAX } from '../services/conciliacionService.js';
+import { ConciliacionError, conciliacionService, MOTIVOS_TIPIFICADOS, TOLERANCIA_PORCENTUAL_MAX } from '../services/conciliacionService.js';
 
 export const conciliacionRouter = Router();
 
@@ -89,7 +89,6 @@ conciliacionRouter.get('/movimientos-huerfanos', async (req, res) => {
 
 conciliacionRouter.get('/tolerancia', async (_req, res) => {
   return res.json({
-    toleranciaNominalCentavos: Number(TOLERANCIA_NOMINAL_MAX_CENTAVOS),
     toleranciaPorcentual: Number(TOLERANCIA_PORCENTUAL_MAX),
     motivosTipificados: MOTIVOS_TIPIFICADOS,
   });

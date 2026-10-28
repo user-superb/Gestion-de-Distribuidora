@@ -18,8 +18,7 @@ export interface JustificacionDiferenciaDto {
   nota?: string;
 }
 
-export const TOLERANCIA_NOMINAL_MAX_CENTAVOS = BigInt(process.env.TOLERANCIA_NOMINAL_MAX_CENTAVOS || 500000); // $5.000 (500000 centavos)
-export const TOLERANCIA_PORCENTUAL_MAX = BigInt(process.env.TOLERANCIA_PORCENTUAL_MAX || 5); // 5%
+export const TOLERANCIA_PORCENTUAL_MAX = BigInt(process.env.TOLERANCIA_PORCENTUAL_MAX || 10); // 10%
 
 export class ConciliacionError extends Error {
   constructor(
@@ -247,7 +246,7 @@ export const conciliacionService = {
     }
     const result = await db.query(
       `SELECT mb.id::text AS id, mb.fecha_hora, mb.ordenante,
-              (mb.importe_centavos - COALESCE(i.imputado_centavos, 0))::text AS importe_centavos,
+              (CASE WHEN i.imputado_centavos IS NULL THEN mb.importe_centavos ELSE mb.importe_centavos - i.imputado_centavos END)::text AS importe_centavos,
               mb.cuenta_id::text AS cuenta_id, cr.alias AS cuenta
        FROM movimiento_bancario mb
        JOIN cuenta_recepcion cr ON cr.id = mb.cuenta_id
@@ -280,7 +279,7 @@ export const conciliacionService = {
     const [movimientosRes, remitosRes] = await Promise.all([
       db.query(
         `SELECT mb.id::text AS movimiento_id, mb.fecha_hora, mb.ordenante, mb.ordenante_cuit,
-                (mb.importe_centavos - COALESCE(i.imputado_centavos, 0))::text AS importe_disponible_centavos,
+                (CASE WHEN i.imputado_centavos IS NULL THEN mb.importe_centavos ELSE mb.importe_centavos - i.imputado_centavos END)::text AS importe_disponible_centavos,
                 mb.cuenta_id::text AS cuenta_id, cr.alias AS cuenta, cr.sucursal_id::text AS sucursal_id
          FROM movimiento_bancario mb
          JOIN cuenta_recepcion cr ON cr.id = mb.cuenta_id AND cr.activa = true
@@ -289,7 +288,7 @@ export const conciliacionService = {
            FROM imputacion WHERE movimiento_bancario_id IS NOT NULL GROUP BY movimiento_bancario_id
          ) i ON i.movimiento_bancario_id = mb.id
          WHERE mb.estado IN ('sin_imputar', 'parcial')
-           AND mb.importe_centavos > COALESCE(i.imputado_centavos, 0)
+           AND (i.imputado_centavos IS NULL OR mb.importe_centavos > i.imputado_centavos)
          ORDER BY mb.fecha_hora DESC, mb.id DESC`
       ),
       db.query(
@@ -344,7 +343,7 @@ export const conciliacionService = {
     const cutoff = new Date(Date.now() - HORAS_PARA_HUERFANO * 3_600_000);
     const result = await db.query(
       `SELECT mb.id::text AS id, mb.fecha_hora, mb.ordenante,
-              (mb.importe_centavos - COALESCE(i.imputado_centavos, 0))::text AS importe_centavos,
+              (CASE WHEN i.imputado_centavos IS NULL THEN mb.importe_centavos ELSE mb.importe_centavos - i.imputado_centavos END)::text AS importe_centavos,
               mb.cuenta_id::text AS cuenta_id, cr.alias AS cuenta,
               cr.sucursal_id::text AS sucursal_id, s.nombre AS sucursal
        FROM movimiento_bancario mb
@@ -355,7 +354,7 @@ export const conciliacionService = {
          FROM imputacion WHERE movimiento_bancario_id IS NOT NULL GROUP BY movimiento_bancario_id
        ) i ON i.movimiento_bancario_id = mb.id
        WHERE mb.estado IN ('sin_imputar', 'parcial')
-         AND mb.importe_centavos > COALESCE(i.imputado_centavos, 0)
+         AND (i.imputado_centavos IS NULL OR mb.importe_centavos > i.imputado_centavos)
          AND mb.fecha_hora <= $1
        ORDER BY mb.fecha_hora DESC, mb.id DESC`,
       [cutoff]
@@ -469,9 +468,9 @@ export const conciliacionService = {
           );
         }
 
-        // Evaluar política financiera de tolerancia (nominal y porcentual)
+        // Evaluar política financiera de tolerancia (10% porcentual sin tope nominal)
         const porcentajeDesvio = (desvioCentavos * 100n) / result.importeSeleccionado;
-        const excedeTolerancia = desvioCentavos > TOLERANCIA_NOMINAL_MAX_CENTAVOS || porcentajeDesvio > TOLERANCIA_PORCENTUAL_MAX;
+        const excedeTolerancia = porcentajeDesvio > TOLERANCIA_PORCENTUAL_MAX;
 
         // ESCENARIO 2: Bloqueo y escalamiento a aprobación gerencial si excede la tolerancia
         if (excedeTolerancia) {
@@ -510,10 +509,9 @@ export const conciliacionService = {
                 porcentajeDesvio: Number(porcentajeDesvio),
                 motivoTipificado: justificacion.motivoTipificado,
                 comprobanteNombre: justificacion.comprobanteNombre.trim(),
-                toleranciaNominalCentavos: TOLERANCIA_NOMINAL_MAX_CENTAVOS.toString(),
                 toleranciaPorcentual: Number(TOLERANCIA_PORCENTUAL_MAX),
               }),
-              `Desvío excede tolerancia operativa ($${Number(desvioCentavos) / 100} / ${porcentajeDesvio}%). Conciliación bloqueada y derivada a aprobación gerencial.`,
+              `Desvío excede tolerancia operativa (${porcentajeDesvio}% > ${TOLERANCIA_PORCENTUAL_MAX}%). Conciliación bloqueada y derivada a aprobación gerencial.`,
             ]
           );
 
@@ -524,7 +522,7 @@ export const conciliacionService = {
             discrepanciaId,
             desvioCentavos: desvioCentavos.toString(),
             porcentajeDesvio: Number(porcentajeDesvio),
-            message: `El desvío excede la tolerancia operativa máxima (límite: $${Number(TOLERANCIA_NOMINAL_MAX_CENTAVOS) / 100} o ${TOLERANCIA_PORCENTUAL_MAX}%). La conciliación directa fue bloqueada y el caso se envió a la bandeja de aprobación gerencial.`,
+            message: `El desvío excede la tolerancia operativa máxima (límite: ${TOLERANCIA_PORCENTUAL_MAX}%). La conciliación directa fue bloqueada y el caso se envió a la bandeja de aprobación gerencial.`,
           };
         }
 

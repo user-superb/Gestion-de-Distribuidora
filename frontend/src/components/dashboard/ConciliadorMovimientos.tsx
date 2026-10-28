@@ -41,8 +41,6 @@ interface Discrepancia {
 }
 
 interface PoliticaTolerancia {
-  toleranciaNominalCentavos: string;
-  toleranciaNominalPesos: number;
   toleranciaPorcentual: number;
   motivosTipificados: string[];
 }
@@ -74,9 +72,7 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
 
   // Estados para justificación de diferencia monetaria (HU Conciliación)
   const [politicaTolerancia, setPoliticaTolerancia] = useState<PoliticaTolerancia>({
-    toleranciaNominalCentavos: '500000',
-    toleranciaNominalPesos: 5000,
-    toleranciaPorcentual: 5,
+    toleranciaPorcentual: 10,
     motivosTipificados: [
       'Retenciones impositivas',
       'Descuentos comerciales',
@@ -148,11 +144,9 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
   const porcentajeDesvio = suma > 0n && diferencia < 0n
     ? Number((desvioCentavos * 10000n) / suma) / 100
     : 0;
-  const toleranciaNominalCentavos = BigInt(politicaTolerancia.toleranciaNominalCentavos || '500000');
-  const toleranciaPorcentualMax = politicaTolerancia.toleranciaPorcentual || 5;
+  const toleranciaPorcentualMax = politicaTolerancia.toleranciaPorcentual || 10;
 
   const excedeTolerancia = diferencia < 0n && (
-    desvioCentavos > toleranciaNominalCentavos ||
     porcentajeDesvio > toleranciaPorcentualMax
   );
 
@@ -360,7 +354,7 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
                 <div className="flex items-start gap-2 rounded border border-blue-200 bg-blue-50 p-2 text-xs text-blue-900">
                   <span className="text-base leading-none">ℹ️</span>
                   <div>
-                    <strong>Diferencia dentro de tolerancia operativa:</strong> El desvío de {formatoARS(desvioCentavos)} ({porcentajeDesvio.toFixed(2)}%) no supera la tolerancia parametrizada (hasta {formatoARS(toleranciaNominalCentavos)} o {toleranciaPorcentualMax}%).
+                    <strong>Diferencia dentro de tolerancia operativa:</strong> El desvío de {formatoARS(desvioCentavos)} ({porcentajeDesvio.toFixed(2)}%) no supera la tolerancia parametrizada (hasta el {toleranciaPorcentualMax}%).
                     Al clasificar la causa y adjuntar el comprobante, el sistema asentará el ajuste contable y saldará los remitos al 100%.
                   </div>
                 </div>
@@ -368,7 +362,7 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
                 <div className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
                   <span className="text-base leading-none">⚠️</span>
                   <div>
-                    <strong>Desvío excede la tolerancia permitida:</strong> La diferencia de {formatoARS(desvioCentavos)} ({porcentajeDesvio.toFixed(2)}%) supera el límite fijado por política financiera (máx. {formatoARS(toleranciaNominalCentavos)} o {toleranciaPorcentualMax}%).
+                    <strong>Desvío excede la tolerancia permitida:</strong> La diferencia de {formatoARS(desvioCentavos)} ({porcentajeDesvio.toFixed(2)}%) supera el límite del {toleranciaPorcentualMax}% fijado por política financiera.
                     La conciliación automática directa será <strong>bloqueada</strong> y se remitirá el expediente con su justificación a la <strong>bandeja de aprobación gerencial</strong>.
                   </div>
                 </div>
