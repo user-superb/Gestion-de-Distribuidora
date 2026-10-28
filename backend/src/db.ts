@@ -224,7 +224,10 @@ function setupMemoryDb() {
       anulado boolean NOT NULL DEFAULT false,
       anulado_por bigint,
       anulado_en timestamp,
-      motivo_anulacion text
+      motivo_anulacion text,
+      es_ajuste boolean NOT NULL DEFAULT false,
+      motivo_ajuste text,
+      comprobante_nombre text
     );
 
     CREATE TABLE IF NOT EXISTS discrepancia_conciliacion (
@@ -236,9 +239,23 @@ function setupMemoryDb() {
       importe_seleccionado bigint NOT NULL,
       diferencia_centavos bigint NOT NULL,
       nota text NOT NULL,
+      motivo_tipificado text,
+      comprobante_nombre text,
+      dentro_de_tolerancia boolean NOT NULL DEFAULT false,
       estado text NOT NULL DEFAULT 'pendiente',
       creada_por bigint NOT NULL,
       creada_en timestamp DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS ajuste_conciliacion (
+      id serial PRIMARY KEY,
+      movimiento_bancario_id bigint,
+      remito_id bigint NOT NULL,
+      motivo_tipificado text NOT NULL,
+      comprobante_nombre text NOT NULL,
+      importe_centavos bigint NOT NULL,
+      creado_por bigint NOT NULL,
+      creado_en timestamp DEFAULT now()
     );
 
     CREATE VIEW remito_saldo AS
@@ -246,16 +263,23 @@ function setupMemoryDb() {
             r.comercio_id,
             r.marca_id,
             r.importe_centavos,
-            COALESCE(SUM(i.importe_centavos), 0) AS imputado_centavos,
-            r.importe_centavos - COALESCE(SUM(i.importe_centavos), 0) AS saldo_centavos,
+            COALESCE(i.imputado, 0) AS imputado_centavos,
             CASE
-                WHEN r.importe_centavos = COALESCE(SUM(i.importe_centavos), 0) THEN 'saldado'
-                WHEN COALESCE(SUM(i.importe_centavos), 0) > 0 THEN 'parcial'
+              WHEN i.imputado IS NULL THEN r.importe_centavos
+              ELSE r.importe_centavos - i.imputado
+            END AS saldo_centavos,
+            CASE
+                WHEN i.imputado IS NOT NULL AND r.importe_centavos = i.imputado THEN 'saldado'
+                WHEN i.imputado IS NOT NULL AND i.imputado > 0 THEN 'parcial'
                 ELSE 'pendiente'
             END AS estado_pago
     FROM remito r
-    LEFT JOIN imputacion i ON i.remito_id = r.id AND i.anulado = false
-    GROUP BY r.id, r.comercio_id, r.marca_id, r.importe_centavos;
+    LEFT JOIN (
+      SELECT remito_id, SUM(importe_centavos) AS imputado
+      FROM imputacion
+      WHERE anulado = false
+      GROUP BY remito_id
+    ) i ON i.remito_id = r.id;
   `);
 
   // Seeds iniciales
@@ -328,6 +352,15 @@ function setupMemoryDb() {
       ('R-0001-45121', 1, 2, 1, 6200000, 'pendiente'),
       ('R-0003-11200', 3, 2, 1, 11000000, 'pendiente'),
       ('R-0002-89315', 2, 3, 1, 9400000, 'pendiente');
+
+    UPDATE remito SET estado = 'entregado', entregado_en = now() - interval '2 days'
+    WHERE numero IN ('R-0001-45120', 'R-0002-89310', 'R-0001-45121');
+
+    INSERT INTO movimiento_bancario (cuenta_id, fecha_hora, ordenante, referencia_externa, importe_centavos) VALUES
+      (1, now(), 'Mayorista El Sol S.R.L.', 'DEMO-E5-04-001', 15700000),
+      (1, now(), 'Mayorista El Sol S.R.L.', 'DEMO-E5-04-002', 15600000),
+      (1, now(), 'Mayorista El Sol S.R.L.', 'DEMO-E5-04-003', 15800000),
+      (1, now(), 'Autoservicio Luna', 'DEMO-E5-04-004', 6200000);
   `);
 
   memDbInstance = mem.adapters.createPg().Pool;

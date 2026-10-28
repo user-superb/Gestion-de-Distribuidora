@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { requireAuth } from './authRoutes.js';
-import { ConciliacionError, conciliacionService } from '../services/conciliacionService.js';
+import { ConciliacionError, conciliacionService, MOTIVOS_TIPIFICADOS, TOLERANCIA_NOMINAL_MAX_CENTAVOS, TOLERANCIA_PORCENTUAL_MAX } from '../services/conciliacionService.js';
 
 export const conciliacionRouter = Router();
 
@@ -87,9 +87,22 @@ conciliacionRouter.get('/movimientos-huerfanos', async (req, res) => {
   }
 });
 
+conciliacionRouter.get('/tolerancia', async (_req, res) => {
+  return res.json({
+    toleranciaNominalCentavos: Number(TOLERANCIA_NOMINAL_MAX_CENTAVOS),
+    toleranciaPorcentual: Number(TOLERANCIA_PORCENTUAL_MAX),
+    motivosTipificados: MOTIVOS_TIPIFICADOS,
+  });
+});
+
 conciliacionRouter.post('/imputaciones', async (req, res) => {
   try {
-    const result = await conciliacionService.conciliar(req.body?.movimientoIds, req.body?.remitoIds, getUsuarioId(req));
+    const result = await conciliacionService.conciliar(
+      req.body?.movimientoIds,
+      req.body?.remitoIds,
+      getUsuarioId(req),
+      req.body?.justificacion
+    );
     return res.status(201).json({ success: true, ...result });
   } catch (error) {
     return responderError(error, res);
@@ -99,7 +112,7 @@ conciliacionRouter.post('/imputaciones', async (req, res) => {
 conciliacionRouter.post('/sugerencias/aceptar', async (req, res) => {
   try {
     const result = await conciliacionService.conciliar(
-      [req.body?.movimientoId], [req.body?.remitoId], getUsuarioId(req), true
+      [req.body?.movimientoId], [req.body?.remitoId], getUsuarioId(req), null, true
     );
     return res.status(201).json({ success: true, ...result });
   } catch (error) {

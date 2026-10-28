@@ -452,6 +452,9 @@ CREATE TABLE imputacion (
     importe_centavos    bigint      NOT NULL,
     imputado_por        bigint      NOT NULL REFERENCES usuario(id),
     imputado_en         timestamptz NOT NULL DEFAULT now(),
+    es_ajuste           boolean     NOT NULL DEFAULT false,
+    motivo_ajuste       text,
+    comprobante_nombre  text,
     CONSTRAINT imputacion_origen_unico CHECK ((cobro_id IS NULL) <> (movimiento_bancario_id IS NULL)),
     CONSTRAINT imputacion_importe_positivo CHECK (importe_centavos > 0)
 );
@@ -471,6 +474,9 @@ CREATE TABLE discrepancia_conciliacion (
     importe_seleccionado bigint      NOT NULL,
     diferencia_centavos  bigint      NOT NULL,
     nota                 text        NOT NULL,
+    motivo_tipificado    text,
+    comprobante_nombre   text,
+    dentro_de_tolerancia boolean     NOT NULL DEFAULT false,
     estado               text        NOT NULL DEFAULT 'pendiente',
     creada_por           bigint      NOT NULL REFERENCES usuario(id),
     creada_en            timestamptz NOT NULL DEFAULT now(),

@@ -1,6 +1,26 @@
 import { PoolClient } from 'pg';
 import { db } from '../db.js';
 
+
+export const MOTIVOS_TIPIFICADOS = [
+  'Retenciones impositivas',
+  'Descuentos comerciales',
+  'Diferencias de cambio',
+  'Comisiones bancarias',
+  'Otros conceptos autorizados',
+] as const;
+
+export type MotivoTipificado = (typeof MOTIVOS_TIPIFICADOS)[number];
+
+export interface JustificacionDiferenciaDto {
+  motivoTipificado: MotivoTipificado;
+  comprobanteNombre: string;
+  nota?: string;
+}
+
+export const TOLERANCIA_NOMINAL_MAX_CENTAVOS = BigInt(process.env.TOLERANCIA_NOMINAL_MAX_CENTAVOS || 500000); // $5.000 (500000 centavos)
+export const TOLERANCIA_PORCENTUAL_MAX = BigInt(process.env.TOLERANCIA_PORCENTUAL_MAX || 5); // 5%
+
 export class ConciliacionError extends Error {
   constructor(
     message: string,
@@ -80,7 +100,7 @@ async function validarSeleccion(
 ) {
   const movimientoRes = await client.query(
     `SELECT mb.id::text AS id, mb.cuenta_id::text AS cuenta_id,
-            (mb.importe_centavos - COALESCE(i.imputado_centavos, 0))::text AS importe_disponible_centavos,
+            (CASE WHEN i.imputado_centavos IS NULL THEN mb.importe_centavos ELSE mb.importe_centavos - i.imputado_centavos END)::text AS importe_disponible_centavos,
             mb.estado, mb.ordenante, mb.ordenante_cuit, mb.fecha_hora,
             cr.sucursal_id
      FROM movimiento_bancario mb
@@ -89,9 +109,8 @@ async function validarSeleccion(
        SELECT movimiento_bancario_id, SUM(importe_centavos) AS imputado_centavos
        FROM imputacion WHERE movimiento_bancario_id IS NOT NULL GROUP BY movimiento_bancario_id
      ) i ON i.movimiento_bancario_id = mb.id
-     WHERE mb.id = ANY($1::bigint[])
-     ORDER BY mb.id
-     FOR UPDATE OF mb`,
+     WHERE mb.id::text = ANY($1)
+     ORDER BY mb.id`,
     [movimientoIds]
   );
   if (movimientoRes.rowCount !== movimientoIds.length) {
@@ -113,7 +132,7 @@ async function validarSeleccion(
   }
 
   const remitosBloqueados = await client.query(
-    'SELECT id FROM remito WHERE id = ANY($1::bigint[]) ORDER BY id FOR UPDATE',
+    `SELECT id FROM remito WHERE id::text = ANY($1) ORDER BY id ${db.isMemory() ? '' : 'FOR UPDATE'}`,
     [remitoIds]
   );
   if (remitosBloqueados.rowCount !== remitoIds.length) {
@@ -132,7 +151,7 @@ async function validarSeleccion(
      JOIN comercio c ON c.id = r.comercio_id
      LEFT JOIN visita v ON v.id = r.visita_id
      JOIN remito_saldo rs ON rs.remito_id = r.id
-     WHERE r.id = ANY($1::bigint[])
+     WHERE r.id::text = ANY($1)
      ORDER BY r.id`,
     [remitoIds]
   );
@@ -194,6 +213,7 @@ async function validarSeleccion(
     movimientos,
     remitos,
     imputaciones,
+    saldos,
     importeMovimiento,
     importeSeleccionado,
     diferencia: importeMovimiento - importeSeleccionado,
@@ -241,7 +261,20 @@ export const conciliacionService = {
     return result.rows;
   },
 
+  async getDiscrepanciaMovimientoIds(): Promise<Set<string>> {
+    const res = await db.query(
+      "SELECT movimiento_ids::text AS movimiento_ids FROM discrepancia_conciliacion WHERE estado = 'pendiente'"
+    );
+    const ids = new Set<string>();
+    for (const row of res.rows) {
+      const items = String(row.movimiento_ids || '').replace(/[{}]/g, '').split(',').filter(Boolean);
+      for (const item of items) ids.add(item);
+    }
+    return ids;
+  },
+
   async getSugerencias() {
+    const idsExcluidos = await this.getDiscrepanciaMovimientoIds();
     const [movimientosRes, remitosRes] = await Promise.all([
       db.query(
         `SELECT mb.id::text AS movimiento_id, mb.fecha_hora, mb.ordenante, mb.ordenante_cuit,
@@ -255,10 +288,6 @@ export const conciliacionService = {
          ) i ON i.movimiento_bancario_id = mb.id
          WHERE mb.estado IN ('sin_imputar', 'parcial')
            AND mb.importe_centavos > COALESCE(i.imputado_centavos, 0)
-           AND NOT EXISTS (
-             SELECT 1 FROM discrepancia_conciliacion dc
-             WHERE dc.estado = 'pendiente' AND mb.id = ANY(dc.movimiento_ids)
-           )
          ORDER BY mb.fecha_hora DESC, mb.id DESC`
       ),
       db.query(
@@ -288,6 +317,7 @@ export const conciliacionService = {
 
     const sugerencias: any[] = [];
     for (const movimiento of movimientosRes.rows) {
+      if (idsExcluidos.has(String(movimiento.movimiento_id))) continue;
       const fechaMovimiento = new Date(movimiento.fecha_hora).getTime();
       const remitos = remitosPorSucursal.get(String(movimiento.sucursal_id)) || [];
       for (const remito of remitos) {
@@ -306,6 +336,7 @@ export const conciliacionService = {
   },
 
   async getMovimientosHuerfanos(filters: { sucursalId?: string; cuentaId?: string; desde?: string; hasta?: string } = {}) {
+    const idsExcluidos = await this.getDiscrepanciaMovimientoIds();
     const sugerencias = await this.getSugerencias();
     const movimientosConSugerencias = new Set(sugerencias.map((item) => item.movimiento_id));
     const cutoff = new Date(Date.now() - HORAS_PARA_HUERFANO * 3_600_000);
@@ -324,14 +355,11 @@ export const conciliacionService = {
        WHERE mb.estado IN ('sin_imputar', 'parcial')
          AND mb.importe_centavos > COALESCE(i.imputado_centavos, 0)
          AND mb.fecha_hora <= $1
-         AND NOT EXISTS (
-           SELECT 1 FROM discrepancia_conciliacion dc
-           WHERE dc.estado = 'pendiente' AND mb.id = ANY(dc.movimiento_ids)
-         )
        ORDER BY mb.fecha_hora DESC, mb.id DESC`,
       [cutoff]
     );
     const movimientos = result.rows.filter((item) => {
+      if (idsExcluidos.has(String(item.id))) return false;
       if (movimientosConSugerencias.has(item.id)) return false;
       const fecha = new Date(item.fecha_hora).toISOString().slice(0, 10);
       return (!filters.sucursalId || item.sucursal_id === filters.sucursalId) &&
@@ -344,7 +372,7 @@ export const conciliacionService = {
   async getRemitosPendientes() {
     const result = await db.query(
       `SELECT r.id::text AS id, r.numero, r.estado,
-              COALESCE(r.entregado_en, v.registrada_en)::text AS fecha_entrega,
+              COALESCE(r.entregado_en, v.registrada_en) AS fecha_entrega,
               c.id::text AS comercio_id, c.razon_social,
               m.nombre AS marca, rs.importe_centavos::text AS importe_centavos,
               rs.saldo_centavos::text AS saldo_centavos,
@@ -370,15 +398,22 @@ export const conciliacionService = {
               dc.importe_seleccionado::text AS importe_seleccionado,
               dc.diferencia_centavos::text AS diferencia_centavos, dc.nota,
               dc.remito_ids::text AS remito_ids
+       , dc.motivo_tipificado, dc.comprobante_nombre, dc.dentro_de_tolerancia, dc.estado
        FROM discrepancia_conciliacion dc
        JOIN movimiento_bancario mb ON mb.id = dc.movimiento_id
-       WHERE dc.estado = 'pendiente'
+       WHERE dc.estado IN ('pendiente', 'pendiente_aprobacion')
        ORDER BY dc.creada_en DESC`
     );
     return result.rows;
   },
 
-  async conciliar(movimientoIdsValue: unknown, remitoIdsValue: unknown, usuarioId: number, aceptarSugerencia = false) {
+  async conciliar(
+    movimientoIdsValue: unknown,
+    remitoIdsValue: unknown,
+    usuarioId: number,
+    justificacion?: JustificacionDiferenciaDto | null,
+    aceptarSugerencia = false
+  ) {
     const movimientoIds = parsearIds(movimientoIdsValue, 'movimiento');
     const remitoIds = parsearIds(remitoIdsValue, 'remito');
     return enTransaccion(async (client) => {
@@ -402,6 +437,198 @@ export const conciliacionService = {
           diferenciaCentavos: result.diferencia.toString(),
         });
       }
+
+      // Si el movimiento bancario es inferior al saldo total de los remitos (diferencia < 0)
+      if (result.diferencia < 0n) {
+        const desvioCentavos = -result.diferencia;
+
+        // ESCENARIO 3: Validación obligatoria de motivo tipificado y comprobante de respaldo
+        if (!justificacion) {
+          throw new ConciliacionError(
+            'Toda diferencia entre el valor del movimiento bancario y el saldo de los remitos debe clasificarse obligatoriamente bajo un motivo tipificado con comprobante de respaldo adjunto.',
+            422,
+            { camposFaltantes: ['motivoTipificado', 'comprobanteNombre'], desvioCentavos: desvioCentavos.toString() }
+          );
+        }
+
+        const camposFaltantes: string[] = [];
+        if (!justificacion.motivoTipificado || !MOTIVOS_TIPIFICADOS.includes(justificacion.motivoTipificado as any)) {
+          camposFaltantes.push('motivoTipificado');
+        }
+        if (!justificacion.comprobanteNombre || typeof justificacion.comprobanteNombre !== 'string' || !justificacion.comprobanteNombre.trim()) {
+          camposFaltantes.push('comprobanteNombre');
+        }
+
+        if (camposFaltantes.length > 0) {
+          throw new ConciliacionError(
+            'Debe seleccionar una causal tipificada válida y adjuntar el comprobante o certificado de respaldo obligatorio.',
+            422,
+            { camposFaltantes, desvioCentavos: desvioCentavos.toString() }
+          );
+        }
+
+        // Evaluar política financiera de tolerancia (nominal y porcentual)
+        const porcentajeDesvio = (desvioCentavos * 100n) / result.importeSeleccionado;
+        const excedeTolerancia = desvioCentavos > TOLERANCIA_NOMINAL_MAX_CENTAVOS || porcentajeDesvio > TOLERANCIA_PORCENTUAL_MAX;
+
+        // ESCENARIO 2: Bloqueo y escalamiento a aprobación gerencial si excede la tolerancia
+        if (excedeTolerancia) {
+          const discResult = await client.query(
+            `INSERT INTO discrepancia_conciliacion
+               (movimiento_id, movimiento_ids, remito_ids, importe_movimiento, importe_seleccionado,
+                diferencia_centavos, nota, motivo_tipificado, comprobante_nombre, dentro_de_tolerancia, estado, creada_por)
+             VALUES ($1, $2::bigint[], $3::bigint[], $4, $5, $6, $7, $8, $9, false, 'pendiente_aprobacion', $10)
+             RETURNING id::text AS id`,
+            [
+              movimientoIds[0],
+              movimientoIds,
+              remitoIds,
+              result.importeMovimiento.toString(),
+              result.importeSeleccionado.toString(),
+              result.diferencia.toString(),
+              justificacion.nota?.trim() || 'Discrepancia excede tolerancia operativa',
+              justificacion.motivoTipificado,
+              justificacion.comprobanteNombre.trim(),
+              usuarioId,
+            ]
+          );
+
+          const discrepanciaId = discResult.rows[0].id;
+
+          await client.query(
+            `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
+             VALUES ('discrepancia_conciliacion', $1, 'escalamiento_gerencial', $2, $3::jsonb, $4)`,
+            [
+              discrepanciaId,
+              usuarioId,
+              JSON.stringify({
+                movimientoIds,
+                remitoIds,
+                desvioCentavos: desvioCentavos.toString(),
+                porcentajeDesvio: Number(porcentajeDesvio),
+                motivoTipificado: justificacion.motivoTipificado,
+                comprobanteNombre: justificacion.comprobanteNombre.trim(),
+                toleranciaNominalCentavos: TOLERANCIA_NOMINAL_MAX_CENTAVOS.toString(),
+                toleranciaPorcentual: Number(TOLERANCIA_PORCENTUAL_MAX),
+              }),
+              `Desvío excede tolerancia operativa ($${Number(desvioCentavos) / 100} / ${porcentajeDesvio}%). Conciliación bloqueada y derivada a aprobación gerencial.`,
+            ]
+          );
+
+          return {
+            bloqueadoPorTolerancia: true,
+            escaladoGerencia: true,
+            estado: 'pendiente_aprobacion',
+            discrepanciaId,
+            desvioCentavos: desvioCentavos.toString(),
+            porcentajeDesvio: Number(porcentajeDesvio),
+            message: `El desvío excede la tolerancia operativa máxima (límite: $${Number(TOLERANCIA_NOMINAL_MAX_CENTAVOS) / 100} o ${TOLERANCIA_PORCENTUAL_MAX}%). La conciliación directa fue bloqueada y el caso se envió a la bandeja de aprobación gerencial.`,
+          };
+        }
+
+        // ESCENARIO 1: Justificación válida dentro de la tolerancia permitida
+        // 1. Imputar monto bancario
+        const imputaciones: Array<{ id: string; movimientoId: string; remitoId: string; importeCentavos: string }> = [];
+        for (const asignacion of result.imputaciones) {
+          const inserted = await client.query(
+            `INSERT INTO imputacion (movimiento_bancario_id, remito_id, importe_centavos, imputado_por, es_ajuste)
+             VALUES ($1, $2, $3, $4, false)
+             RETURNING id::text AS id`,
+            [asignacion.movimientoId, asignacion.remitoId, asignacion.importeCentavos.toString(), usuarioId]
+          );
+          imputaciones.push({
+            id: inserted.rows[0].id,
+            movimientoId: asignacion.movimientoId,
+            remitoId: asignacion.remitoId,
+            importeCentavos: asignacion.importeCentavos.toString(),
+          });
+        }
+
+        // 2. Asentar ajuste contable con la causal y certificado para saldar el remito
+        const ajustes: Array<{ id: string; remitoId: string; importeCentavos: string }> = [];
+        for (const [remitoId, saldoRestante] of result.saldos.entries()) {
+          if (saldoRestante <= 0n) continue;
+          await client.query(
+            `INSERT INTO imputacion (movimiento_bancario_id, remito_id, importe_centavos, imputado_por, es_ajuste, motivo_ajuste, comprobante_nombre)
+             VALUES ($1, $2, $3, $4, true, $5, $6)`,
+            [
+              movimientoIds[0],
+              remitoId,
+              saldoRestante.toString(),
+              usuarioId,
+              justificacion.motivoTipificado,
+              justificacion.comprobanteNombre.trim(),
+            ]
+          );
+
+          const insertedAjuste = await client.query(
+            `INSERT INTO ajuste_conciliacion (movimiento_bancario_id, remito_id, motivo_tipificado, comprobante_nombre, importe_centavos, creado_por)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING id::text AS id`,
+            [
+              movimientoIds[0],
+              remitoId,
+              justificacion.motivoTipificado,
+              justificacion.comprobanteNombre.trim(),
+              saldoRestante.toString(),
+              usuarioId,
+            ]
+          );
+
+          ajustes.push({
+            id: insertedAjuste.rows[0].id,
+            remitoId,
+            importeCentavos: saldoRestante.toString(),
+          });
+        }
+
+        await client.query(
+          `UPDATE movimiento_bancario SET estado = 'imputado' WHERE id::text = ANY($1)`,
+          [movimientoIds]
+        );
+
+        await client.query(
+          `UPDATE discrepancia_conciliacion SET estado = 'resuelta'
+           WHERE estado IN ('pendiente', 'pendiente_aprobacion') AND movimiento_ids && $1::bigint[]`,
+          [movimientoIds]
+        );
+
+        // Registrar desglose contable en auditoría
+        await client.query(
+          `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
+           VALUES ('movimiento_bancario', $1, 'conciliacion_con_ajuste', $2, $3::jsonb, $4)`,
+          [
+            movimientoIds[0],
+            usuarioId,
+            JSON.stringify({
+              movimientoIds,
+              remitoIds,
+              importeMovimiento: result.importeMovimiento.toString(),
+              desvioAjustado: desvioCentavos.toString(),
+              motivoTipificado: justificacion.motivoTipificado,
+              comprobanteNombre: justificacion.comprobanteNombre.trim(),
+              ajustes,
+              imputaciones,
+            }),
+            `Conciliación con ajuste asentado por ${justificacion.motivoTipificado} (Certificado: ${justificacion.comprobanteNombre.trim()}). Comprobantes saldados.`,
+          ]
+        );
+
+        return {
+          success: true,
+          movimientoIds,
+          estado: 'imputado',
+          ajusteAsentado: true,
+          motivoTipificado: justificacion.motivoTipificado,
+          comprobanteNombre: justificacion.comprobanteNombre.trim(),
+          desvioCentavos: desvioCentavos.toString(),
+          imputaciones,
+          ajustes,
+          message: `Ajuste asentado correctamente dentro de la tolerancia permitida bajo causal "${justificacion.motivoTipificado}". Los comprobantes quedaron saldados y el desglose contable registrado.`,
+        };
+      }
+
+      // Conciliación exacta estándar
       const discrepanciasVigentes = await client.query(
         `SELECT movimiento_ids::text AS movimiento_ids FROM discrepancia_conciliacion
          WHERE estado = 'pendiente' AND movimiento_ids && $1::bigint[] FOR UPDATE`,
@@ -438,7 +665,7 @@ export const conciliacionService = {
       }
 
       await client.query(
-        `UPDATE movimiento_bancario SET estado = 'imputado' WHERE id = ANY($1::bigint[])`,
+        `UPDATE movimiento_bancario SET estado = 'imputado' WHERE id::text = ANY($1)`,
         [movimientoIds]
       );
       await client.query(
