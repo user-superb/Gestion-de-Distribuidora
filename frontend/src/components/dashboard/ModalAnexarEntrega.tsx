@@ -45,13 +45,16 @@ export const ModalAnexarEntrega: React.FC<ModalAnexarEntregaProps> = ({
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Regla: Solo hojas de ruta abiertas (no cerradas ni anuladas)
-  // Y regla de comercio: la hoja de ruta debe pertenecer al mismo comercio o estar vacía
-  const hojasCandidatas = hojasDeRuta.filter((h) => {
-    if (h.estado === 'cerrada' || h.estado === 'anulada') return false;
+  // Regla: Solo hojas de ruta preexistentes creadas y abiertas (no borrador, no cerrada, no anulada)
+  const estadosAbiertosValidos = ['pendiente_de_despacho', 'publicada', 'en_curso', 'asignada'];
+  const hojasAbiertasExistentes = hojasDeRuta.filter((h) =>
+    estadosAbiertosValidos.includes(h.estado)
+  );
+
+  const hojasCandidatas = hojasAbiertasExistentes.filter((h) => {
     if (!remito) return false;
     const visitasDeHoja = h.visitas || [];
-    if (visitasDeHoja.length === 0) return true;
+    if (visitasDeHoja.length === 0) return false;
     return visitasDeHoja.some((v) => v.comercioId === remito.comercioId);
   });
 
@@ -169,7 +172,13 @@ export const ModalAnexarEntrega: React.FC<ModalAnexarEntregaProps> = ({
               <div className="p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800 flex items-start gap-1.5">
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                 <span>
-                  No hay hojas abiertas para <strong>{comercio?.razonSocial || 'este comercio'}</strong>. Solo se pueden anexar remitos del mismo comercio.
+                  {hojasAbiertasExistentes.length === 0 ? (
+                    'No hay hojas de ruta abiertas creadas en el sistema. Debe armar y confirmar una hoja de ruta antes de poder anexarle entregas.'
+                  ) : (
+                    <>
+                      No hay hojas abiertas para <strong>{comercio?.razonSocial || 'este comercio'}</strong>. Solo se pueden anexar remitos a rutas del mismo comercio.
+                    </>
+                  )}
                 </span>
               </div>
             ) : (

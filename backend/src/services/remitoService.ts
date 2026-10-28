@@ -1211,10 +1211,19 @@ export const remitoService = {
       };
     }
 
-    // REGLA A CONSIDERAR: "La ruta de destino debe encontrarse abierta"
-    // Estados abiertos: borrador, pendiente_de_despacho, publicada, en_curso.
-    // No abiertas: cerrada, anulada.
+    // REGLA A CONSIDERAR: "La ruta de destino debe encontrarse abierta y preexistente"
+    // Estados abiertos válidos de rutas creadas: pendiente_de_despacho, publicada, en_curso.
+    // Una hoja en borrador todavía no ha sido conformada/creada como hoja de ruta.
+    // No abiertas: cerrada, anulada, borrador.
     const estadoRuta = String(hojaRow.estado).toLowerCase();
+    if (estadoRuta === 'borrador') {
+      return {
+        success: false,
+        error:
+          'No se puede anexar la entrega: la hoja de ruta de destino se encuentra en estado borrador. Solo se pueden anexar entregas a rutas preexistentes creadas y abiertas.',
+        status: 422,
+      };
+    }
     if (estadoRuta === 'cerrada' || estadoRuta === 'anulada') {
       return {
         success: false,

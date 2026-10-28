@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { newDb } from 'pg-mem';
 import { db } from '../db.js';
 import { remitoService } from '../services/remitoService.js';
+import { cobroService } from '../services/cobroService.js';
 
 describe('Backend PostgreSQL - HU #19: Anexar una Entrega a una Ruta', () => {
   beforeEach(() => {
@@ -32,8 +33,12 @@ describe('Backend PostgreSQL - HU #19: Anexar una Entrega a una Ruta', () => {
       CREATE TABLE IF NOT EXISTS comercio (
         id serial PRIMARY KEY,
         razon_social text NOT NULL,
+        nombre_fantasia text,
         domicilio text NOT NULL,
         localidad text,
+        ventana_desde time,
+        ventana_hasta time,
+        telefono text,
         activo boolean DEFAULT true
       );
 
@@ -59,7 +64,8 @@ describe('Backend PostgreSQL - HU #19: Anexar una Entrega a una Ruta', () => {
         comercio_id bigint NOT NULL REFERENCES comercio(id),
         orden integer NOT NULL DEFAULT 1,
         estado text NOT NULL DEFAULT 'pendiente',
-        sincronizacion_pendiente boolean NOT NULL DEFAULT false
+        sincronizacion_pendiente boolean NOT NULL DEFAULT false,
+        cobrada_en timestamptz
       );
 
       CREATE TABLE IF NOT EXISTS remito (
@@ -97,7 +103,7 @@ describe('Backend PostgreSQL - HU #19: Anexar una Entrega a una Ruta', () => {
 
       -- Hoja de Ruta 100: Abierta (pendiente_de_despacho) con chofer conectado (10) para Comercio 1
       INSERT INTO hoja_de_ruta (id, sucursal_id, transportista_id, fecha_reparto, estado)
-      VALUES (100, 1, 10, CURRENT_DATE, 'pendiente_de_despacho');
+      VALUES (100, 1, 10, '2026-10-28', 'pendiente_de_despacho');
 
       -- 2 Paradas preexistentes en la Hoja 100 (secuencia: 1, 2) para Comercio 1
       INSERT INTO visita (id, hoja_de_ruta_id, comercio_id, orden, estado, sincronizacion_pendiente)
@@ -112,7 +118,7 @@ describe('Backend PostgreSQL - HU #19: Anexar una Entrega a una Ruta', () => {
 
       -- Hoja de Ruta 200: Abierta (en_curso) con chofer desconectado (20) para Comercio 2
       INSERT INTO hoja_de_ruta (id, sucursal_id, transportista_id, fecha_reparto, estado)
-      VALUES (200, 1, 20, CURRENT_DATE, 'en_curso');
+      VALUES (200, 1, 20, '2026-10-28', 'en_curso');
 
       -- 1 Parada preexistente en Hoja 200 (secuencia: 1) para Comercio 2
       INSERT INTO visita (id, hoja_de_ruta_id, comercio_id, orden, estado, sincronizacion_pendiente)
@@ -123,12 +129,12 @@ describe('Backend PostgreSQL - HU #19: Anexar una Entrega a una Ruta', () => {
 
       -- Hoja de Ruta 300: CERRADA para Comercio 1
       INSERT INTO hoja_de_ruta (id, sucursal_id, transportista_id, fecha_reparto, estado)
-      VALUES (300, 1, 10, CURRENT_DATE, 'cerrada');
+      VALUES (300, 1, 10, '2026-10-28', 'cerrada');
       INSERT INTO visita (id, hoja_de_ruta_id, comercio_id, orden, estado) VALUES (301, 300, 1, 1, 'completada');
 
       -- Hoja de Ruta 400: ANULADA para Comercio 1
       INSERT INTO hoja_de_ruta (id, sucursal_id, transportista_id, fecha_reparto, estado)
-      VALUES (400, 1, 10, CURRENT_DATE, 'anulada');
+      VALUES (400, 1, 10, '2026-10-28', 'anulada');
       INSERT INTO visita (id, hoja_de_ruta_id, comercio_id, orden, estado) VALUES (401, 400, 1, 1, 'no_realizada');
 
       -- Remitos pendientes sin asignar
@@ -234,13 +240,46 @@ describe('Backend PostgreSQL - HU #19: Anexar una Entrega a una Ruta', () => {
     assert.ok(resultado.error?.includes('comercio distinto'));
   });
 
-  it('PERMISIBILIDAD: Permite anexar a cualquier ruta abierta ("borrador", "pendiente_de_despacho", "publicada", "en_curso")', async () => {
+  it('PERMISIBILIDAD: Permite anexar a cualquier ruta abierta creada ("pendiente_de_despacho", "publicada", "en_curso")', async () => {
     await db.query("INSERT INTO hoja_de_ruta (id, transportista_id, estado) VALUES (500, 10, 'publicada')");
     // Al no tener visitas previas, acepta el remito de Comercio 1
     const resultado = await remitoService.anexarEntregaARuta('5003', '500');
 
     assert.equal(resultado.success, true);
     assert.equal(resultado.ordenParada, 1);
+  });
+
+  it('REGLA A CONSIDERAR: Rechaza si la hoja de ruta está en estado "borrador" (no se puede anexar si no fue conformada/creada)', async () => {
+    await db.query("INSERT INTO hoja_de_ruta (id, transportista_id, estado) VALUES (600, 10, 'borrador')");
+    const resultado = await remitoService.anexarEntregaARuta('5003', '600');
+
+    assert.equal(resultado.success, false);
+    assert.equal(resultado.status, 422);
+    assert.ok(resultado.error?.includes('borrador'));
+  });
+
+  it('INTEGRACIÓN DATABASE Y MÓVIL: Al anexar un remito a la ruta, se actualiza la database y el transportista ve la nueva parada al final en /movil/hoja-de-ruta', async () => {
+    // Anexar remito 5003 (Comercio 1) a la hoja 100 del chofer 10 ('chofer_online') programada para '2026-10-28'
+    const resultado = await remitoService.anexarEntregaARuta('5003', '100');
+    assert.equal(resultado.success, true);
+
+    // 1. Verificar persistencia en PostgreSQL de remito y visita
+    const remitoDb = await db.query('SELECT visita_id, estado FROM remito WHERE id = 5003');
+    assert.equal(remitoDb.rows[0].estado, 'en_ruta');
+    assert.equal(String(remitoDb.rows[0].visita_id), resultado.parada.id);
+
+    // 2. Verificar que el transportista al consultar su hoja del día desde el móvil recibe la nueva parada
+    const hojaMovil = await cobroService.getHojaDelDia(10, '2026-10-28');
+    assert.ok(hojaMovil);
+    assert.equal(hojaMovil.id, '100');
+    // Tenía 2 paradas iniciales, ahora tiene 3
+    assert.equal(hojaMovil.visitas.length, 3);
+    const ultimaParada = hojaMovil.visitas[2];
+    assert.equal(ultimaParada.id, resultado.parada.id);
+    assert.equal(ultimaParada.orden, 3);
+    assert.equal(ultimaParada.remitos.length, 1);
+    assert.equal(ultimaParada.remitos[0].id, '5003');
+    assert.equal(ultimaParada.remitos[0].numero, 'REM-PEND-03');
   });
 
   it('VALIDACIÓN: Rechaza si el remito ya se encuentra asignado a otra visita', async () => {

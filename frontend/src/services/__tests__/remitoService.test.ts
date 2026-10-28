@@ -565,6 +565,23 @@ describe('Historia de Usuario #19 - Anexar una Entrega a una Ruta', () => {
     expect(resAnulada.status).toBe(422);
     expect(resAnulada.error).toMatch(/no se encuentra abierta/i);
   });
+
+  it('REGLA A CONSIDERAR: Rechaza anexar si la hoja de ruta está en estado "borrador" o no hay hojas creadas', () => {
+    // Al resetear o sin programar ninguna hoja de ruta, mockHojasDeRuta está vacío.
+    remitoService.resetearDatosMock();
+    expect(remitoService.getHojasDeRuta().length).toBe(0);
+
+    // Intentar anexar a la hoja borrador inicial 'hdr-1'
+    const resBorrador = remitoService.anexarEntregaARuta('rem-1', 'hdr-1');
+    expect(resBorrador.success).toBe(false);
+    expect(resBorrador.status).toBe(422);
+    expect(resBorrador.error).toMatch(/borrador/i);
+
+    // Intentar anexar a una hoja inexistente
+    const resInexistente = remitoService.anexarEntregaARuta('rem-1', 'hdr-inexistente');
+    expect(resInexistente.success).toBe(false);
+    expect(resInexistente.status).toBe(404);
+  });
 });
 
 describe('Historia de Usuario - Quitar una visita de una hoja de ruta para reprogramarla en otra secuencia', () => {

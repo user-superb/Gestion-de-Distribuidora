@@ -614,11 +614,16 @@ export const remitoService = {
     }
 
     // Buscar la hoja de ruta de destino
-    let hoja = mockHojasDeRuta.find((h) => h.id === hojaDeRutaId);
-    if (!hoja && mockHojaDeRuta.id === hojaDeRutaId) {
-      hoja = mockHojaDeRuta;
-    }
+    const hoja = mockHojasDeRuta.find((h) => h.id === hojaDeRutaId);
     if (!hoja) {
+      if (mockHojaDeRuta.id === hojaDeRutaId && mockHojaDeRuta.estado === 'borrador') {
+        return {
+          success: false,
+          error:
+            'No se puede anexar la entrega: la hoja de ruta de destino se encuentra en estado borrador. Solo se pueden anexar entregas a rutas preexistentes creadas y abiertas.',
+          status: 422,
+        };
+      }
       return { success: false, error: 'La hoja de ruta de destino no existe.', status: 404 };
     }
 
@@ -636,7 +641,15 @@ export const remitoService = {
       };
     }
 
-    // Regla: La ruta de destino debe encontrarse abierta
+    // Regla: La ruta de destino debe encontrarse abierta y preexistente (creada)
+    if (hoja.estado === 'borrador') {
+      return {
+        success: false,
+        error:
+          'No se puede anexar la entrega: la hoja de ruta de destino se encuentra en estado borrador. Solo se pueden anexar entregas a rutas preexistentes creadas y abiertas.',
+        status: 422,
+      };
+    }
     if (hoja.estado === 'cerrada' || hoja.estado === 'anulada') {
       return {
         success: false,
