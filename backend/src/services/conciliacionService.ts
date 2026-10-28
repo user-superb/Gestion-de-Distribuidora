@@ -241,7 +241,9 @@ export const conciliacionService = {
     let fechaFiltro = '';
     if (fecha) {
       params.push(fecha);
-      fechaFiltro = "AND (mb.fecha_hora AT TIME ZONE 'America/Argentina/Buenos_Aires')::date = $1::date";
+      fechaFiltro = db.isMemory()
+        ? "AND mb.fecha_hora::date = $1::date"
+        : "AND (mb.fecha_hora AT TIME ZONE 'America/Argentina/Buenos_Aires')::date = $1::date";
     }
     const result = await db.query(
       `SELECT mb.id::text AS id, mb.fecha_hora, mb.ordenante,
