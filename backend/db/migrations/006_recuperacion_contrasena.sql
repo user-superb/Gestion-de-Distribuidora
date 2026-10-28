@@ -17,5 +17,5 @@ CREATE INDEX IF NOT EXISTS idx_token_recuperacion_usuario ON token_recuperacion_
 
 -- Actualización del correo electrónico del usuario administrativo de prueba
 UPDATE usuario 
-SET email = 'almeida.christian.writing@gmail.com', actualizado_en = now()
+SET email = 'almeidachristian94@hotmail.com', actualizado_en = now()
 WHERE usuario = 'admin';

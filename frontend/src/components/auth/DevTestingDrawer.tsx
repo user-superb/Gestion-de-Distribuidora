@@ -19,7 +19,7 @@ const SEED_USERS_DB: Array<{
   branch: string;
 }> = [
   {
-    email: 'admin@tutucas.com.ar',
+    email: 'almeidachristian94@hotmail.com',
     password: 'Password123!',
     name: 'Martín Jirafales Coordinador',
     role: 'Administrativo',
