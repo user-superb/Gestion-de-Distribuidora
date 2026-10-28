@@ -51,25 +51,30 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+  const isSysAdmin = session.role === 'Administrador del sistema';
+
   const [seccion, setSeccion] = useState<Seccion>(() => {
+    if (session.role === 'Administrador del sistema') return 'configuracion';
     const path = window.location.pathname;
     if (path.endsWith('/conciliacion')) return 'conciliacion';
-    if ((path.endsWith('/configuracion') || path.endsWith('/usuarios')) && session.role === 'Administrador del sistema') return 'configuracion';
     return 'hojas';
   });
 
   useEffect(() => {
+    if (isSysAdmin) {
+      setSeccion('configuracion');
+      if (!window.location.pathname.startsWith('/dashboard/configuracion') && !window.location.pathname.endsWith('/usuarios')) {
+        window.history.replaceState(null, '', '/dashboard/configuracion');
+      }
+      return;
+    }
     const syncSection = () => {
       const path = window.location.pathname;
-      setSeccion(path.endsWith('/conciliacion')
-        ? 'conciliacion'
-        : (path.endsWith('/configuracion') || path.endsWith('/usuarios')) && session.role === 'Administrador del sistema'
-          ? 'configuracion'
-          : 'hojas');
+      setSeccion(path.endsWith('/conciliacion') ? 'conciliacion' : 'hojas');
     };
     window.addEventListener('popstate', syncSection);
     return () => window.removeEventListener('popstate', syncSection);
-  }, [session.role]);
+  }, [isSysAdmin]);
 
   useEffect(() => {
     if (session.role === 'Transportista') {
@@ -153,11 +158,12 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
   };
 
   if (isAdmin) {
-    const navItems = [
-      { id: 'hojas' as const, label: 'Hojas de ruta', icon: Route, path: '/dashboard' },
-      { id: 'conciliacion' as const, label: 'Conciliación', icon: Landmark, path: '/dashboard/conciliacion' },
-      ...(session.role === 'Administrador del sistema' ? [{ id: 'configuracion' as const, label: 'Configuración', icon: Settings, path: '/dashboard/configuracion' }] : []),
-    ];
+    const navItems = isSysAdmin
+      ? [{ id: 'configuracion' as const, label: 'Configuración', icon: Settings, path: '/dashboard/configuracion' }]
+      : [
+          { id: 'hojas' as const, label: 'Hojas de ruta', icon: Route, path: '/dashboard' },
+          { id: 'conciliacion' as const, label: 'Conciliación', icon: Landmark, path: '/dashboard/conciliacion' },
+        ];
 
     return (
       <div className="min-h-screen bg-[#F8FAFC]">
@@ -263,7 +269,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
                   </a>
                 );
               })}
-              {[
+              {!isSysAdmin && [
                 { label: 'Efectivo', icon: Banknote },
                 { label: 'Reportes', icon: ChartNoAxesCombined },
               ].map(({ label, icon: Icon }) => (
@@ -287,16 +293,31 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
         <main className="mx-auto max-w-screen-2xl px-4 py-6 sm:px-6 lg:py-8">
           <div className="mb-5">
             <h1 className="text-2xl font-extrabold text-marca-azul">
-              {seccion === 'hojas' ? (subseccionHojas === 'armadas' ? 'Hojas de ruta armadas' : 'Armado de hoja de ruta') : seccion === 'conciliacion' ? 'Conciliación de transferencias' : 'Configuración'}
+              {isSysAdmin
+                ? 'Configuración'
+                : seccion === 'hojas'
+                ? subseccionHojas === 'armadas'
+                  ? 'Hojas de ruta armadas'
+                  : 'Armado de hoja de ruta'
+                : 'Conciliación de transferencias'}
             </h1>
             <p className="mt-1 text-sm text-slate-600">
-              {seccion === 'hojas' ? (subseccionHojas === 'armadas' ? 'Seguimiento, asignación de choferes y control de hojas de ruta despachadas.' : 'Organizá los remitos y las visitas de reparto.') : seccion === 'conciliacion' ? 'Imputá los movimientos de la cuenta a los remitos pendientes.' : 'Administrá usuarios, marcas, comercios, sucursales y permisos.'}
+              {isSysAdmin
+                ? 'Administrá usuarios, marcas, comercios, sucursales y permisos.'
+                : seccion === 'hojas'
+                ? subseccionHojas === 'armadas'
+                  ? 'Seguimiento, asignación de choferes y control de hojas de ruta despachadas.'
+                  : 'Organizá los remitos y las visitas de reparto.'
+                : 'Imputá los movimientos de la cuenta a los remitos pendientes.'}
             </p>
           </div>
-          {seccion === 'hojas' ? <AgrupadorRemitos vistaInicial={subseccionHojas} onCambioVista={setSubseccionHojas} />
-            : seccion === 'conciliacion'
-              ? <ConciliacionCentro session={session} />
-              : <Configuracion session={session} />}
+          {isSysAdmin ? (
+            <Configuracion session={session} />
+          ) : seccion === 'hojas' ? (
+            <AgrupadorRemitos vistaInicial={subseccionHojas} onCambioVista={setSubseccionHojas} />
+          ) : (
+            <ConciliacionCentro session={session} />
+          )}
         </main>
       </div>
     );

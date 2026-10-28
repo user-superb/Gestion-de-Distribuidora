@@ -39,7 +39,7 @@ export const App: React.FC = () => {
     if (existing) {
       setCurrentSession(existing);
       const roleUrls: Record<string, string> = {
-        'Administrador del sistema': '/dashboard',
+        'Administrador del sistema': '/dashboard/configuracion',
         Administrativo: '/dashboard',
         Transportista: '/mobile-dispatch',
         Supervisor: '/operations/routes',
