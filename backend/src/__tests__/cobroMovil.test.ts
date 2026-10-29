@@ -103,7 +103,7 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
       CREATE TABLE remito (
         id serial PRIMARY KEY, marca_id bigint NOT NULL, comercio_id bigint NOT NULL, numero text NOT NULL,
         importe_centavos bigint NOT NULL, estado text NOT NULL DEFAULT 'pendiente', visita_id bigint,
-        actualizado_en timestamptz DEFAULT now()
+        motivo_no_entrega text, actualizado_en timestamptz DEFAULT now()
       );
       CREATE TABLE cobro (
         id serial PRIMARY KEY, visita_id bigint NOT NULL, medio_pago text NOT NULL, importe_centavos bigint NOT NULL,

@@ -33,6 +33,7 @@ export interface RemitoEntrega {
   importeCentavos: number;
   estado: 'pendiente' | 'en_ruta' | 'entregado' | 'no_entregado' | 'devuelto' | 'anulado';
   visitaId?: string | null;
+  motivoNoEntrega?: string | null;
   entregadoEn?: string | null;
   entregadoPor?: string | null;
   latitud?: number | null;
@@ -130,6 +131,7 @@ export const transportistaService = {
                 (CASE WHEN r.importe_centavos > 1000000 THEN r.importe_centavos / 100 ELSE r.importe_centavos END)::int as importe,
                 r.importe_centavos as "importeCentavos",
                 r.estado, r.visita_id::text as "visitaId",
+                r.motivo_no_entrega as "motivoNoEntrega",
                 r.entregado_en as "entregadoEn",
                 r.entregado_por::text as "entregadoPor",
                 r.latitud, r.longitud
@@ -399,6 +401,7 @@ export const transportistaService = {
                 (CASE WHEN r.importe_centavos > 1000000 THEN r.importe_centavos / 100 ELSE r.importe_centavos END)::int as importe,
                 r.importe_centavos as "importeCentavos",
                 r.estado, r.visita_id::text as "visitaId",
+                r.motivo_no_entrega as "motivoNoEntrega",
                 r.entregado_en as "entregadoEn",
                 r.entregado_por::text as "entregadoPor",
                 r.latitud, r.longitud

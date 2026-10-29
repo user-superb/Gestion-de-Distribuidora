@@ -64,6 +64,7 @@ describe('Backend PostgreSQL - HU #22: Confirmar Entrega Remito Individual', () 
         entregado_por bigint,
         latitud numeric,
         longitud numeric,
+        motivo_no_entrega text,
         observacion text
       );
 

@@ -205,7 +205,7 @@ export const authService = {
    */
   async logout(token: string, reason: 'manual' | 'inactividad' = 'manual'): Promise<{ success: boolean; message: string }> {
     try {
-      const cleanToken = token.replace('Bearer ', '').trim();
+      const cleanToken = token.replace(/^Bearer\s+/i, '').trim();
       await db.query(
         `UPDATE sesion_usuario
          SET revocado = true, revocado_en = now(), motivo_cierre = $1
@@ -235,7 +235,7 @@ export const authService = {
     error?: { type: 'SESSION_REVOKED' | 'SESSION_EXPIRED' | 'NOT_FOUND'; message: string };
   }> {
     try {
-      const cleanToken = token.replace('Bearer ', '').trim();
+      const cleanToken = token.replace(/^Bearer\s+/i, '').trim();
 
       const result = await db.query(
         `SELECT s.id, s.token, s.expira_en, s.revocado, s.creado_en,

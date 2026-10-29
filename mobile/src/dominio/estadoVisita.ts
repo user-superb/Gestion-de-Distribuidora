@@ -69,7 +69,13 @@ export function infoEstadoRemito(remito: Remito, cola: ColaPorClave): InfoEstado
     };
   }
   if (remito.estado === 'devuelto') {
-    return { texto: 'Devuelto', color: '#6c757d', puedeOperar: false, esRechazado: true };
+    return {
+      texto: 'Devuelto',
+      color: '#6c757d',
+      puedeOperar: false,
+      esRechazado: true,
+      motivo: remito.motivoNoEntrega,
+    };
   }
   if (remito.estado === 'anulado') {
     return { texto: 'Anulado', color: '#6c757d', puedeOperar: false, esRechazado: false };
