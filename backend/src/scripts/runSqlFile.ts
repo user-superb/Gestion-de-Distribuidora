@@ -1,4 +1,4 @@
-// Aplica un archivo .sql contra DATABASE_URL. Uso: tsx src/scripts/runSqlFile.ts db/demo_movil.sql
+// Aplica un archivo .sql contra DATABASE_URL. Uso: tsx src/scripts/runSqlFile.ts db/seed.sql
 import fs from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';

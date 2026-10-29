@@ -43,9 +43,9 @@ Primero el backend (en otra terminal):
 ```bash
 cd backend
 npm install
-npm run db:init              # solo la primera vez: crea tutucas_db con schema.sql y seed.sql
-npm run db:migrate-cobro-movil   # si la base ya existía antes de esta rama
-npm run db:demo-movil        # hoja de ruta de HOY para el usuario "chofer"
+npm run db:init              # primera vez: crea la base, aplica esquema, migraciones y seed
+# Si la base ya existe, usar en cambio: npm run db:migrate
+npm run db:seed              # vuelve a asegurar los datos de demo para web y móvil
 npm run dev
 ```
 
@@ -62,7 +62,7 @@ Escaneá el QR con **Expo Go** en un Android, en la misma red Wi-Fi que la PC. U
 
 **Probar en la PC, sin celular:** `npx expo start --web` abre la app en el navegador. Para verla como en un teléfono, usá la vista de dispositivo móvil de las herramientas de desarrollador (F12). Si el backend no está en el puerto 3001, indicalo así: `EXPO_PUBLIC_API_URL=http://localhost:3101/api npx expo start --web`.
 La hoja de demo trae tres visitas: una con dos marcas, una con un remito devuelto (que se descuenta del total) y una de un solo remito.
-Para volver a dejarlas pendientes y probar de nuevo: `npm run db:demo-movil-reset` (en `backend/`).
+Para reiniciar la ruta demo y sus cobros antes de repetir la prueba: `npm run db:demo-movil-reset` (en `backend/`).
 
 ## Tests
 

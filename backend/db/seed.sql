@@ -40,13 +40,18 @@ SELECT u.id, s.id
 FROM (VALUES
   ('admin', 'Sucursal Central - La Plata'),
   ('admin_sistema', 'Sucursal Central - La Plata'),
-  ('chofer', 'Depósito Sur - Berisso'),
+  ('chofer', 'Sucursal Central - La Plata'),
   ('supervisor', 'Hub Central - Distribución'),
   ('gerencia', 'Sede Administrativa Central')
 ) AS us(usuario_nom, sucursal_nom)
 JOIN usuario u ON u.usuario = us.usuario_nom
 JOIN sucursal s ON s.nombre = us.sucursal_nom
 ON CONFLICT (usuario_id, sucursal_id) DO NOTHING;
+
+-- El transportista demo opera desde la misma sucursal que su hoja.
+DELETE FROM usuario_sucursal
+WHERE usuario_id = (SELECT id FROM usuario WHERE usuario = 'chofer')
+  AND sucursal_id <> (SELECT id FROM sucursal WHERE nombre = 'Sucursal Central - La Plata');
 
 -- 3. Marcas
 INSERT INTO marca (nombre, activa) VALUES
@@ -67,16 +72,59 @@ WHERE NOT EXISTS (
   SELECT 1 FROM comercio c WHERE c.razon_social = v.razon_social
 );
 
--- 5. Hoja de Ruta Inicial de Prueba (en estado borrador)
-INSERT INTO hoja_de_ruta (sucursal_id, transportista_id, fecha_reparto, estado)
-SELECT s.id, u.id, CURRENT_DATE, 'borrador'
+-- 5. Hoja de ruta demo publicada para el día operativo argentino.
+WITH demo_dia AS (
+  SELECT timezone('America/Argentina/Buenos_Aires', now())::date AS fecha
+)
+INSERT INTO hoja_de_ruta (sucursal_id, transportista_id, fecha_reparto, patente, estado, publicada_en)
+SELECT s.id, u.id, d.fecha, 'AB123CD', 'publicada', now()
 FROM sucursal s
 JOIN usuario u ON u.usuario = 'chofer'
+CROSS JOIN demo_dia d
 WHERE s.nombre = 'Sucursal Central - La Plata'
   AND NOT EXISTS (
     SELECT 1 FROM hoja_de_ruta h
-    WHERE h.transportista_id = u.id AND h.fecha_reparto = CURRENT_DATE
+    WHERE h.transportista_id = u.id AND h.fecha_reparto = d.fecha
   );
+
+-- Si ya existía la hoja borrador creada por una seed anterior, publicarla.
+WITH demo_dia AS (
+  SELECT timezone('America/Argentina/Buenos_Aires', now())::date AS fecha
+)
+UPDATE hoja_de_ruta h
+SET patente = COALESCE(h.patente, 'AB123CD'),
+    estado = CASE WHEN h.estado = 'borrador' THEN 'publicada' ELSE h.estado END,
+    publicada_en = COALESCE(h.publicada_en, now())
+FROM usuario u, demo_dia d
+WHERE u.usuario = 'chofer'
+  AND h.transportista_id = u.id
+  AND h.fecha_reparto = d.fecha
+  AND h.id = (
+    SELECT h2.id FROM hoja_de_ruta h2
+    WHERE h2.transportista_id = u.id AND h2.fecha_reparto = d.fecha
+    ORDER BY h2.id DESC LIMIT 1
+  );
+
+-- Tres paradas de demo, únicas por orden y comercio para la hoja.
+WITH demo_dia AS (
+  SELECT timezone('America/Argentina/Buenos_Aires', now())::date AS fecha
+)
+INSERT INTO visita (hoja_de_ruta_id, comercio_id, orden)
+SELECT h.id, c.id, d.orden
+FROM (VALUES
+  ('Mayorista El Sol S.R.L.', 1),
+  ('Autoservicio Luna', 2),
+  ('Distribuidora Los Andes', 3)
+) AS d(razon_social, orden)
+JOIN comercio c ON c.razon_social = d.razon_social
+JOIN usuario u ON u.usuario = 'chofer'
+JOIN hoja_de_ruta h ON h.id = (
+  SELECT h2.id FROM hoja_de_ruta h2
+  WHERE h2.transportista_id = u.id
+    AND h2.fecha_reparto = (SELECT fecha FROM demo_dia)
+  ORDER BY h2.id DESC LIMIT 1
+)
+ON CONFLICT DO NOTHING;
 
 -- 6. Remitos de Prueba (Importes en centavos)
 -- Nota: Asociamos a sucursal 1 y a los IDs de marca y comercio generados
@@ -102,6 +150,34 @@ JOIN marca m ON m.nombre = r.marca_nombre
 JOIN comercio c ON c.razon_social = r.comercio_nombre
 JOIN sucursal s ON s.nombre = 'Sucursal Central - La Plata'
 ON CONFLICT (marca_id, numero) DO NOTHING;
+
+-- Remitos asignados a las paradas para probar entregas y cobros desde el móvil.
+WITH demo_dia AS (
+  SELECT timezone('America/Argentina/Buenos_Aires', now())::date AS fecha
+)
+INSERT INTO remito (marca_id, comercio_id, sucursal_id, numero, importe_centavos, estado, visita_id)
+SELECT m.id, c.id, h.sucursal_id,
+       'M' || to_char(d.fecha, 'YYMMDD') || '-' || r.sufijo,
+       r.importe_centavos, r.estado, v.id
+FROM (VALUES
+  (1, 'Lácteos del Sur',           '01', 4500000::bigint, 'en_ruta'),
+  (1, 'Bebidas Nacionales',        '02', 1250050::bigint, 'en_ruta'),
+  (2, 'Alimentos Río de la Plata', '03', 3000000::bigint, 'en_ruta'),
+  (2, 'Lácteos del Sur',           '04',  800000::bigint, 'devuelto'),
+  (3, 'Bebidas Nacionales',        '05', 2199999::bigint, 'en_ruta')
+) AS r(orden, marca, sufijo, importe_centavos, estado)
+CROSS JOIN demo_dia d
+JOIN marca m ON m.nombre = r.marca
+JOIN usuario u ON u.usuario = 'chofer'
+JOIN hoja_de_ruta h ON h.id = (
+  SELECT h2.id FROM hoja_de_ruta h2
+  WHERE h2.transportista_id = u.id AND h2.fecha_reparto = d.fecha
+  ORDER BY h2.id DESC LIMIT 1
+)
+JOIN visita v ON v.hoja_de_ruta_id = h.id AND v.orden = r.orden
+JOIN comercio c ON c.id = v.comercio_id AND c.razon_social =
+  CASE r.orden WHEN 1 THEN 'Mayorista El Sol S.R.L.' WHEN 2 THEN 'Autoservicio Luna' ELSE 'Distribuidora Los Andes' END
+ON CONFLICT (marca_id, numero) DO UPDATE SET visita_id = EXCLUDED.visita_id;
 
 -- Remitos entregados de ejemplo para la bandeja de cobranza y conciliación exacta.
 UPDATE remito SET estado = 'entregado', entregado_en = now() - interval '12 days'
