@@ -1004,14 +1004,6 @@ export const remitoService = {
       return { success: false, error: 'La hoja de ruta especificada no existe.', status: 404 };
     }
     const hojaRow = hojaRes.rows[0];
-    const estadoRuta = String(hojaRow.estado).toLowerCase();
-    if (estadoRuta === 'borrador') {
-      return {
-        success: false,
-        error: 'No se puede anexar la entrega: primero hay que armar y confirmar la hoja de ruta.',
-        status: 422,
-      };
-    }
     const estadoRuta = hojaRow.estado;
 
     // Regla de Negocio: Si la hoja ya fue despachada o cuenta con entregas realizadas, no se puede desasignar ni modificar el transportista
@@ -1371,8 +1363,16 @@ export const remitoService = {
     }
 
     const hojaRow = hojaRes.rows[0];
+    const estadoRuta = String(hojaRow.estado).toLowerCase();
+    if (estadoRuta === 'borrador') {
+      return {
+        success: false,
+        error: 'No se puede anexar la entrega: primero hay que armar y confirmar la hoja de ruta.',
+        status: 422,
+      };
+    }
 
-    // REGLA: Coherencia de comercio destinatario (Solo se pueden agrupar o anexar entregas del mismo comercio)
+    // REGLA: Coherencia de comercio destinatario (Solo se pueden agrupar o anexar remitos del mismo comercio)
     const visitasDeRuta = await db.query(
       'SELECT DISTINCT comercio_id::text as "comercioId" FROM visita WHERE hoja_de_ruta_id::text = $1',
       [String(hojaDeRutaId)]
