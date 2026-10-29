@@ -93,6 +93,16 @@ function setupMemoryDb() {
       motivo_cierre text
     );
 
+    CREATE TABLE IF NOT EXISTS token_recuperacion_contrasena (
+      id serial PRIMARY KEY,
+      usuario_id bigint NOT NULL,
+      token_hash text NOT NULL UNIQUE,
+      expira_en timestamp NOT NULL,
+      usado boolean NOT NULL DEFAULT false,
+      usado_en timestamp,
+      creado_en timestamp DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS marca (
       id serial PRIMARY KEY,
       nombre text NOT NULL UNIQUE,
@@ -310,7 +320,7 @@ function setupMemoryDb() {
     ON CONFLICT (nombre) DO NOTHING;
 
     INSERT INTO usuario (usuario, nombre, email, password_hash, rol, es_transportista, activo) VALUES
-      ('admin', 'Martín Jirafales Coordinador', 'admin@tutucas.com.ar', '${hash}', 'Administrativo', false, true),
+      ('admin', 'Martín Jirafales Coordinador', 'almeidachristian94@hotmail.com', '${hash}', 'Administrativo', false, true),
       ('chofer', 'Carlos Repartidor', 'chofer@tutucas.com.ar', '${hash}', 'Transportista', true, true),
       ('supervisor', 'Valeria Logística', 'supervisor@tutucas.com.ar', '${hash}', 'Supervisor', false, true),
       ('gerencia', 'Roberto Gerente', 'gerencia@tutucas.com.ar', '${hash}', 'Gerente', false, true),

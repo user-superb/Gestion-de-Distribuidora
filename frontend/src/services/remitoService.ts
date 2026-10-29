@@ -763,10 +763,20 @@ export const remitoService = {
       return { success: false, error: 'La hoja de ruta de destino no existe.', status: 404 };
     }
 
+    if (hoja.estado === 'borrador') {
+      return { success: false, error: 'No se puede anexar la entrega: primero hay que armar y confirmar la hoja de ruta.', status: 422 };
+    }
+
     // Regla: Coherencia de comercio destinatario (Solo se pueden agrupar o anexar remitos del mismo comercio)
     const visitasDeHoja = mockVisitas.filter((v) => v.hojaDeRutaId === hojaDeRutaId);
+    if (visitasDeHoja.length === 0) {
+      return {
+        success: false,
+        error: 'No se puede anexar la entrega: la hoja de ruta debe tener visitas del mismo comercio.',
+        status: 422,
+      };
+    }
     if (
-      visitasDeHoja.length > 0 &&
       !visitasDeHoja.some((v) => v.comercioId === remito.comercioId)
     ) {
       return {

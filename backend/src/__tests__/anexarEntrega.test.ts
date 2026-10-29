@@ -131,6 +131,11 @@ describe('Backend PostgreSQL - HU #19: Anexar una Entrega a una Ruta', () => {
       VALUES (400, 1, 10, CURRENT_DATE, 'anulada');
       INSERT INTO visita (id, hoja_de_ruta_id, comercio_id, orden, estado) VALUES (401, 400, 1, 1, 'no_realizada');
 
+      -- Hoja de Ruta 600: Borrador para Comercio 1
+      INSERT INTO hoja_de_ruta (id, sucursal_id, transportista_id, fecha_reparto, estado)
+      VALUES (600, 1, 10, CURRENT_DATE, 'borrador');
+      INSERT INTO visita (id, hoja_de_ruta_id, comercio_id, orden, estado) VALUES (601, 600, 1, 1, 'pendiente');
+
       -- Remitos pendientes sin asignar
       INSERT INTO remito (id, numero, comercio_id, marca_id, visita_id, importe_centavos, estado)
       VALUES 
@@ -234,13 +239,25 @@ describe('Backend PostgreSQL - HU #19: Anexar una Entrega a una Ruta', () => {
     assert.ok(resultado.error?.includes('comercio distinto'));
   });
 
-  it('PERMISIBILIDAD: Permite anexar a cualquier ruta abierta ("borrador", "pendiente_de_despacho", "publicada", "en_curso")', async () => {
+  it('VALIDACIÓN: Rechaza anexar a una ruta en borrador', async () => {
+    const resultado = await remitoService.anexarEntregaARuta('5003', '600');
+
+    assert.equal(resultado.success, false);
+    assert.equal(resultado.status, 422);
+    assert.ok(resultado.error?.includes('armar y confirmar'));
+
+    const dbRemito = await db.query('SELECT visita_id, estado FROM remito WHERE id = 5003');
+    assert.equal(dbRemito.rows[0].visita_id, null);
+    assert.equal(dbRemito.rows[0].estado, 'pendiente');
+  });
+
+  it('VALIDACIÓN: Rechaza anexar a una ruta sin visitas', async () => {
     await db.query("INSERT INTO hoja_de_ruta (id, transportista_id, estado) VALUES (500, 10, 'publicada')");
-    // Al no tener visitas previas, acepta el remito de Comercio 1
     const resultado = await remitoService.anexarEntregaARuta('5003', '500');
 
-    assert.equal(resultado.success, true);
-    assert.equal(resultado.ordenParada, 1);
+    assert.equal(resultado.success, false);
+    assert.equal(resultado.status, 422);
+    assert.ok(resultado.error?.includes('debe tener visitas'));
   });
 
   it('VALIDACIÓN: Rechaza si el remito ya se encuentra asignado a otra visita', async () => {

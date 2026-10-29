@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 // backend/src/server.ts
 import express from 'express';
 import cors from 'cors';
@@ -11,6 +13,10 @@ import { configuracionRouter } from './routes/configuracionRoutes.js';
 import { movilRouter } from './routes/movilRoutes.js';
 import { transportistaRouter } from './routes/transportistaRoutes.js';
 
+const rootEnv = path.resolve(process.cwd(), '.env');
+const backendEnv = path.resolve(process.cwd(), 'backend', '.env');
+if (fs.existsSync(backendEnv)) dotenv.config({ path: backendEnv });
+if (fs.existsSync(rootEnv)) dotenv.config({ path: rootEnv });
 dotenv.config();
 
 const app = express();

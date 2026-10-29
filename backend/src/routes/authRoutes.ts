@@ -155,3 +155,46 @@ authRouter.post('/auth/reset-lockout', (req: Request, res: Response) => {
   authService.resetLockout(identifier);
   return res.json({ success: true, message: 'Intentos fallidos reseteados.' });
 });
+
+/**
+ * POST /api/auth/forgot-password
+ * ESCENARIO 1: Solicitud de restablecimiento de contraseña
+ */
+authRouter.post('/auth/forgot-password', async (req: Request, res: Response) => {
+  const { email } = req.body || {};
+  const result = await authService.requestPasswordReset(email);
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  return res.json(result);
+});
+
+/**
+ * GET /api/auth/reset-password/validate
+ * ESCENARIOS 2 y 3: Pre-validación del token para mostrar u ocultar el formulario
+ */
+authRouter.get('/auth/reset-password/validate', async (req: Request, res: Response) => {
+  const token = req.query.token as string;
+  const result = await authService.validateResetToken(token);
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  if (!result.valid) {
+    return res.status(400).json(result);
+  }
+  return res.json(result);
+});
+
+/**
+ * POST /api/auth/reset-password
+ * ESCENARIOS 2 y 3: Establecimiento de la nueva contraseña con invalidación atómica
+ */
+authRouter.post('/auth/reset-password', async (req: Request, res: Response) => {
+  const { token, newPassword } = req.body || {};
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  try {
+    const result = await authService.resetPasswordWithToken(token, newPassword);
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    return res.json(result);
+  } catch {
+    return res.status(500).json({ success: false, message: 'No se pudo restablecer la contraseña. Intente nuevamente.' });
+  }
+});

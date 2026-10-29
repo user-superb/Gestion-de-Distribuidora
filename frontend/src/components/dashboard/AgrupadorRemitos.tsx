@@ -2357,7 +2357,7 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
           setRemitoParaAnexar(null);
         }}
         remito={remitoParaAnexar}
-        hojasDeRuta={hojasRuta}
+        hojasDeRuta={hojasArmadas}
         transportistas={transportistas}
         comercios={comercios}
         marcas={marcas}

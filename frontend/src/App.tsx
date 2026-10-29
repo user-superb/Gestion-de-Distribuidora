@@ -1,3 +1,5 @@
+import { ResetPasswordView } from './components/auth/ResetPasswordView';
+import { ForgotPasswordModal } from './components/auth/ForgotPasswordModal';
 import React, { useState, useEffect, useCallback } from 'react';
 import { AuthLayout } from './components/auth/AuthLayout';
 import { LoginForm } from './components/auth/LoginForm';
@@ -14,6 +16,11 @@ export const App: React.FC = () => {
   const [prefillCredentials, setPrefillCredentials] = useState<LoginCredentials | undefined>(undefined);
   const [, setLockoutKey] = useState(0);
   const [inactivityNotice, setInactivityNotice] = useState<string | null>(null);
+  const [resetToken, setResetToken] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('token');
+  });
+  const [showDirectRecoveryModal, setShowDirectRecoveryModal] = useState(false);
 
   // Cierre de sesión automático por inactividad (30 min)
   const handleInactivityTimeout = useCallback(async () => {
@@ -39,7 +46,7 @@ export const App: React.FC = () => {
     if (existing) {
       setCurrentSession(existing);
       const roleUrls: Record<string, string> = {
-        'Administrador del sistema': '/dashboard',
+        'Administrador del sistema': '/dashboard/configuracion',
         Administrativo: '/dashboard',
         Transportista: '/mobile-dispatch',
         Supervisor: '/operations/routes',
@@ -65,8 +72,9 @@ export const App: React.FC = () => {
       const active = authService.getCurrentSession();
       if (!active) {
         setCurrentSession(null);
-        window.history.replaceState(null, '', '/');
       }
+      const params = new URLSearchParams(window.location.search);
+      setResetToken(params.get('token'));
     };
 
     window.addEventListener('popstate', handlePopState);
@@ -98,6 +106,30 @@ export const App: React.FC = () => {
     window.location.reload();
   };
 
+  // Si hay un token en la URL o estamos en la ruta de restablecimiento
+  if (resetToken !== null || window.location.pathname === '/reset-password') {
+    return (
+      <AuthLayout>
+        <ResetPasswordView
+          token={resetToken || ''}
+          onNavigateToLogin={() => {
+            setResetToken(null);
+            window.history.pushState(null, '', '/');
+          }}
+          onRequestNewLink={() => {
+            setResetToken(null);
+            window.history.pushState(null, '', '/');
+            setShowDirectRecoveryModal(true);
+          }}
+        />
+        <ForgotPasswordModal
+          isOpen={showDirectRecoveryModal}
+          onClose={() => setShowDirectRecoveryModal(false)}
+        />
+      </AuthLayout>
+    );
+  }
+
   // Si el usuario está autenticado, mostrar la vista con información operativa y módulo administrativo
   if (currentSession) {
     return (
@@ -125,6 +157,10 @@ export const App: React.FC = () => {
         <LoginForm
           onSuccess={handleLoginSuccess}
           prefillCredentials={prefillCredentials}
+        />
+        <ForgotPasswordModal
+          isOpen={showDirectRecoveryModal}
+          onClose={() => setShowDirectRecoveryModal(false)}
         />
       </AuthLayout>
 

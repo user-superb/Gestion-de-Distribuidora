@@ -151,4 +151,80 @@ describe('Frontend authService - Autenticación y Cierre de Sesión', () => {
     // Debe haber limpiado la sesión local
     expect(authService.getCurrentSession()).toBeNull();
   });
+
+  it('HU RECUPERACIÓN - ESCENARIO 1: Solicitud de restablecimiento envía email y devuelve respuesta genérica', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        message: 'Si el correo electrónico coincide con una cuenta activa, recibirá las instrucciones para restablecer su contraseña en su casilla de correo.',
+      }),
+    } as any);
+    globalThis.fetch = fetchMock;
+
+    const res = await authService.requestPasswordReset('almeida.christian.writing@gmail.com');
+    expect(res.success).toBe(true);
+    expect(res.message).toContain('correo');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/auth/forgot-password'),
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'almeida.christian.writing@gmail.com' }),
+      })
+    );
+  });
+
+  it('HU RECUPERACIÓN - ESCENARIO 2 y 3: Pre-validación de token distingue tokens válidos y caducados', async () => {
+    // Token válido
+    globalThis.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ valid: true, message: 'Token válido.' }),
+    } as any);
+
+    const validRes = await authService.validateResetToken('token_valido_123');
+    expect(validRes.valid).toBe(true);
+
+    // Token caducado o usado
+    globalThis.fetch = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        valid: false,
+        error: 'TOKEN_EXPIRADO',
+        message: 'El enlace de recuperación ha caducado.',
+      }),
+    } as any);
+
+    const expiredRes = await authService.validateResetToken('token_caducado_456');
+    expect(expiredRes.valid).toBe(false);
+    expect(expiredRes.error).toBe('TOKEN_EXPIRADO');
+  });
+
+  it('HU RECUPERACIÓN - ESCENARIOS 2 y 3: Consumo de token para nueva contraseña', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        message: 'Contraseña actualizada exitosamente.',
+      }),
+    } as any);
+    globalThis.fetch = fetchMock;
+
+    const res = await authService.resetPassword('tok_xyz', 'NuevaClaveValida2026!');
+    expect(res.success).toBe(true);
+    expect(res.message).toBe('Contraseña actualizada exitosamente.');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/auth/reset-password'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ token: 'tok_xyz', newPassword: 'NuevaClaveValida2026!' }),
+      })
+    );
+  });
 });

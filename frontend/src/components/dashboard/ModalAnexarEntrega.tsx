@@ -45,13 +45,12 @@ export const ModalAnexarEntrega: React.FC<ModalAnexarEntregaProps> = ({
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Regla: Solo hojas de ruta abiertas (no cerradas ni anuladas)
-  // Y regla de comercio: la hoja de ruta debe pertenecer al mismo comercio o estar vacía
+  // Solo rutas operativas ya armadas y con visitas del mismo comercio.
   const hojasCandidatas = hojasDeRuta.filter((h) => {
-    if (h.estado === 'cerrada' || h.estado === 'anulada') return false;
+    if (!['pendiente_de_despacho', 'publicada', 'en_curso'].includes(h.estado)) return false;
     if (!remito) return false;
     const visitasDeHoja = h.visitas || [];
-    if (visitasDeHoja.length === 0) return true;
+    if (visitasDeHoja.length === 0) return false;
     return visitasDeHoja.some((v) => v.comercioId === remito.comercioId);
   });
 
@@ -169,7 +168,7 @@ export const ModalAnexarEntrega: React.FC<ModalAnexarEntregaProps> = ({
               <div className="p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800 flex items-start gap-1.5">
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                 <span>
-                  No hay hojas abiertas para <strong>{comercio?.razonSocial || 'este comercio'}</strong>. Solo se pueden anexar remitos del mismo comercio.
+                  No hay hojas de ruta armadas para <strong>{comercio?.razonSocial || 'este comercio'}</strong>. Primero hay que armar una ruta con visitas del mismo comercio.
                 </span>
               </div>
             ) : (
