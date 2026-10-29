@@ -18,8 +18,9 @@ export interface Remito {
   comercioId: string;
   marcaId: string;
   importe: number;
-  estado: 'PENDIENTE' | 'AGRUPADO';
+  estado: 'PENDIENTE' | 'AGRUPADO' | string;
   visitaId?: string | null;
+  motivoNoEntrega?: string | null;
 }
 
 export interface Visita {
@@ -30,6 +31,7 @@ export interface Visita {
   orden?: number;
   hojaDeRutaId?: string | null;
   estado?: string;
+  observacion?: string | null;
   sincronizacionPendiente?: boolean;
 }
 
@@ -166,26 +168,50 @@ export const remitoService = {
   },
 
   async getVisitas(): Promise<Visita[]> {
-    const visitasRes = await db.query(
-      `SELECT id::text as id, comercio_id::text as "comercioId",
-              hoja_de_ruta_id::text as "hojaDeRutaId", orden, estado
-       FROM visita
-       ORDER BY COALESCE(orden, 999999), id ASC`
-    );
+    let visitasRes;
+    try {
+      visitasRes = await db.query(
+        `SELECT id::text as id, comercio_id::text as "comercioId",
+                hoja_de_ruta_id::text as "hojaDeRutaId", orden, estado, observacion
+         FROM visita
+         ORDER BY COALESCE(orden, 999999), id ASC`
+      );
+    } catch {
+      visitasRes = await db.query(
+        `SELECT id::text as id, comercio_id::text as "comercioId",
+                hoja_de_ruta_id::text as "hojaDeRutaId", orden, estado
+         FROM visita
+         ORDER BY COALESCE(orden, 999999), id ASC`
+      );
+    }
 
     const visitas: Visita[] = [];
 
     for (const v of visitasRes.rows) {
-      const remitosRes = await db.query(
-        `SELECT id::text as id, numero as "numeroRemito", comercio_id::text as "comercioId",
-                marca_id::text as "marcaId",
-                (CASE WHEN importe_centavos >= 100 THEN importe_centavos / 100 ELSE importe_centavos END)::int as importe,
-                'AGRUPADO' as estado, visita_id::text as "visitaId"
-         FROM remito
-         WHERE visita_id::text = $1
-         ORDER BY id`,
-        [v.id]
-      );
+      let remitosRes;
+      try {
+        remitosRes = await db.query(
+          `SELECT id::text as id, numero as "numeroRemito", comercio_id::text as "comercioId",
+                  marca_id::text as "marcaId",
+                  (CASE WHEN importe_centavos >= 100 THEN importe_centavos / 100 ELSE importe_centavos END)::int as importe,
+                  estado, motivo_no_entrega as "motivoNoEntrega", visita_id::text as "visitaId"
+           FROM remito
+           WHERE visita_id::text = $1
+           ORDER BY id`,
+          [v.id]
+        );
+      } catch {
+        remitosRes = await db.query(
+          `SELECT id::text as id, numero as "numeroRemito", comercio_id::text as "comercioId",
+                  marca_id::text as "marcaId",
+                  (CASE WHEN importe_centavos >= 100 THEN importe_centavos / 100 ELSE importe_centavos END)::int as importe,
+                  estado, visita_id::text as "visitaId"
+           FROM remito
+           WHERE visita_id::text = $1
+           ORDER BY id`,
+          [v.id]
+        );
+      }
 
       const remitos: Remito[] = remitosRes.rows;
       const importeTotal = remitos.reduce((acc, r) => acc + Number(r.importe), 0);
@@ -198,6 +224,7 @@ export const remitoService = {
         orden: v.orden != null ? Number(v.orden) : undefined,
         hojaDeRutaId: v.hojaDeRutaId || null,
         estado: v.estado,
+        observacion: v.observacion || null,
       });
     }
 

@@ -19,6 +19,7 @@ export interface Remito {
   importe: number;
   estado: 'PENDIENTE' | 'AGRUPADO' | 'pendiente' | 'en_ruta' | 'entregado' | 'no_entregado' | 'anulado' | 'devuelto' | string;
   visitaId?: string | null;
+  motivoNoEntrega?: string | null;
 }
 
 export interface Visita {
@@ -29,6 +30,7 @@ export interface Visita {
   orden?: number;
   hojaDeRutaId?: string | null;
   estado?: string;
+  observacion?: string | null;
   sincronizacionPendiente?: boolean;
 }
 

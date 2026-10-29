@@ -581,18 +581,19 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
 
   const handleSolicitarQuitarVisita = (visita: Visita, hoja: HojaDeRuta) => {
     const estadoVisita = String(visita.estado || '').toLowerCase();
-    const esVisitaEntregada =
+    const esVisitaProcesada =
       estadoVisita === 'completada' ||
       estadoVisita === 'entregado' ||
+      estadoVisita === 'no_realizada' ||
       (visita.remitos || []).some(
         (r) => r.estado === 'entregado' || r.estado === 'no_entregado' || r.estado === 'devuelto'
       ) ||
       hoja.estado === 'cerrada';
 
-    if (esVisitaEntregada) {
+    if (esVisitaProcesada) {
       setMensaje({
         tipo: 'error',
-        texto: 'No se puede quitar la visita: ya fue entregada o se encuentra completada en la ruta histórica.',
+        texto: 'No se puede quitar la visita: ya fue gestionada (entregada o rechazada) en la ruta.',
       });
       return;
     }
@@ -1807,41 +1808,40 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
           data-testid="hojas-de-ruta-armadas"
           className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden"
         >
-        <button
-          type="button"
-          onClick={() => setMostrarHojasArmadas(!mostrarHojasArmadas)}
-          className="w-full bg-marca-azul text-white px-5 py-3.5 flex items-center justify-between gap-3 text-left cursor-pointer hover:bg-blue-950 transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            <ClipboardCheck className="w-5 h-5 text-marca-crema" />
-            <div>
-              <h3 className="text-sm font-bold text-white">
-                Hojas de ruta armadas ({hojasArmadas.length})
-              </h3>
-              <p className="text-xs text-slate-200">
-                Rutas programadas, asignadas y despachadas en la sucursal
-              </p>
+        <div className="w-full bg-marca-azul text-white px-5 py-3.5 flex items-center justify-between gap-3 text-left">
+          <button
+            type="button"
+            onClick={() => setMostrarHojasArmadas(!mostrarHojasArmadas)}
+            className="flex-1 flex items-center justify-between gap-3 text-left cursor-pointer hover:opacity-95 transition-opacity"
+          >
+            <div className="flex items-center gap-3">
+              <ClipboardCheck className="w-5 h-5 text-marca-crema" />
+              <div>
+                <h3 className="text-sm font-bold text-white">
+                  Hojas de ruta armadas ({hojasArmadas.length})
+                </h3>
+                <p className="text-xs text-slate-200">
+                  Rutas programadas, asignadas y despachadas en la sucursal
+                </p>
+              </div>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
+            {mostrarHojasArmadas ? (
+              <ChevronUp className="w-5 h-5 text-slate-200 shrink-0" />
+            ) : (
+              <ChevronDown className="w-5 h-5 text-slate-200 shrink-0" />
+            )}
+          </button>
+          <div className="flex items-center gap-2 border-l border-white/20 pl-3 ml-2">
             <button
               type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                void recargarDatos();
-              }}
-              className="p-1.5 rounded bg-white/10 hover:bg-white/20 text-white transition-colors"
+              onClick={() => void recargarDatos()}
+              className="p-1.5 rounded bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
               title="Actualizar datos"
             >
               <RefreshCw className="w-3.5 h-3.5" />
             </button>
-            {mostrarHojasArmadas ? (
-              <ChevronUp className="w-5 h-5 text-slate-200" />
-            ) : (
-              <ChevronDown className="w-5 h-5 text-slate-200" />
-            )}
           </div>
-        </button>
+        </div>
 
         {mostrarHojasArmadas && (
           <div className="p-4 sm:p-5 space-y-4 bg-slate-50/40 border-t border-slate-200">
@@ -1888,8 +1888,14 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                     visitasHoja.every(
                       (v) =>
                         v.estado === 'completada' ||
+                        v.estado === 'no_realizada' ||
                         (v.remitos.length > 0 &&
-                          v.remitos.every((r) => r.estado === 'entregado' || r.estado === 'no_entregado'))
+                          v.remitos.every(
+                            (r) =>
+                              r.estado === 'entregado' ||
+                              r.estado === 'no_entregado' ||
+                              r.estado === 'devuelto'
+                          ))
                     );
 
                   return (
@@ -2199,13 +2205,48 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                               const comercio = getComercio(visita.comercioId);
                               const ordenNumero = visita.orden ?? idx + 1;
                               const estadoVisita = String(visita.estado || '').toLowerCase();
-                              const esVisitaEntregada =
-                                estadoVisita === 'completada' ||
-                                estadoVisita === 'entregado' ||
-                                (visita.remitos || []).some(
-                                  (r) => r.estado === 'entregado' || r.estado === 'no_entregado' || r.estado === 'devuelto'
-                                ) ||
-                                hoja.estado === 'cerrada';
+                              const remitos = visita.remitos || [];
+                              const remitosRechazados = remitos.filter(
+                                (r) => r.estado === 'no_entregado' || r.estado === 'devuelto'
+                              );
+                              const remitosEntregados = remitos.filter((r) => r.estado === 'entregado');
+
+                              const esCompletamenteRechazada =
+                                (remitos.length > 0 && remitosRechazados.length === remitos.length) ||
+                                estadoVisita === 'no_realizada';
+
+                              const esConExcepciones =
+                                !esCompletamenteRechazada &&
+                                remitosRechazados.length > 0 &&
+                                remitosEntregados.length > 0;
+
+                              const esCompletamenteEntregada =
+                                !esCompletamenteRechazada &&
+                                !esConExcepciones &&
+                                (estadoVisita === 'completada' ||
+                                  estadoVisita === 'entregado' ||
+                                  (remitos.length > 0 && remitosEntregados.length === remitos.length));
+
+                              const esCerrada =
+                                hoja.estado === 'cerrada' &&
+                                !esCompletamenteRechazada &&
+                                !esConExcepciones &&
+                                !esCompletamenteEntregada;
+
+                              const esVisitaProcesada =
+                                esCompletamenteRechazada ||
+                                esConExcepciones ||
+                                esCompletamenteEntregada ||
+                                esCerrada;
+
+                              const motivosRechazo = remitosRechazados
+                                .map((r) => r.motivoNoEntrega)
+                                .filter((m): m is string => Boolean(m && m.trim()));
+
+                              const motivoPrincipal =
+                                motivosRechazo.length > 0
+                                  ? Array.from(new Set(motivosRechazo)).join(', ')
+                                  : visita.observacion || 'Sin motivo especificado';
 
                               const esParaQuitar = visitaParaQuitarId === visita.id && hojaDeVisitaParaQuitarId === hoja.id;
                               const nombreComercio = comercio?.razonSocial || `Parada ${ordenNumero}`;
@@ -2222,20 +2263,43 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                                     }`}
                                   >
                                     <div>
-                                      <div className="flex items-center gap-2">
+                                      <div className="flex items-center gap-2 flex-wrap">
                                         <span className="px-1.5 py-0.5 rounded bg-blue-700 text-white font-mono font-bold text-[10px]">
                                           Parada {ordenNumero}
                                         </span>
                                         <strong className="text-slate-900">{comercio?.razonSocial}</strong>
-                                        {esVisitaEntregada && (
-                                          <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-semibold text-[10px]">
-                                            Entregado / Histórica
+                                        {esCompletamenteRechazada ? (
+                                          <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 border border-red-200 font-semibold text-[10px] inline-flex items-center gap-1 shadow-2xs">
+                                            <span>❌ Rechazado</span>
                                           </span>
-                                        )}
+                                        ) : esConExcepciones ? (
+                                          <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 font-semibold text-[10px] inline-flex items-center gap-1 shadow-2xs">
+                                            <span>⚠️ Con excepciones</span>
+                                          </span>
+                                        ) : esCompletamenteEntregada ? (
+                                          <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold text-[10px] inline-flex items-center gap-1 shadow-2xs">
+                                            <span>✓ Entregada</span>
+                                          </span>
+                                        ) : esCerrada ? (
+                                          <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-semibold text-[10px]">
+                                            Cerrada
+                                          </span>
+                                        ) : null}
                                       </div>
                                       <div className="text-[11px] text-slate-500 mt-0.5">
                                         {comercio?.domicilio} • {visita.remitos.length} remito(s)
                                       </div>
+                                      {(esCompletamenteRechazada || esConExcepciones) && (
+                                        <div className="text-[11px] font-semibold text-red-700 mt-1 inline-flex items-center gap-1.5 bg-red-50 border border-red-200 px-2 py-0.5 rounded">
+                                          <span className="text-red-900 font-bold">Motivo:</span>
+                                          <span className="font-medium text-red-800">{motivoPrincipal}</span>
+                                          {esConExcepciones && (
+                                            <span className="text-[10px] text-amber-800 font-medium ml-1">
+                                              ({remitosRechazados.length} de {remitos.length} remitos rechazados)
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
                                     </div>
                                     <div className="flex items-center gap-3">
                                       <span className="font-mono font-bold text-slate-900">
@@ -2243,18 +2307,20 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                                       </span>
                                       <button
                                         type="button"
-                                        disabled={esVisitaEntregada}
+                                        disabled={esVisitaProcesada}
                                         onClick={() => handleSolicitarQuitarVisita(visita, hoja)}
                                         className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded border transition-colors ${
-                                          esVisitaEntregada
+                                          esVisitaProcesada
                                             ? 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400 border-slate-200'
                                             : esParaQuitar
                                             ? 'bg-amber-100 border-amber-400 text-amber-900'
                                             : 'text-red-700 bg-white hover:bg-red-50 border-red-300 cursor-pointer'
                                         }`}
                                         title={
-                                          esVisitaEntregada
-                                            ? 'No se puede quitar: la visita ya fue entregada o completada.'
+                                          esCompletamenteRechazada
+                                            ? 'No se puede quitar: la visita fue rechazada en la ruta histórica.'
+                                            : esVisitaProcesada
+                                            ? 'No se puede quitar: la visita ya fue procesada o completada.'
                                             : 'Quitar esta parada de la hoja de ruta y reprogramar remitos'
                                         }
                                       >
