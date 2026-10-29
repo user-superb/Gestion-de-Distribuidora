@@ -164,13 +164,14 @@ export const App: React.FC = () => {
         />
       </AuthLayout>
 
-      {/* Drawer inferior para QA / Criterios de Aceptación */}
-      <DevTestingDrawer
-        onSelectCredentials={(creds) => setPrefillCredentials(creds)}
-        onResetLockout={handleResetLockout}
-        onSimulateInactivity={triggerTimeoutNow}
-        isAuthenticated={false}
-      />
+      {import.meta.env.DEV && (
+        <DevTestingDrawer
+          onSelectCredentials={(creds) => setPrefillCredentials(creds)}
+          onResetLockout={handleResetLockout}
+          onSimulateInactivity={triggerTimeoutNow}
+          isAuthenticated={false}
+        />
+      )}
     </>
   );
 };
