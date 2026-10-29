@@ -15,4 +15,7 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    allowedHosts: ['web-production-ca7c7.up.railway.app'],
+  },
 });
