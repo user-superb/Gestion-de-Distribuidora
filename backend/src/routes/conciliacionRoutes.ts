@@ -1,20 +1,35 @@
 import { NextFunction, Request, Response, Router } from 'express';
+import multer from 'multer';
+import { db } from '../db.js';
 import { requireAuth } from './authRoutes.js';
 import { ConciliacionError, conciliacionService } from '../services/conciliacionService.js';
 
 export const conciliacionRouter = Router();
 
 conciliacionRouter.use(requireAuth, (req: Request, res: Response, next: NextFunction) => {
-  if (!['Administrativo', 'Administrador del sistema'].includes((req as any).userSession?.role)) {
+  if (!['Administrativo', 'Administrador del sistema', 'Gerente'].includes((req as any).userSession?.role)) {
     return res.status(403).json({ error: 'FORBIDDEN', message: 'Solo un usuario administrativo puede conciliar movimientos.' });
   }
   next();
 });
 
+const comprobante = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }).single('comprobante');
+const requireAdministrativo = (req: Request, res: Response, next: NextFunction) => {
+  if (!['Administrativo', 'Administrador del sistema'].includes((req as any).userSession?.role)) {
+    return res.status(403).json({ error: 'FORBIDDEN', message: 'Solo un usuario administrativo puede imputar movimientos.' });
+  }
+  next();
+};
+
 function getUsuarioId(req: Request): number {
   const id = Number(String((req as any).userSession?.id || '').replace(/^usr_/, ''));
   if (!Number.isSafeInteger(id) || id <= 0) throw new ConciliacionError('No se pudo identificar al usuario de la sesión.', 401);
   return id;
+}
+
+function parsearLista(value: unknown): unknown {
+  try { return JSON.parse(String(value)); }
+  catch { throw new ConciliacionError('La selección de movimientos y remitos es inválida.', 400); }
 }
 
 function responderError(error: unknown, res: Response) {
@@ -87,7 +102,7 @@ conciliacionRouter.get('/movimientos-huerfanos', async (req, res) => {
   }
 });
 
-conciliacionRouter.post('/imputaciones', async (req, res) => {
+conciliacionRouter.post('/imputaciones', requireAdministrativo, async (req, res) => {
   try {
     const result = await conciliacionService.conciliar(req.body?.movimientoIds, req.body?.remitoIds, getUsuarioId(req));
     return res.status(201).json({ success: true, ...result });
@@ -96,7 +111,7 @@ conciliacionRouter.post('/imputaciones', async (req, res) => {
   }
 });
 
-conciliacionRouter.post('/sugerencias/aceptar', async (req, res) => {
+conciliacionRouter.post('/sugerencias/aceptar', requireAdministrativo, async (req, res) => {
   try {
     const result = await conciliacionService.conciliar(
       [req.body?.movimientoId], [req.body?.remitoId], getUsuarioId(req), true
@@ -107,13 +122,52 @@ conciliacionRouter.post('/sugerencias/aceptar', async (req, res) => {
   }
 });
 
-conciliacionRouter.post('/discrepancias', async (req, res) => {
+conciliacionRouter.post('/discrepancias', requireAdministrativo, (req, res, next) => comprobante(req, res, (error: any) => {
+  if (error) return res.status(error.code === 'LIMIT_FILE_SIZE' ? 400 : 400).json({ message: 'El comprobante debe ser PDF, JPG o PNG y no superar 5 MB.' });
+  next();
+}), async (req, res) => {
   try {
-    const result = await conciliacionService.derivarDiscrepancia(
-      req.body?.movimientoIds, req.body?.remitoIds, req.body?.nota, getUsuarioId(req)
+    const result = await conciliacionService.registrarDiscrepancia(
+      parsearLista(req.body?.movimientoIds), parsearLista(req.body?.remitoIds),
+      req.body?.nota, req.body?.motivo, req.file || null, getUsuarioId(req)
     );
     return res.status(201).json({ success: true, ...result });
   } catch (error) {
     return responderError(error, res);
   }
+});
+
+conciliacionRouter.post('/discrepancias/:id/aprobar', async (req, res) => {
+  try {
+    return res.json(await conciliacionService.resolverDiscrepancia(req.params.id, getUsuarioId(req), true, req.body?.observacion || 'Aprobado'));
+  } catch (error) { return responderError(error, res); }
+});
+
+conciliacionRouter.post('/discrepancias/:id/rechazar', async (req, res) => {
+  try {
+    return res.json(await conciliacionService.resolverDiscrepancia(req.params.id, getUsuarioId(req), false, req.body?.observacion));
+  } catch (error) { return responderError(error, res); }
+});
+
+conciliacionRouter.get('/notificaciones', async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT id::text AS id, discrepancia_id::text AS discrepancia_id, mensaje, creada_en
+       FROM discrepancia_notificacion WHERE usuario_id = $1 AND leida_en IS NULL ORDER BY creada_en DESC`,
+      [getUsuarioId(req)]
+    );
+    return res.json(result.rows);
+  } catch (error) { return responderError(error, res); }
+});
+
+conciliacionRouter.get('/discrepancias/:id/comprobante', async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT c.nombre_archivo, c.tipo_mime, c.contenido FROM discrepancia_comprobante c
+       JOIN discrepancia_conciliacion d ON d.id = c.discrepancia_id
+       WHERE c.discrepancia_id = $1`, [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ message: 'No se encontró el comprobante.' });
+    return res.type(result.rows[0].tipo_mime).attachment(result.rows[0].nombre_archivo).send(result.rows[0].contenido);
+  } catch (error) { return responderError(error, res); }
 });

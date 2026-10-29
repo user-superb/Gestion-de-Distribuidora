@@ -76,6 +76,7 @@ describe('API de administración de usuarios', () => {
       CREATE TABLE usuario (
         id serial PRIMARY KEY, usuario text NOT NULL UNIQUE, nombre text NOT NULL, email text,
         password_hash text NOT NULL, rol text NOT NULL DEFAULT 'Administrativo',
+        limite_autorizacion_centavos bigint NOT NULL DEFAULT 0,
         es_transportista boolean NOT NULL DEFAULT false, activo boolean NOT NULL DEFAULT true,
         creado_en timestamp DEFAULT now(), actualizado_en timestamp DEFAULT now(),
         CHECK (rol IN ('Administrador del sistema', 'Administrativo', 'Transportista', 'Supervisor', 'Gerente'))
@@ -133,11 +134,12 @@ describe('API de administración de usuarios', () => {
   });
 
   it('crea usuario con rol y sucursales y guarda la contraseña como hash', async () => {
-    const response = await dispatch(usuarioRouter, 'post', '/usuarios', { usuario: 'nuevo', nombre: 'Usuario Nuevo', email: 'nuevo@example.com', password, rol: 'Transportista', sucursalIds: [1, 2] }, await adminToken());
+    const response = await dispatch(usuarioRouter, 'post', '/usuarios', { usuario: 'nuevo', nombre: 'Usuario Nuevo', email: 'nuevo@example.com', password, rol: 'Transportista', sucursalIds: [1, 2], limiteAutorizacionCentavos: 250000 }, await adminToken());
     assert.equal(response.statusCode, 201);
-    const user = await db.query("SELECT id, password_hash, rol, es_transportista FROM usuario WHERE usuario = 'nuevo'");
+    const user = await db.query("SELECT id, password_hash, rol, es_transportista, limite_autorizacion_centavos FROM usuario WHERE usuario = 'nuevo'");
     assert.equal(user.rows[0].rol, 'Transportista');
     assert.equal(user.rows[0].es_transportista, true);
+    assert.equal(Number(user.rows[0].limite_autorizacion_centavos), 250000);
     assert.notEqual(user.rows[0].password_hash, password);
     assert.equal(await bcryptjs.compare(password, user.rows[0].password_hash), true);
     const branches = await db.query('SELECT sucursal_id FROM usuario_sucursal WHERE usuario_id = $1 ORDER BY sucursal_id', [user.rows[0].id]);

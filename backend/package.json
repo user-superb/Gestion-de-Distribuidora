@@ -7,7 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "tsx --test src/__tests__/remitoApi.test.ts src/__tests__/authApi.test.ts src/__tests__/usuarioApi.test.ts src/__tests__/secuenciaVisitas.test.ts src/__tests__/remitoManual.test.ts src/__tests__/fechaHojaRuta.test.ts src/__tests__/asignarTransportista.test.ts src/__tests__/anexarEntrega.test.ts src/__tests__/transportistaApi.test.ts src/__tests__/cobroMovil.test.ts src/__tests__/quitarVisitaHojaRuta.test.ts",
+    "test": "tsx --test src/__tests__/remitoApi.test.ts src/__tests__/authApi.test.ts src/__tests__/usuarioApi.test.ts src/__tests__/secuenciaVisitas.test.ts src/__tests__/remitoManual.test.ts src/__tests__/fechaHojaRuta.test.ts src/__tests__/asignarTransportista.test.ts src/__tests__/anexarEntrega.test.ts src/__tests__/transportistaApi.test.ts src/__tests__/cobroMovil.test.ts src/__tests__/quitarVisitaHojaRuta.test.ts src/__tests__/conciliacionDiscrepancia.test.ts",
     "db:init": "tsx src/scripts/initDb.ts",
     "db:migrate": "tsx src/scripts/migrateAll.ts",
     "db:migrate-admin": "tsx src/scripts/migrateAdminRole.ts",
@@ -22,12 +22,14 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "multer": "^2.5.0",
     "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
+    "@types/multer": "^2.3.0",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.23.1",
     "pg-mem": "^3.0.14",
