@@ -123,6 +123,13 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
   const [hojaParaEliminarId, setHojaParaEliminarId] = useState<string | null>(null);
   const [textoConfirmacionEliminar, setTextoConfirmacionEliminar] = useState<string>('');
   const [isEliminando, setIsEliminando] = useState<boolean>(false);
+
+  // HU #45: Reemplazo de hoja de ruta asignada a un transportista
+  const [modalReemplazo, setModalReemplazo] = useState<{
+    hojaDestino: HojaDeRuta;
+    transportista: Transportista;
+    hojaPrevia: HojaDeRuta;
+  } | null>(null);
   // Confirmación deliberada por tipeo para quitar una visita de una hoja de ruta
   const [visitaParaQuitarId, setVisitaParaQuitarId] = useState<string | null>(null);
   const [hojaDeVisitaParaQuitarId, setHojaDeVisitaParaQuitarId] = useState<string | null>(null);
@@ -460,6 +467,43 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
       setErrorAsignacionPorHoja((prev) => ({
         ...prev,
         [hojaId]: res.error || 'No se pudo asignar el transportista.',
+      }));
+    }
+    setAsignandoHojaId(null);
+  };
+
+  const handleConfirmarReemplazo = async () => {
+    if (!modalReemplazo) return;
+    const { hojaDestino, transportista, hojaPrevia } = modalReemplazo;
+    const hojaId = hojaDestino.id;
+    setAsignandoHojaId(hojaId);
+    setErrorAsignacionPorHoja((prev) => ({ ...prev, [hojaId]: '' }));
+    setExitoAsignacionPorHoja((prev) => ({ ...prev, [hojaId]: '' }));
+    setModalReemplazo(null);
+
+    const res = await remitoService.reemplazarHojaDeRutaTransportistaAsync(
+      hojaDestino.id,
+      transportista.id
+    );
+
+    if (res.success && res.hojaDeRuta) {
+      const hojaActualizada = res.hojaDeRuta;
+      setHojasRuta((prev) =>
+        prev.map((h) => {
+          if (h.id === hojaId) return { ...h, ...hojaActualizada };
+          if (h.id === hojaPrevia.id) return { ...h, transportistaId: null, transportistaNombre: null };
+          return h;
+        })
+      );
+      setExitoAsignacionPorHoja((prev) => ({
+        ...prev,
+        [hojaId]: `Reemplazo exitoso: se asignó a "${transportista.nombre}" y se desvinculó de la hoja anterior (${hojaPrevia.numero || 'HR-' + hojaPrevia.id}).`,
+      }));
+      void recargarDatos();
+    } else {
+      setErrorAsignacionPorHoja((prev) => ({
+        ...prev,
+        [hojaId]: res.error || 'No se pudo reemplazar la hoja de ruta.',
       }));
     }
     setAsignandoHojaId(null);
@@ -2046,7 +2090,47 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                             <div className="flex items-center gap-1.5">
                               <select
                                 value={hoja.transportistaId || ''}
-                                onChange={(e) => void handleAsignarTransportistaEnHoja(hoja.id, e.target.value)}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (!val) {
+                                    void handleAsignarTransportistaEnHoja(hoja.id, '');
+                                    return;
+                                  }
+                                  const cleanTId = String(val).replace(/^usr_/, '').trim();
+                                  const t = transportistas.find(
+                                    (tr) => String(tr.id).replace(/^usr_/, '').trim() === cleanTId
+                                  );
+                                  const fechaHojaNorm = (hoja.fechaReparto || '').slice(0, 10);
+                                  const hojaPreviaOcupada = hojasRuta.find(
+                                    (otra) =>
+                                      otra.id !== hoja.id &&
+                                      String(otra.transportistaId || '').replace(/^usr_/, '').trim() === cleanTId &&
+                                      (otra.fechaReparto || '').slice(0, 10) === fechaHojaNorm &&
+                                      otra.estado !== 'anulada'
+                                  );
+
+                                  if (hojaPreviaOcupada && t) {
+                                    // HU #45: Reemplazar hoja de ruta
+                                    const esActiva =
+                                      hojaPreviaOcupada.estado === 'en_curso' ||
+                                      hojaPreviaOcupada.estado === 'cerrada';
+                                    if (esActiva) {
+                                      setErrorAsignacionPorHoja((prev) => ({
+                                        ...prev,
+                                        [hoja.id]:
+                                          'No se puede reemplazar la hoja de ruta: el transportista posee una hoja de ruta en curso para esa misma fecha.',
+                                      }));
+                                      return;
+                                    }
+                                    setModalReemplazo({
+                                      hojaDestino: hoja,
+                                      transportista: t,
+                                      hojaPrevia: hojaPreviaOcupada,
+                                    });
+                                  } else {
+                                    void handleAsignarTransportistaEnHoja(hoja.id, val);
+                                  }
+                                }}
                                 disabled={asignandoHojaId === hoja.id || esDespachada}
                                 aria-label="Seleccionar transportista para la hoja de ruta"
                                 className="w-full text-xs bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 font-medium focus:ring-1 focus:ring-blue-500"
@@ -2055,16 +2139,27 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                                 {transportistas.map((t) => {
                                   const cleanTId = String(t.id).replace(/^usr_/, '').trim();
                                   const fechaHojaNorm = (hoja.fechaReparto || '').slice(0, 10);
-                                  const ocupadoEnFecha = hojasRuta.some(
+                                  const hojaPreviaOcupada = hojasRuta.find(
                                     (otra) =>
                                       otra.id !== hoja.id &&
                                       String(otra.transportistaId || '').replace(/^usr_/, '').trim() === cleanTId &&
                                       (otra.fechaReparto || '').slice(0, 10) === fechaHojaNorm &&
                                       otra.estado !== 'anulada'
                                   );
+                                  const ocupadoEnFecha = Boolean(hojaPreviaOcupada);
+                                  const esActiva =
+                                    hojaPreviaOcupada &&
+                                    (hojaPreviaOcupada.estado === 'en_curso' ||
+                                      hojaPreviaOcupada.estado === 'cerrada');
+
                                   return (
-                                    <option key={t.id} value={t.id} disabled={ocupadoEnFecha}>
-                                      {t.nombre} {ocupadoEnFecha ? `(Ocupado el ${formatearFechaCorta(hoja.fechaReparto)})` : '(Disponible)'}
+                                    <option key={t.id} value={t.id} disabled={Boolean(esActiva)}>
+                                      {t.nombre}{' '}
+                                      {esActiva
+                                        ? `(Ruta activa en curso)`
+                                        : ocupadoEnFecha
+                                        ? `(Asignado en ${hojaPreviaOcupada?.numero || 'otra hoja'} - Reemplazar)`
+                                        : '(Disponible)'}
                                     </option>
                                   );
                                 })}
@@ -2269,6 +2364,73 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
         preselectedHojaId={hojaDestinoPreseleccionada}
         onSuccess={handleAnexionExitosa}
       />
+
+      {/* Modal HU #45: Reemplazar Hoja de Ruta Asignada */}
+      {modalReemplazo && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-modal-reemplazo"
+        >
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+              <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center text-amber-600 border border-amber-200">
+                <RefreshCw className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 id="titulo-modal-reemplazo" className="font-bold text-base text-slate-800">
+                  Reemplazar hoja de ruta asignada
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Historia de usuario #45 · Épica 1.1
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-600 bg-slate-50 p-3.5 rounded-lg border border-slate-200">
+              <p>
+                El transportista <strong className="text-slate-800">{modalReemplazo.transportista.nombre}</strong> ya tiene asignada una hoja de ruta para la fecha <strong className="text-slate-800">{formatearFechaCorta(modalReemplazo.hojaDestino.fechaReparto)}</strong>:
+              </p>
+              <div className="bg-white p-2.5 rounded border border-slate-200 space-y-1">
+                <div className="text-slate-500 flex justify-between">
+                  <span>Hoja actual asignada:</span>
+                  <span className="font-bold text-red-700">
+                    {modalReemplazo.hojaPrevia.numero || `HR-${modalReemplazo.hojaPrevia.id}`} (Desvincular)
+                  </span>
+                </div>
+                <div className="text-slate-500 flex justify-between">
+                  <span>Nueva hoja a asignar:</span>
+                  <span className="font-bold text-emerald-700">
+                    {modalReemplazo.hojaDestino.numero || `HR-${modalReemplazo.hojaDestino.id}`} (Vincular)
+                  </span>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Al confirmar, el sistema vinculará la nueva hoja de ruta al perfil del transportista y desvinculará la anterior.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setModalReemplazo(null)}
+                className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmarReemplazo()}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-xs cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Confirmar reemplazo</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

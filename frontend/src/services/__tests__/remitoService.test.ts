@@ -368,6 +368,98 @@ describe('Historia de Usuario #14 - Asignar Hoja de Ruta a Transportista', () =>
   });
 });
 
+describe('Historia de Usuario #45 - Reemplazar Hoja de Ruta asignada a un Transportista', () => {
+  beforeEach(() => {
+    remitoService.resetearDatosMock();
+  });
+
+  it('ESCENARIO 1: Reemplazo exitoso: El administrativo selecciona a un transportista habilitado con una hoja de ruta asignada para la fecha y asigna la nueva hoja de ruta. El sistema vincula la nueva ruta a su perfil y desvincula la anterior.', () => {
+    // 1. Armamos y programamos primera hoja para fecha 2026-10-25 con Carlos Repartidor (id '2')
+    remitoService.agruparEnVisita(['rem-1']);
+    const prog1 = remitoService.asignarFechaHojaDeRuta('2026-10-25', '2026-10-20');
+    expect(prog1.success).toBe(true);
+    const hoja1Id = prog1.hojaDeRuta!.id;
+    const asig1 = remitoService.asignarTransportistaHojaDeRuta(hoja1Id, '2');
+    expect(asig1.success).toBe(true);
+
+    // 2. Armamos segunda hoja para la MISMA fecha 2026-10-25, sin transportista
+    remitoService.agruparEnVisita(['rem-2']);
+    const prog2 = remitoService.asignarFechaHojaDeRuta('2026-10-25', '2026-10-20');
+    expect(prog2.success).toBe(true);
+    const hoja2Id = prog2.hojaDeRuta!.id;
+
+    // 3. Reemplazamos la hoja de ruta asignada a Carlos por la hoja2
+    const reemplazo = remitoService.reemplazarHojaDeRutaTransportista(hoja2Id, '2');
+    expect(reemplazo.success).toBe(true);
+    expect(reemplazo.hojaDeRuta?.id).toBe(hoja2Id);
+    expect(reemplazo.hojaDeRuta?.transportistaId).toBe('2');
+    expect(reemplazo.hojaDeRuta?.transportistaNombre).toBe('Carlos Repartidor');
+    expect(reemplazo.hojaPreviaDesvinculadaId).toBe(hoja1Id);
+
+    // Verificamos que la hoja anterior (hoja1) quedó desvinculada
+    const hojas = remitoService.getHojasDeRuta();
+    const hoja1Guardada = hojas.find((h) => h.id === hoja1Id);
+    expect(hoja1Guardada?.transportistaId).toBeNull();
+    expect(hoja1Guardada?.transportistaNombre).toBeNull();
+
+    // Verificamos que la nueva hoja (hoja2) quedó vinculada
+    const hoja2Guardada = hojas.find((h) => h.id === hoja2Id);
+    expect(hoja2Guardada?.transportistaId).toBe('2');
+    expect(hoja2Guardada?.transportistaNombre).toBe('Carlos Repartidor');
+  });
+
+  it('ESCENARIO 2: Fallo por ruta activa: El administrativo selecciona a un transportista habilitado con una hoja de ruta en curso para esa misma fecha e intenta reemplazar la hoja de ruta. El sistema rechaza la asignación.', () => {
+    // 1. Hoja 1 asignada a Carlos
+    remitoService.agruparEnVisita(['rem-1']);
+    const prog1 = remitoService.asignarFechaHojaDeRuta('2026-10-25', '2026-10-20');
+    const hoja1Id = prog1.hojaDeRuta!.id;
+    remitoService.asignarTransportistaHojaDeRuta(hoja1Id, '2');
+
+    // 2. Hoja 2 para la misma fecha, sin asignar
+    remitoService.agruparEnVisita(['rem-2']);
+    const prog2 = remitoService.asignarFechaHojaDeRuta('2026-10-25', '2026-10-20');
+    const hoja2Id = prog2.hojaDeRuta!.id;
+
+    // Pasamos la hoja 1 a en ejecución ('en_curso')
+    remitoService.cambiarEstadoHojaDeRuta('en_curso', hoja1Id);
+
+    // 3. Intento de reemplazar
+    const reemplazo = remitoService.reemplazarHojaDeRutaTransportista(hoja2Id, '2');
+    expect(reemplazo.success).toBe(false);
+    expect(reemplazo.status).toBe(409);
+    expect(reemplazo.error).toMatch(/en curso/i);
+
+    // La hoja 1 sigue asignada y la hoja 2 sin asignar
+    const hojas = remitoService.getHojasDeRuta();
+    expect(hojas.find((h) => h.id === hoja1Id)?.transportistaId).toBe('2');
+    expect(hojas.find((h) => h.id === hoja2Id)?.transportistaId).toBeNull();
+  });
+
+  it('ESCENARIO 3: Fallo por no haber hoja de ruta previa: El administrativo selecciona a un transportista habilitado sin hoja de ruta para esa fecha e intenta reemplazar la hoja de ruta. El sistema rechaza la asignación.', () => {
+    // Hoja 1 para 2026-10-25, Carlos no tiene ninguna hoja asignada previamente en esa fecha
+    remitoService.agruparEnVisita(['rem-1']);
+    const prog1 = remitoService.asignarFechaHojaDeRuta('2026-10-25', '2026-10-20');
+    const hoja1Id = prog1.hojaDeRuta!.id;
+
+    // Intentamos reemplazar sin tener previa
+    const reemplazo = remitoService.reemplazarHojaDeRutaTransportista(hoja1Id, '2');
+    expect(reemplazo.success).toBe(false);
+    expect(reemplazo.status).toBe(422);
+    expect(reemplazo.error).toMatch(/no posee una hoja de ruta asignada para esa fecha/i);
+  });
+
+  it('REGLAS A CONSIDERAR: Rechaza si el transportista no está habilitado en la flota', () => {
+    remitoService.agruparEnVisita(['rem-1']);
+    const prog1 = remitoService.asignarFechaHojaDeRuta('2026-10-25', '2026-10-20');
+    const hoja1Id = prog1.hojaDeRuta!.id;
+
+    // Chofer inexistente o no habilitado
+    const reemplazo = remitoService.reemplazarHojaDeRutaTransportista(hoja1Id, '99999');
+    expect(reemplazo.success).toBe(false);
+    expect(reemplazo.status).toBe(404);
+  });
+});
+
 describe('Historia de Usuario: Carga Manual de Entregas', () => {
   beforeEach(() => {
     remitoService.resetearDatosMock();

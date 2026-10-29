@@ -185,6 +185,34 @@ remitoRouter.patch('/hoja-de-ruta/:id/transportista', async (req, res) => {
   }
 });
 
+remitoRouter.patch('/hoja-de-ruta/:id/reemplazar-transportista', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { transportistaId } = req.body;
+    const result = await remitoService.reemplazarHojaDeRutaTransportista(id, transportistaId);
+    if (!result.success) {
+      return res.status(result.status || 422).json(result);
+    }
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+remitoRouter.post('/hoja-de-ruta/:id/reemplazar-transportista', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { transportistaId } = req.body;
+    const result = await remitoService.reemplazarHojaDeRutaTransportista(id, transportistaId);
+    if (!result.success) {
+      return res.status(result.status || 422).json(result);
+    }
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 remitoRouter.patch('/hoja-de-ruta/:id/fecha', async (req, res) => {
   try {
     const { id } = req.params;

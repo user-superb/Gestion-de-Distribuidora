@@ -490,6 +490,147 @@ export const remitoService = {
     return { success: true, hojaDeRuta: actualizada };
   },
 
+  /**
+   * HU #45: Reemplazar Hoja de Ruta asignada a un Transportista
+   * Reglas:
+   * - El reemplazo de la hoja de ruta solo se puede realizar a un transportista que se encuentre habilitado en la flota y tenga una hoja de ruta asignada para esa fecha.
+   * - Escenario 1 (Reemplazo exitoso): Vincula la nueva ruta a su perfil y desvincula la anterior.
+   * - Escenario 2 (Fallo por ruta activa): Rechaza si la ruta previa está en curso para esa misma fecha.
+   * - Escenario 3 (Fallo por no haber hoja de ruta previa): Rechaza si el transportista no posee hoja asignada para esa fecha.
+   */
+  reemplazarHojaDeRutaTransportista: (
+    nuevaHojaDeRutaId: string,
+    transportistaId: string
+  ): {
+    success: boolean;
+    hojaDeRuta?: HojaDeRuta;
+    hojaPreviaDesvinculadaId?: string;
+    error?: string;
+    status?: number;
+  } => {
+    if (!nuevaHojaDeRutaId || !transportistaId) {
+      return {
+        success: false,
+        error: 'Debe especificar el ID de la hoja de ruta y del transportista.',
+        status: 400,
+      };
+    }
+
+    const nuevaHojaIdx = mockHojasDeRuta.findIndex((h) => h.id === nuevaHojaDeRutaId);
+    const nuevaHoja =
+      nuevaHojaIdx !== -1
+        ? mockHojasDeRuta[nuevaHojaIdx]
+        : mockHojaDeRuta.id === nuevaHojaDeRutaId
+        ? mockHojaDeRuta
+        : null;
+
+    if (!nuevaHoja) {
+      return { success: false, error: 'La hoja de ruta especificada no existe.', status: 404 };
+    }
+
+    if (nuevaHoja.estado === 'en_curso' || nuevaHoja.estado === 'cerrada' || nuevaHoja.estado === 'anulada') {
+      return {
+        success: false,
+        error: 'No se puede asignar una hoja de ruta que ya fue despachada, cerrada o anulada.',
+        status: 409,
+      };
+    }
+
+    const cleanTransId = String(transportistaId || '').replace(/^usr_/, '').trim();
+    const transportista = cachedTransportistas.find(
+      (t) => String(t.id).replace(/^usr_/, '').trim() === cleanTransId
+    );
+    if (!transportista) {
+      return { success: false, error: 'El transportista seleccionado no existe.', status: 404 };
+    }
+
+    const estaHabilitado =
+      Boolean(transportista.activo) &&
+      (Boolean(transportista.esTransportista) || transportista.rol === 'Transportista');
+
+    if (!estaHabilitado) {
+      return {
+        success: false,
+        error: 'El reemplazo de la hoja de ruta solo se puede realizar a un transportista que se encuentre habilitado en la flota.',
+        status: 422,
+      };
+    }
+
+    const fechaNuevaNorm = (nuevaHoja.fechaReparto || '').slice(0, 10);
+
+    // Buscar hoja previa asignada para esa misma fecha
+    const hojaPreviaIdx = mockHojasDeRuta.findIndex(
+      (h) =>
+        h.id !== nuevaHojaDeRutaId &&
+        String(h.transportistaId || '').replace(/^usr_/, '').trim() === cleanTransId &&
+        (h.fechaReparto || '').slice(0, 10) === fechaNuevaNorm &&
+        h.estado !== 'anulada'
+    );
+
+    // ESCENARIO 3: Fallo por no haber hoja de ruta previa
+    if (hojaPreviaIdx === -1) {
+      return {
+        success: false,
+        error: `El transportista no posee una hoja de ruta asignada para esa fecha (${nuevaHoja.fechaReparto}).`,
+        status: 422,
+      };
+    }
+
+    const hojaPrevia = mockHojasDeRuta[hojaPreviaIdx];
+
+    // ESCENARIO 2: Fallo por ruta activa
+    const esPreviaActiva =
+      hojaPrevia.estado === 'en_curso' ||
+      hojaPrevia.estado === 'cerrada' ||
+      mockVisitas.some(
+        (v) =>
+          v.hojaDeRutaId === hojaPrevia.id &&
+          (v.estado === 'en_curso' ||
+            v.estado === 'completada' ||
+            (v.remitos || []).some(
+              (r) => r.estado === 'entregado' || r.estado === 'no_entregado' || r.estado === 'devuelto'
+            ))
+      );
+
+    if (esPreviaActiva) {
+      return {
+        success: false,
+        error: 'No se puede reemplazar la hoja de ruta: el transportista posee una hoja de ruta en curso para esa misma fecha.',
+        status: 409,
+      };
+    }
+
+    // ESCENARIO 1: Reemplazo exitoso
+    // Desvincular hoja anterior
+    mockHojasDeRuta[hojaPreviaIdx] = {
+      ...hojaPrevia,
+      transportistaId: null,
+      transportistaNombre: null,
+    };
+    if (mockHojaDeRuta.id === hojaPrevia.id) {
+      mockHojaDeRuta = { ...mockHojaDeRuta, transportistaId: null, transportistaNombre: null };
+    }
+
+    // Vincular nueva hoja
+    const nuevaActualizada: HojaDeRuta = {
+      ...nuevaHoja,
+      transportistaId: transportista.id,
+      transportistaNombre: transportista.nombre,
+    };
+    if (nuevaHojaIdx !== -1) {
+      mockHojasDeRuta[nuevaHojaIdx] = nuevaActualizada;
+    }
+    if (mockHojaDeRuta.id === nuevaHojaDeRutaId) {
+      mockHojaDeRuta = nuevaActualizada;
+    }
+
+    return {
+      success: true,
+      hojaDeRuta: nuevaActualizada,
+      hojaPreviaDesvinculadaId: hojaPrevia.id,
+    };
+  },
+
   quitarVisitaDeHojaDeRuta: (
     visitaId: string,
     hojaDeRutaId?: string
@@ -1058,6 +1199,43 @@ export const remitoService = {
       // Fallback a lógica en memoria
     }
     return remitoService.asignarTransportistaHojaDeRuta(hojaDeRutaId, transportistaId);
+  },
+
+  async reemplazarHojaDeRutaTransportistaAsync(
+    nuevaHojaDeRutaId: string,
+    transportistaId: string
+  ): Promise<{
+    success: boolean;
+    hojaDeRuta?: HojaDeRuta;
+    hojaPreviaDesvinculadaId?: string;
+    error?: string;
+    status?: number;
+  }> {
+    try {
+      const res = await fetch(
+        `${API_BASE}/hoja-de-ruta/${encodeURIComponent(nuevaHojaDeRutaId)}/reemplazar-transportista`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transportistaId }),
+          signal: AbortSignal.timeout(3000),
+        }
+      );
+      const data = await res.json();
+      if (res.ok && data.success) {
+        return data;
+      }
+      if (data.error) {
+        return {
+          success: false,
+          error: data.error,
+          status: res.status,
+        };
+      }
+    } catch {
+      // Fallback a lógica en memoria
+    }
+    return remitoService.reemplazarHojaDeRutaTransportista(nuevaHojaDeRutaId, transportistaId);
   },
   async anexarEntregaARutaAsync(
     remitoId: string,

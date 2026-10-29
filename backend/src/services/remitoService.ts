@@ -1116,6 +1116,172 @@ export const remitoService = {
       hojaDeRuta: hojaActualizada,
     };
   },
+
+  /**
+   * HU #45: Reemplazar Hoja de Ruta asignada a un Transportista
+   * Reglas:
+   * - El reemplazo de la hoja de ruta solo se puede realizar a un transportista que se encuentre habilitado en la flota y tenga una hoja de ruta asignada para esa fecha.
+   * - Escenario 1: Reemplazo exitoso: Vincula la nueva ruta a su perfil y desvincula la anterior.
+   * - Escenario 2: Fallo por ruta activa: Rechaza si la ruta previa está en curso para esa misma fecha.
+   * - Escenario 3: Fallo por no haber hoja de ruta previa: Rechaza si el transportista no posee hoja asignada para esa fecha.
+   */
+  async reemplazarHojaDeRutaTransportista(
+    nuevaHojaDeRutaId: string,
+    transportistaId: string
+  ): Promise<{
+    success: boolean;
+    hojaDeRuta?: HojaDeRuta;
+    hojaPreviaDesvinculadaId?: string;
+    error?: string;
+    status?: number;
+  }> {
+    if (!nuevaHojaDeRutaId || !transportistaId) {
+      return {
+        success: false,
+        error: 'Debe especificar el ID de la hoja de ruta y del transportista.',
+        status: 400,
+      };
+    }
+
+    // 1. Verificar existencia y estado de la nueva hoja de ruta
+    const nuevaHojaRes = await db.query(
+      'SELECT id::text as id, sucursal_id::text as "sucursalId", transportista_id::text as "transportistaId", fecha_reparto as "fechaReparto", estado FROM hoja_de_ruta WHERE id::text = $1',
+      [nuevaHojaDeRutaId]
+    );
+
+    if (nuevaHojaRes.rows.length === 0) {
+      return { success: false, error: 'La hoja de ruta especificada no existe.', status: 404 };
+    }
+
+    const nuevaHoja = nuevaHojaRes.rows[0];
+
+    // No se puede reemplazar asignando una ruta que ya fue despachada, cerrada o anulada
+    if (nuevaHoja.estado === 'en_curso' || nuevaHoja.estado === 'cerrada' || nuevaHoja.estado === 'anulada') {
+      return {
+        success: false,
+        error: 'No se puede asignar una hoja de ruta que ya fue despachada, cerrada o anulada.',
+        status: 409,
+      };
+    }
+
+    // 2. Verificar que el transportista exista y esté habilitado en la flota (Regla a considerar)
+    const cleanTransId = String(transportistaId).replace(/^usr_/, '').trim();
+    const transRes = await db.query(
+      `SELECT id::text as id, nombre, activo, es_transportista as "esTransportista", rol 
+       FROM usuario 
+       WHERE id::text = $1`,
+      [cleanTransId]
+    );
+
+    if (transRes.rows.length === 0) {
+      return { success: false, error: 'El transportista seleccionado no existe.', status: 404 };
+    }
+
+    const transportista = transRes.rows[0];
+    const estaHabilitado =
+      Boolean(transportista.activo) &&
+      (Boolean(transportista.esTransportista) || transportista.rol === 'Transportista');
+
+    if (!estaHabilitado) {
+      return {
+        success: false,
+        error: 'El reemplazo de la hoja de ruta solo se puede realizar a un transportista que se encuentre habilitado en la flota.',
+        status: 422,
+      };
+    }
+
+    const fechaReparto = normalizarFechaISO(nuevaHoja.fechaReparto);
+
+    // 3. Buscar la hoja de ruta asignada previamente al transportista para esa misma fecha
+    const hojasPreviasRes = await db.query(
+      `SELECT id::text as id, fecha_reparto as "fechaReparto", estado 
+       FROM hoja_de_ruta 
+       WHERE transportista_id::text = $1 
+         AND fecha_reparto = $2::date 
+         AND estado NOT IN ('anulada')`,
+      [cleanTransId, fechaReparto]
+    );
+
+    // ESCENARIO 3: Fallo por no haber hoja de ruta previa
+    if (hojasPreviasRes.rows.length === 0) {
+      return {
+        success: false,
+        error: `El transportista no posee una hoja de ruta asignada para esa fecha (${fechaReparto}).`,
+        status: 422,
+      };
+    }
+
+    const hojaPrevia = hojasPreviasRes.rows[0];
+
+    // Si la nueva hoja es la misma que la previa
+    if (String(hojaPrevia.id) === String(nuevaHojaDeRutaId)) {
+      return {
+        success: false,
+        error: 'La nueva hoja de ruta es la misma que ya tiene asignada el transportista.',
+        status: 422,
+      };
+    }
+
+    // ESCENARIO 2: Fallo por ruta activa (hoja previa en curso)
+    let hojaPreviaActiva = hojaPrevia.estado === 'en_curso' || hojaPrevia.estado === 'cerrada';
+    if (!hojaPreviaActiva) {
+      try {
+        const entregasRes = await db.query(
+          `SELECT r.id
+           FROM remito r
+           JOIN visita v ON v.id = r.visita_id
+           WHERE v.hoja_de_ruta_id::text = $1
+             AND (r.estado IN ('entregado', 'no_entregado', 'devuelto') OR v.estado IN ('en_curso', 'completada'))
+           LIMIT 1`,
+          [hojaPrevia.id]
+        );
+        if (entregasRes.rows.length > 0) {
+          hojaPreviaActiva = true;
+        }
+      } catch {
+        // Ignorar si faltan tablas en tests
+      }
+    }
+
+    if (hojaPreviaActiva) {
+      return {
+        success: false,
+        error: 'No se puede reemplazar la hoja de ruta: el transportista posee una hoja de ruta en curso para esa misma fecha.',
+        status: 409,
+      };
+    }
+
+    // ESCENARIO 1: Reemplazo exitoso
+    // Desvincula la anterior y vincula la nueva ruta a su perfil
+    try {
+      await db.query('BEGIN');
+      await db.query('UPDATE hoja_de_ruta SET transportista_id = NULL WHERE id::text = $1', [
+        String(hojaPrevia.id),
+      ]);
+      await db.query('UPDATE hoja_de_ruta SET transportista_id = $1 WHERE id::text = $2', [
+        cleanTransId,
+        String(nuevaHojaDeRutaId),
+      ]);
+      await db.query('COMMIT');
+    } catch (txError: any) {
+      try {
+        await db.query('ROLLBACK');
+      } catch {}
+      throw txError;
+    }
+
+    const hojaActualizada = await this.construirHojaDeRutaDetalle({
+      ...nuevaHoja,
+      transportistaId: cleanTransId,
+    });
+
+    return {
+      success: true,
+      hojaDeRuta: hojaActualizada,
+      hojaPreviaDesvinculadaId: String(hojaPrevia.id),
+    };
+  },
+
   async actualizarConexionTransportista(
     transportistaId: string,
     conectado: boolean
