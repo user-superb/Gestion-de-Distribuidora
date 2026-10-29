@@ -257,7 +257,7 @@ export const conciliacionService = {
            AND mb.importe_centavos > COALESCE(i.imputado_centavos, 0)
            AND NOT EXISTS (
              SELECT 1 FROM discrepancia_conciliacion dc
-             WHERE dc.estado = 'pendiente' AND mb.id = ANY(dc.movimiento_ids)
+             WHERE dc.estado IN ('pendiente','escalada') AND mb.id = ANY(dc.movimiento_ids)
            )
          ORDER BY mb.fecha_hora DESC, mb.id DESC`
       ),
@@ -326,7 +326,7 @@ export const conciliacionService = {
          AND mb.fecha_hora <= $1
          AND NOT EXISTS (
            SELECT 1 FROM discrepancia_conciliacion dc
-           WHERE dc.estado = 'pendiente' AND mb.id = ANY(dc.movimiento_ids)
+           WHERE dc.estado IN ('pendiente','escalada') AND mb.id = ANY(dc.movimiento_ids)
          )
        ORDER BY mb.fecha_hora DESC, mb.id DESC`,
       [cutoff]
@@ -368,11 +368,12 @@ export const conciliacionService = {
               dc.movimiento_ids::text AS movimiento_ids,
               mb.fecha_hora, mb.ordenante, dc.importe_movimiento::text AS importe_movimiento,
               dc.importe_seleccionado::text AS importe_seleccionado,
-              dc.diferencia_centavos::text AS diferencia_centavos, dc.nota,
-              dc.remito_ids::text AS remito_ids
+              dc.diferencia_centavos::text AS diferencia_centavos, dc.nota, dc.motivo_codigo,
+              dc.remito_ids::text AS remito_ids, dc.estado, dc.creada_por::text AS creada_por,
+              (SELECT nombre_archivo FROM discrepancia_comprobante WHERE discrepancia_id = dc.id) AS comprobante_nombre
        FROM discrepancia_conciliacion dc
        JOIN movimiento_bancario mb ON mb.id = dc.movimiento_id
-       WHERE dc.estado = 'pendiente'
+       WHERE dc.estado IN ('pendiente','escalada')
        ORDER BY dc.creada_en DESC`
     );
     return result.rows;
@@ -387,13 +388,14 @@ export const conciliacionService = {
           diasEntre(result.movimientos[0].fecha_hora, result.remitos[0].fecha_entrega) > VENTANA_SUGERENCIAS_DIAS)) {
         throw new ConciliacionError('La sugerencia dejó de ser exacta o ya no está vigente; revisá la conciliación manual.', 409);
       }
-      if (aceptarSugerencia) {
-        const discrepancia = await client.query(
-          `SELECT id FROM discrepancia_conciliacion
-           WHERE estado = 'pendiente' AND movimiento_ids && $1::bigint[] FOR UPDATE`,
-          [movimientoIds]
-        );
-        if (discrepancia.rows.length) throw new ConciliacionError('El movimiento está en la bandeja de discrepancias y requiere revisión manual.', 409);
+      const discrepanciasVigentes = await client.query(
+        `SELECT id FROM discrepancia_conciliacion
+         WHERE estado IN ('pendiente','escalada')
+           AND (movimiento_ids && $1::bigint[] OR remito_ids && $2::bigint[]) FOR UPDATE`,
+        [movimientoIds, remitoIds]
+      );
+      if (discrepanciasVigentes.rows.length) {
+        throw new ConciliacionError('El movimiento o remito pertenece a una discrepancia pendiente de revisión.', 409);
       }
       if (result.diferencia > 0n) {
         throw new ConciliacionError('El total de movimientos supera los saldos seleccionados.', 422, {
@@ -402,19 +404,13 @@ export const conciliacionService = {
           diferenciaCentavos: result.diferencia.toString(),
         });
       }
-      const discrepanciasVigentes = await client.query(
-        `SELECT movimiento_ids::text AS movimiento_ids FROM discrepancia_conciliacion
-         WHERE estado = 'pendiente' AND movimiento_ids && $1::bigint[] FOR UPDATE`,
-        [movimientoIds]
-      );
-      const seleccionIds = new Set(movimientoIds);
-      const grupoIncompleto = discrepanciasVigentes.rows.some((row) =>
-        row.movimiento_ids.replace(/[{}]/g, '').split(',').some((id: string) => !seleccionIds.has(id))
-      );
-      if (grupoIncompleto) {
-        throw new ConciliacionError('Seleccioná todos los movimientos de la discrepancia para resolverla.', 409);
+      if (result.diferencia < 0n) {
+        throw new ConciliacionError('El total de movimientos no coincide con el saldo de los remitos. Registrá una justificación para continuar.', 422, {
+          importeMovimiento: result.importeMovimiento.toString(),
+          importeSeleccionado: result.importeSeleccionado.toString(),
+          diferenciaCentavos: result.diferencia.toString(),
+        });
       }
-
       const imputaciones: Array<{ id: string; movimientoId: string; remitoId: string; importeCentavos: string }> = [];
       for (const asignacion of result.imputaciones) {
         const inserted = await client.query(
@@ -441,11 +437,6 @@ export const conciliacionService = {
         `UPDATE movimiento_bancario SET estado = 'imputado' WHERE id = ANY($1::bigint[])`,
         [movimientoIds]
       );
-      await client.query(
-        `UPDATE discrepancia_conciliacion SET estado = 'resuelta'
-         WHERE estado = 'pendiente' AND movimiento_ids && $1::bigint[]`,
-        [movimientoIds]
-      );
       for (const movimientoId of movimientoIds) {
         await client.query(
           `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
@@ -458,38 +449,68 @@ export const conciliacionService = {
     });
   },
 
-  async derivarDiscrepancia(movimientoIdsValue: unknown, remitoIdsValue: unknown, nota: unknown, usuarioId: number) {
+  async registrarDiscrepancia(movimientoIdsValue: unknown, remitoIdsValue: unknown, nota: unknown, motivo: unknown, archivo: { originalname: string; mimetype: string; size: number; buffer: Buffer } | null, usuarioId: number) {
     const movimientoIds = parsearIds(movimientoIdsValue, 'movimiento');
     const remitoIds = parsearIds(remitoIdsValue, 'remito');
-    if (typeof nota !== 'string' || !nota.trim()) {
-      throw new ConciliacionError('Escribí una nota para derivar la discrepancia.', 400);
+    const motivos = ['retenciones_impositivas', 'descuento_comercial', 'diferencia_cambio', 'comision_bancaria', 'otro'];
+    if (typeof nota !== 'string' || !nota.trim() || nota.trim().length > 500 || typeof motivo !== 'string' || !motivos.includes(motivo) || !archivo) {
+      throw new ConciliacionError('Indicá el motivo, agregá una explicación y adjuntá el comprobante de respaldo.', 400);
     }
+    if (!['application/pdf', 'image/jpeg', 'image/png'].includes(archivo.mimetype) || archivo.size < 1 || archivo.size > 5 * 1024 * 1024) {
+      throw new ConciliacionError('El comprobante debe ser PDF, JPG o PNG y no superar 5 MB.', 400);
+    }
+    const firma = archivo.buffer.subarray(0, 8);
+    const formatoValido = archivo.mimetype === 'application/pdf' ? firma.subarray(0, 4).toString() === '%PDF' :
+      archivo.mimetype === 'image/png' ? firma.equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) :
+      firma[0] === 0xff && firma[1] === 0xd8 && firma[2] === 0xff;
+    if (!formatoValido) throw new ConciliacionError('El contenido del comprobante no coincide con su formato.', 400);
 
     return enTransaccion(async (client) => {
       const result = await validarSeleccion(client, movimientoIds, remitoIds);
-      if (result.diferencia <= 0n) {
-        throw new ConciliacionError('No hay sobrante de movimientos; corresponde imputarlos a los remitos.', 422);
+      if (result.diferencia === 0n) {
+        throw new ConciliacionError('Los importes coinciden; usá la conciliación directa.', 422);
       }
       const existing = await client.query(
         `SELECT id::text AS id FROM discrepancia_conciliacion
-         WHERE estado = 'pendiente' AND movimiento_ids && $1::bigint[] FOR UPDATE`,
-        [movimientoIds]
+         WHERE estado IN ('pendiente','escalada')
+           AND (movimiento_ids && $1::bigint[] OR remito_ids && $2::bigint[]) FOR UPDATE`,
+        [movimientoIds, remitoIds]
       );
       if (existing.rows.length) {
-        throw new ConciliacionError('Uno o más movimientos ya están derivados a una discrepancia pendiente.', 409, {
+        throw new ConciliacionError('Un movimiento o remito ya pertenece a una discrepancia pendiente.', 409, {
           movimientosNoElegibles: movimientoIds,
         });
       }
       const values = [movimientoIds[0], movimientoIds, remitoIds, result.importeMovimiento.toString(), result.importeSeleccionado.toString(),
-        result.diferencia.toString(), nota.trim(), usuarioId];
+        result.diferencia.toString(), nota.trim(), motivo, usuarioId];
       const discrepancia = await client.query(
         `INSERT INTO discrepancia_conciliacion
            (movimiento_id, movimiento_ids, remito_ids, importe_movimiento, importe_seleccionado,
-            diferencia_centavos, nota, creada_por)
-         VALUES ($1, $2::bigint[], $3::bigint[], $4, $5, $6, $7, $8)
+            diferencia_centavos, nota, motivo_codigo, creada_por)
+         VALUES ($1, $2::bigint[], $3::bigint[], $4, $5, $6, $7, $8, $9)
          RETURNING id::text AS id`, values
       );
       const discrepanciaId = discrepancia.rows[0].id;
+      await client.query(
+        `INSERT INTO discrepancia_comprobante (discrepancia_id, nombre_archivo, tipo_mime, contenido, tamano_bytes)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [discrepanciaId, archivo.originalname.replace(/[\\/\r\n\"]/g, '_').slice(0, 255), archivo.mimetype, archivo.buffer, archivo.size]
+      );
+      const limiteCentavos = BigInt(Math.max(0, Math.floor(Number(process.env.CONCILIATION_TOLERANCE_CENTS || 0))));
+      const toleranciaPuntosBase = BigInt(Math.max(0, Math.floor(Number(process.env.CONCILIATION_TOLERANCE_PERCENT || 0) * 100)));
+      const magnitudDiferencia = result.diferencia < 0n ? -result.diferencia : result.diferencia;
+      const dentroTolerancia = magnitudDiferencia <= limiteCentavos || magnitudDiferencia * 10_000n <= result.importeSeleccionado * toleranciaPuntosBase;
+      const estado = dentroTolerancia ? 'aprobada' : 'pendiente';
+      if (estado === 'aprobada') {
+        await aplicarDiscrepancia(client, discrepanciaId, result, usuarioId);
+      } else {
+        await client.query(
+          `INSERT INTO discrepancia_notificacion (discrepancia_id, usuario_id, mensaje)
+           SELECT $1, id, 'Hay una discrepancia pendiente de aprobación.' FROM usuario
+           WHERE activo = true AND rol = 'Gerente'`, [discrepanciaId]
+        );
+      }
+      await client.query('UPDATE discrepancia_conciliacion SET estado = $1 WHERE id = $2', [estado, discrepanciaId]);
       await client.query(
         `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
          VALUES ('discrepancia_conciliacion', $1, $2, $3, $4::jsonb, $5)`,
@@ -500,7 +521,90 @@ export const conciliacionService = {
             diferenciaCentavos: result.diferencia.toString(),
           }), nota.trim()]
       );
-      return { id: discrepanciaId, movimientoIds, diferenciaCentavos: result.diferencia.toString() };
+      return { id: discrepanciaId, movimientoIds, diferenciaCentavos: result.diferencia.toString(), estado };
+    });
+  },
+
+  async resolverDiscrepancia(idValue: unknown, usuarioId: number, aprobar: boolean, observacion: unknown) {
+    const id = String(idValue || '');
+    if (!/^[1-9]\d*$/.test(id)) throw new ConciliacionError('Identificador de discrepancia inválido.', 400);
+    if (typeof observacion !== 'string' || !observacion.trim() || observacion.trim().length > 500) throw new ConciliacionError('La observación es obligatoria y no puede superar 500 caracteres.', 400);
+    return enTransaccion(async (client) => {
+      const caso = await client.query('SELECT * FROM discrepancia_conciliacion WHERE id = $1 FOR UPDATE', [id]);
+      if (!caso.rows.length) throw new ConciliacionError('No se encontró la discrepancia.', 404);
+      const dc = caso.rows[0];
+      if (!['pendiente','escalada'].includes(dc.estado)) throw new ConciliacionError('El caso ya fue resuelto por otro usuario.', 409);
+      if (aprobar && String(dc.creada_por) === String(usuarioId)) throw new ConciliacionError('Otro usuario debe aprobar la discrepancia.', 403);
+      if (aprobar) {
+        const usuario = await client.query('SELECT limite_autorizacion_centavos FROM usuario WHERE id = $1', [usuarioId]);
+        const magnitud = BigInt(dc.diferencia_centavos) < 0n ? -BigInt(dc.diferencia_centavos) : BigInt(dc.diferencia_centavos);
+        if (!usuario.rows.length || BigInt(usuario.rows[0].limite_autorizacion_centavos || 0) < magnitud) {
+          await client.query("UPDATE discrepancia_conciliacion SET estado = 'escalada' WHERE id = $1", [id]);
+          await client.query(
+            `INSERT INTO discrepancia_notificacion (discrepancia_id, usuario_id, mensaje)
+             SELECT $1, id, 'Una discrepancia requiere un límite de autorización mayor.' FROM usuario
+             WHERE activo = true AND rol = 'Gerente'`, [id]
+          );
+          return { id, estado: 'escalada', mensaje: 'El límite de autorización no alcanza; se escaló a Gerencia.' };
+        }
+      }
+      const movimientoIds = (dc.movimiento_ids || [dc.movimiento_id]).map(String);
+      const remitoIds = dc.remito_ids.map(String);
+      const result = await validarSeleccion(client, movimientoIds, remitoIds);
+      if (result.importeMovimiento.toString() !== String(dc.importe_movimiento) ||
+          result.importeSeleccionado.toString() !== String(dc.importe_seleccionado) ||
+          result.diferencia.toString() !== String(dc.diferencia_centavos)) {
+        throw new ConciliacionError('Los saldos cambiaron desde que se registró el caso; revisalo nuevamente.', 409);
+      }
+      if (aprobar) await aplicarDiscrepancia(client, id, result, usuarioId);
+      const estado = aprobar ? 'aprobada' : 'rechazada';
+      await client.query(
+        `UPDATE discrepancia_conciliacion SET estado = $1, resuelta_por = $2, resuelta_en = now(), observacion_resolucion = $3 WHERE id = $4`,
+        [estado, usuarioId, observacion.trim(), id]
+      );
+      await client.query(
+        `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
+         VALUES ('discrepancia_conciliacion', $1, $2, $3, $4::jsonb, $5)`,
+        [id, estado, usuarioId, JSON.stringify({ estado, movimientoIds, remitoIds }), observacion.trim()]
+      );
+      if (!aprobar) await client.query(
+        `INSERT INTO discrepancia_notificacion (discrepancia_id, usuario_id, mensaje)
+         VALUES ($1, $2, $3)`, [id, dc.creada_por, `La discrepancia fue rechazada: ${observacion.trim()}`]
+      );
+      return { id, estado };
     });
   },
 };
+
+async function aplicarDiscrepancia(client: PoolClient, id: string, result: Awaited<ReturnType<typeof validarSeleccion>>, usuarioId: number) {
+  for (const item of result.imputaciones) {
+    await client.query(
+      `INSERT INTO imputacion (movimiento_bancario_id, remito_id, importe_centavos, imputado_por)
+       VALUES ($1, $2, $3, $4)`, [item.movimientoId, item.remitoId, item.importeCentavos.toString(), usuarioId]
+    );
+  }
+  if (result.diferencia < 0n) {
+    let restante = -result.diferencia;
+    const saldos = new Map(result.remitos.map((remito) => [String(remito.id), BigInt(remito.saldo_centavos)]));
+    for (const asignacion of result.imputaciones) {
+      const id = String(asignacion.remitoId);
+      saldos.set(id, saldos.get(id)! - asignacion.importeCentavos);
+    }
+    for (const remito of result.remitos) {
+      if (!restante) break;
+      const saldo = saldos.get(String(remito.id))!;
+      const ajuste = saldo < restante ? saldo : restante;
+      await client.query(
+        `INSERT INTO discrepancia_ajuste (discrepancia_id, remito_id, tipo, importe_centavos) VALUES ($1, $2, 'reduccion_saldo', $3)`,
+        [id, remito.id, ajuste.toString()]
+      );
+      restante -= ajuste;
+    }
+  } else {
+    await client.query(
+      `INSERT INTO discrepancia_ajuste (discrepancia_id, comercio_id, tipo, importe_centavos)
+       VALUES ($1, $2, 'saldo_favor', $3)`, [id, result.remitos[0].comercio_id, result.diferencia.toString()]
+    );
+  }
+  await client.query("UPDATE movimiento_bancario SET estado = 'imputado' WHERE id = ANY($1::bigint[])", [result.movimientos.map((item) => String(item.id))]);
+}

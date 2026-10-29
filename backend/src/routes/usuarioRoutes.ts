@@ -18,7 +18,7 @@ usuarioRouter.use('/usuarios', requireAuth, requireSystemAdmin);
 usuarioRouter.get('/usuarios', async (_req, res) => {
   try {
     const [users, assignments, branches] = await Promise.all([
-      db.query('SELECT id, usuario, nombre, email, rol, activo FROM usuario ORDER BY nombre'),
+      db.query('SELECT id, usuario, nombre, email, rol, activo, limite_autorizacion_centavos::text FROM usuario ORDER BY nombre'),
       db.query(`SELECT us.usuario_id, us.sucursal_id, s.nombre
                 FROM usuario_sucursal us JOIN sucursal s ON s.id = us.sucursal_id
                 ORDER BY s.nombre`),
@@ -45,10 +45,11 @@ usuarioRouter.get('/usuarios', async (_req, res) => {
 });
 
 usuarioRouter.post('/usuarios', async (req, res) => {
-  const { usuario, nombre, email, password, rol, sucursalIds } = req.body;
+  const { usuario, nombre, email, password, rol, sucursalIds, limiteAutorizacionCentavos = 0 } = req.body;
   const branches = [...new Set((Array.isArray(sucursalIds) ? sucursalIds : []).map(Number))];
   if (typeof usuario !== 'string' || !usuario.trim() || typeof nombre !== 'string' || !nombre.trim() ||
       typeof password !== 'string' || password.length < 8 || !roles.includes(rol) || !branches.length ||
+      !Number.isSafeInteger(limiteAutorizacionCentavos) || limiteAutorizacionCentavos < 0 ||
       (email && (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))) {
     return res.status(400).json({ message: 'Ingresá usuario, nombre, contraseña de al menos 8 caracteres, rol y sucursal válida.' });
   }
@@ -65,9 +66,9 @@ usuarioRouter.post('/usuarios', async (req, res) => {
     }
     const passwordHash = await bcryptjs.hash(password, 10);
     const created = await client.query(
-      `INSERT INTO usuario (usuario, nombre, email, password_hash, rol, es_transportista)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [usuario.trim(), nombre.trim(), email?.trim() || null, passwordHash, rol, rol === 'Transportista']
+      `INSERT INTO usuario (usuario, nombre, email, password_hash, rol, es_transportista, limite_autorizacion_centavos)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [usuario.trim(), nombre.trim(), email?.trim() || null, passwordHash, rol, rol === 'Transportista', limiteAutorizacionCentavos]
     );
     for (const branchId of branches) {
       await client.query('INSERT INTO usuario_sucursal (usuario_id, sucursal_id) VALUES ($1, $2)', [created.rows[0].id, branchId]);
@@ -84,10 +85,11 @@ usuarioRouter.post('/usuarios', async (req, res) => {
 
 usuarioRouter.put('/usuarios/:id', async (req: any, res) => {
   const id = Number(req.params.id);
-  const { usuario, nombre, email, password, rol, sucursalIds } = req.body;
+  const { usuario, nombre, email, password, rol, sucursalIds, limiteAutorizacionCentavos } = req.body;
   const branches = [...new Set((Array.isArray(sucursalIds) ? sucursalIds : []).map(Number))];
   if (!Number.isSafeInteger(id) || id <= 0 || typeof usuario !== 'string' || !usuario.trim() ||
       typeof nombre !== 'string' || !nombre.trim() || !roles.includes(rol) || !branches.length ||
+      (limiteAutorizacionCentavos !== undefined && (!Number.isSafeInteger(limiteAutorizacionCentavos) || limiteAutorizacionCentavos < 0)) ||
       (password && (typeof password !== 'string' || password.length < 8)) ||
       (email && (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))) {
     return res.status(400).json({ message: 'Revisá los datos del usuario, rol y sucursales.' });
@@ -99,7 +101,7 @@ usuarioRouter.put('/usuarios/:id', async (req: any, res) => {
   const client = await db.getPool().connect();
   try {
     await client.query('BEGIN');
-    const current = await client.query('SELECT id, rol, activo FROM usuario WHERE id = $1 FOR UPDATE', [id]);
+    const current = await client.query('SELECT id, rol, activo, limite_autorizacion_centavos FROM usuario WHERE id = $1 FOR UPDATE', [id]);
     if (!current.rows.length) {
       await client.query('ROLLBACK');
       return res.status(404).json({ message: 'No se encontró el usuario.' });
@@ -118,12 +120,13 @@ usuarioRouter.put('/usuarios/:id', async (req: any, res) => {
         return res.status(400).json({ message: 'Una o más sucursales no existen o están inactivas.' });
       }
     }
-    const params: unknown[] = [usuario.trim(), nombre.trim(), email?.trim() || null, rol, rol === 'Transportista', id];
-    const passwordSql = password ? ', password_hash = $7' : '';
+    const limite = limiteAutorizacionCentavos === undefined ? current.rows[0].limite_autorizacion_centavos : limiteAutorizacionCentavos;
+    const params: unknown[] = [usuario.trim(), nombre.trim(), email?.trim() || null, rol, rol === 'Transportista', limite, id];
+    const passwordSql = password ? ', password_hash = $8' : '';
     if (password) params.push(await bcryptjs.hash(password, 10));
     await client.query(
       `UPDATE usuario SET usuario = $1, nombre = $2, email = $3, rol = $4,
-       es_transportista = $5, actualizado_en = now()${passwordSql} WHERE id = $6`, params
+       es_transportista = $5, limite_autorizacion_centavos = $6, actualizado_en = now()${passwordSql} WHERE id = $7`, params
     );
     await client.query('DELETE FROM usuario_sucursal WHERE usuario_id = $1', [id]);
     for (const branchId of branches) {

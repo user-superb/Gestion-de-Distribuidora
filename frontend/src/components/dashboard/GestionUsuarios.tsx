@@ -11,6 +11,7 @@ interface UserRecord {
   nombre: string;
   email: string | null;
   rol: UserRole;
+  limite_autorizacion_centavos: string;
   activo: boolean;
   sucursal_ids: string[];
   sucursales: string;
@@ -24,10 +25,11 @@ interface UserDraft {
   email: string;
   password: string;
   rol: UserRole;
+  limiteAutorizacionPesos: string;
   sucursalIds: string[];
 }
 
-const emptyDraft = (): UserDraft => ({ usuario: '', nombre: '', email: '', password: '', rol: 'Administrativo', sucursalIds: [] });
+const emptyDraft = (): UserDraft => ({ usuario: '', nombre: '', email: '', password: '', rol: 'Administrativo', limiteAutorizacionPesos: '0', sucursalIds: [] });
 
 export const GestionUsuarios: React.FC<{ session: UserSession }> = ({ session }) => {
   const [users, setUsers] = useState<UserRecord[]>([]);
@@ -53,9 +55,10 @@ export const GestionUsuarios: React.FC<{ session: UserSession }> = ({ session })
     setBusy(true);
     setError('');
     try {
-      const { id, ...body } = draft;
+      const { id, limiteAutorizacionPesos, ...body } = draft;
+      const limiteAutorizacionCentavos = Math.round(Number(limiteAutorizacionPesos || 0) * 100);
       const response = await fetch(`${API_BASE_URL}/api/usuarios${id ? `/${id}` : ''}`, {
-        method: id ? 'PUT' : 'POST', headers, body: JSON.stringify(body),
+        method: id ? 'PUT' : 'POST', headers, body: JSON.stringify({ ...body, limiteAutorizacionCentavos }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'No se pudo guardar el usuario.');
@@ -81,6 +84,7 @@ export const GestionUsuarios: React.FC<{ session: UserSession }> = ({ session })
   const startEdit = (user: UserRecord) => setDraft({
     id: user.id, usuario: user.usuario, nombre: user.nombre, email: user.email || '', password: '',
     rol: user.rol, sucursalIds: user.sucursal_ids.map(String),
+    limiteAutorizacionPesos: (Number(user.limite_autorizacion_centavos || 0) / 100).toFixed(2),
   });
 
   return (
@@ -103,6 +107,7 @@ export const GestionUsuarios: React.FC<{ session: UserSession }> = ({ session })
         <label className="text-sm text-slate-700">Correo electrónico<input type="email" value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} className="mt-1 w-full rounded border border-slate-300 px-3 py-2" /></label>
         <label className="text-sm text-slate-700">{draft.id ? 'Nueva contraseña (opcional)' : 'Contraseña inicial'}<input type="password" required={!draft.id} minLength={8} value={draft.password} onChange={(e) => setDraft({ ...draft, password: e.target.value })} className="mt-1 w-full rounded border border-slate-300 px-3 py-2" /></label>
         <label className="text-sm text-slate-700">Rol<select value={draft.rol} onChange={(e) => setDraft({ ...draft, rol: e.target.value as UserRole })} className="mt-1 w-full rounded border border-slate-300 px-3 py-2">{roles.map((role) => <option key={role}>{role}</option>)}</select></label>
+        <label className="text-sm text-slate-700">Límite para aprobar diferencias (pesos)<input type="number" min="0" step="0.01" value={draft.limiteAutorizacionPesos} onChange={(e) => setDraft({ ...draft, limiteAutorizacionPesos: e.target.value })} className="mt-1 w-full rounded border border-slate-300 px-3 py-2" /></label>
         <fieldset className="text-sm text-slate-700 sm:col-span-2">
           <legend className="mb-2">Sucursales asignadas</legend>
           <div className="flex flex-wrap gap-x-5 gap-y-2">{branches.map((branch) => <label key={branch.id} className="flex items-center gap-2"><input type="checkbox" checked={draft.sucursalIds.includes(String(branch.id))} onChange={(e) => setDraft({ ...draft, sucursalIds: e.target.checked ? [...draft.sucursalIds, String(branch.id)] : draft.sucursalIds.filter((id) => id !== String(branch.id)) })} />{branch.nombre}</label>)}</div>

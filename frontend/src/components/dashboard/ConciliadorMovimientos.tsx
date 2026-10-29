@@ -34,6 +34,10 @@ interface Discrepancia {
   diferencia_centavos: string;
   nota: string;
   remito_ids: string;
+  motivo_codigo: string;
+  estado: string;
+  creada_por: string;
+  comprobante_nombre: string;
 }
 
 import { API_BASE } from '../../config/api';
@@ -57,6 +61,10 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
   const [movimientosSeleccionados, setMovimientosSeleccionados] = useState<Set<string>>(() => new Set(initialSelection ? [initialSelection.movimientoId] : []));
   const [remitosSeleccionados, setRemitosSeleccionados] = useState<Set<string>>(() => new Set(initialSelection ? [initialSelection.remitoId] : []));
   const [nota, setNota] = useState('');
+  const [motivo, setMotivo] = useState('');
+  const [comprobante, setComprobante] = useState<File | null>(null);
+  const [observacionResolucion, setObservacionResolucion] = useState('');
+  const [notificaciones, setNotificaciones] = useState<{ id: string; mensaje: string }[]>([]);
   const [mensaje, setMensaje] = useState('');
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
@@ -70,19 +78,21 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
     setCargando(true);
     setError('');
     try {
-      const [movRes, remRes, discRes] = await Promise.all([
+      const [movRes, remRes, discRes, notifRes] = await Promise.all([
         fetch(`${API_BASE}/conciliacion/movimientos?fecha=${encodeURIComponent(dia)}`, { headers }),
         fetch(`${API_BASE}/conciliacion/remitos-pendientes`, { headers }),
         fetch(`${API_BASE}/conciliacion/discrepancias`, { headers }),
+        fetch(`${API_BASE}/conciliacion/notificaciones`, { headers }),
       ]);
-      const responses = [movRes, remRes, discRes];
+      const responses = [movRes, remRes, discRes, notifRes];
       if (responses.some((response) => !response.ok)) {
         throw new Error('No se pudieron cargar los datos de conciliación. Verificá tu sesión y PostgreSQL.');
       }
-      const [movData, remData, discData] = await Promise.all(responses.map((response) => response.json()));
+      const [movData, remData, discData, notifData] = await Promise.all(responses.map((response) => response.json()));
       setMovimientos(movData);
       setRemitos(remData);
       setDiscrepancias(discData);
+      setNotificaciones(notifData);
       setCuentaId((current) => current === 'todas' || movData.some((item: Movimiento) => item.cuenta_id === current) ? current : 'todas');
       setMovimientosSeleccionados((current) => new Set([...current].filter((id) => movData.some((item: Movimiento) => item.id === id))));
     } catch (e) {
@@ -126,27 +136,26 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
 
   const ejecutar = async () => {
     if (!movimientosSeleccionados.size || !remitosSeleccionados.size) return;
-    const derivar = diferencia > 0n;
-    if (derivar && !nota.trim()) {
-      setError('Agregá una nota para derivar la diferencia a la bandeja.');
+    const derivar = diferencia !== 0n;
+    if (derivar && (!nota.trim() || !motivo || !comprobante)) {
+      setError('Para justificar la diferencia, indicá el motivo, agregá una explicación y adjuntá el comprobante.');
       return;
     }
     setError('');
     setMensaje('');
     setCargando(true);
     try {
-      const response = await fetch(
-        `${API_BASE}/conciliacion/${derivar ? 'discrepancias' : 'imputaciones'}`,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            movimientoIds: movimientosElegidos.map((item) => item.id),
-            remitoIds: remitosElegidos.map((item) => item.id),
-            ...(derivar ? { nota } : {}),
-          }),
-        }
-      );
+      const body = derivar ? new FormData() : JSON.stringify({
+        movimientoIds: movimientosElegidos.map((item) => item.id), remitoIds: remitosElegidos.map((item) => item.id),
+      });
+      if (derivar && body instanceof FormData) {
+        body.set('movimientoIds', JSON.stringify(movimientosElegidos.map((item) => item.id)));
+        body.set('remitoIds', JSON.stringify(remitosElegidos.map((item) => item.id)));
+        body.set('nota', nota); body.set('motivo', motivo); body.set('comprobante', comprobante!);
+      }
+      const response = await fetch(`${API_BASE}/conciliacion/${derivar ? 'discrepancias' : 'imputaciones'}`, {
+        method: 'POST', headers: derivar ? { Authorization: `Bearer ${session.token}` } : headers, body,
+      });
       const data = await response.json();
       if (!response.ok) {
         const noElegibles = [
@@ -155,16 +164,41 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
         ];
         throw new Error(`${data.message || 'No se pudo completar la operación.'}${noElegibles.length ? ` No elegibles: ${noElegibles.join(', ')}.` : ''}`);
       }
-      setMensaje(derivar ? 'La diferencia quedó en la bandeja de resolución.' : 'Movimiento conciliado; los saldos de los remitos quedaron actualizados.');
+      setMensaje(derivar ? (data.estado === 'aprobada' ? 'Diferencia dentro de tolerancia: imputación aprobada.' : 'La diferencia quedó en la bandeja para revisión.') : 'Movimiento conciliado; los saldos de los remitos quedaron actualizados.');
       setMovimientosSeleccionados(new Set());
       setRemitosSeleccionados(new Set());
       setNota('');
+      setMotivo(''); setComprobante(null);
       await cargar();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo completar la operación.');
     } finally {
       setCargando(false);
     }
+  };
+
+  const resolver = async (item: Discrepancia, accion: 'aprobar' | 'rechazar') => {
+    if (accion === 'rechazar' && !observacionResolucion.trim()) { setError('Escribí el motivo del rechazo.'); return; }
+    setError(''); setMensaje(''); setCargando(true);
+    try {
+      const response = await fetch(`${API_BASE}/conciliacion/discrepancias/${item.id}/${accion}`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ observacion: observacionResolucion }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'No se pudo resolver la discrepancia.');
+      setMensaje(data.mensaje || (accion === 'aprobar' ? 'Discrepancia aprobada e imputada.' : 'Discrepancia rechazada; se notificó al administrativo.'));
+      setObservacionResolucion(''); await cargar();
+    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo resolver la discrepancia.'); }
+    finally { setCargando(false); }
+  };
+
+  const verComprobante = async (item: Discrepancia) => {
+    const response = await fetch(`${API_BASE}/conciliacion/discrepancias/${item.id}/comprobante`, { headers: { Authorization: `Bearer ${session.token}` } });
+    if (!response.ok) { setError('No se pudo abrir el comprobante.'); return; }
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a'); link.href = url; link.download = item.comprobante_nombre || 'comprobante'; link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
 
   return (
@@ -244,26 +278,29 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
             <div>{remitosSeleccionados.size} saldo(s) seleccionado(s): <strong>{formatoARS(suma)}</strong></div>
             <div>{diferencia > 0n ? 'Sobrante sin imputar: ' : diferencia < 0n ? 'Saldo que queda pendiente: ' : 'Diferencia: '}<strong>{diferencia > 0n ? formatoARS(diferencia) : diferencia < 0n ? formatoARS(-diferencia) : 'Exacta'}</strong></div>
           </div>
-          {diferencia > 0n && (
+          {diferencia !== 0n && (
             <label className="block text-xs text-slate-700">
-              Nota para la bandeja de discrepancias
+              Justificación de diferencia
+              <select required value={motivo} onChange={(event) => setMotivo(event.target.value)} className="mt-1 w-full rounded border border-slate-300 p-2"><option value="">Seleccionar motivo</option><option value="retenciones_impositivas">Retenciones impositivas</option><option value="descuento_comercial">Descuento comercial</option><option value="diferencia_cambio">Diferencia de cambio</option><option value="comision_bancaria">Comisión bancaria</option><option value="otro">Otro</option></select>
               <textarea value={nota} onChange={(event) => setNota(event.target.value)} rows={2} maxLength={500} className="mt-1 w-full rounded border border-slate-300 p-2" placeholder="Explicá la diferencia encontrada" />
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(event) => setComprobante(event.target.files?.[0] || null)} className="mt-2 block w-full" />
             </label>
           )}
           <div className="flex justify-end">
-            <button type="button" onClick={() => void ejecutar()} disabled={cargando || (diferencia > 0n && !nota.trim())} className="rounded-md bg-marca-naranja hover:bg-marca-naranja-hover px-4 py-2 text-xs font-bold text-white shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50">
-              {cargando ? 'Procesando…' : diferencia > 0n ? 'Derivar discrepancia' : 'Conciliar selección'}
+            <button type="button" onClick={() => void ejecutar()} disabled={cargando || (diferencia !== 0n && (!nota.trim() || !motivo || !comprobante))} className="rounded-md bg-marca-naranja hover:bg-marca-naranja-hover px-4 py-2 text-xs font-bold text-white shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50">
+              {cargando ? 'Procesando…' : diferencia !== 0n ? 'Enviar justificación' : 'Conciliar selección'}
             </button>
           </div>
         </div>
       )}
 
       <div className="border-t border-slate-100 pt-3 space-y-2">
+        {notificaciones.map((item) => <p key={item.id} role="status" className="rounded border border-blue-200 bg-blue-50 p-2 text-xs text-blue-800">{item.mensaje}</p>)}
         <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Bandeja de discrepancias ({discrepancias.length})</h3>
         {discrepancias.length === 0 ? <p className="text-xs text-slate-500">Sin casos pendientes.</p> : discrepancias.map((item) => (
-          <div key={item.id} className="flex flex-wrap justify-between gap-2 rounded border border-amber-200 bg-amber-50 p-2.5 text-xs">
-          <span>Movimientos #{item.movimiento_ids.replace(/[{}]/g, '').replace(/,/g, ', #')} · {item.ordenante || 'Ordenante sin informar'} · Remitos: {item.remito_ids.replace(/[{}]/g, '')} · {item.nota}</span>
-            <strong>{item.diferencia_centavos.startsWith('-') ? 'Faltante ' : 'Sobrante '}{formatoARS(item.diferencia_centavos.startsWith('-') ? item.diferencia_centavos.slice(1) : item.diferencia_centavos)}</strong>
+          <div key={item.id} className="rounded border border-amber-200 bg-amber-50 p-2.5 text-xs space-y-2">
+            <div className="flex flex-wrap justify-between gap-2"><span>Movimientos #{item.movimiento_ids.replace(/[{}]/g, '').replace(/,/g, ', #')} · {item.ordenante || 'Ordenante sin informar'} · Remitos: {item.remito_ids.replace(/[{}]/g, '')}<br />{item.motivo_codigo}: {item.nota} · Estado: {item.estado}</span><strong>{item.diferencia_centavos.startsWith('-') ? 'Faltante ' : 'Sobrante '}{formatoARS(item.diferencia_centavos.startsWith('-') ? item.diferencia_centavos.slice(1) : item.diferencia_centavos)}</strong></div>
+            <div className="flex flex-wrap items-center gap-2"><button type="button" onClick={() => void verComprobante(item)} className="text-blue-700 underline">Descargar {item.comprobante_nombre || 'comprobante'}</button><input aria-label="Observación de revisión" value={observacionResolucion} onChange={(event) => setObservacionResolucion(event.target.value)} maxLength={500} placeholder="Observación (obligatoria al rechazar)" className="min-w-48 flex-1 rounded border border-slate-300 px-2 py-1" /><button type="button" disabled={cargando || item.creada_por === session.id.replace(/^usr_/, '')} onClick={() => void resolver(item, 'aprobar')} className="rounded bg-emerald-700 px-2 py-1 font-semibold text-white disabled:opacity-50">Aprobar</button><button type="button" disabled={cargando || !observacionResolucion.trim()} onClick={() => void resolver(item, 'rechazar')} className="rounded bg-red-700 px-2 py-1 font-semibold text-white disabled:opacity-50">Rechazar</button></div>
           </div>
         ))}
       </div>

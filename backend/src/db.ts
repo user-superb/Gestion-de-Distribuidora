@@ -45,6 +45,7 @@ function setupMemoryDb() {
       email text,
       password_hash text NOT NULL,
       rol text NOT NULL DEFAULT 'Administrativo',
+      limite_autorizacion_centavos bigint NOT NULL DEFAULT 0,
       es_transportista boolean NOT NULL DEFAULT false,
       dispositivo_conectado boolean NOT NULL DEFAULT true,
       activo boolean NOT NULL DEFAULT true,
@@ -228,24 +229,57 @@ function setupMemoryDb() {
       nota text NOT NULL,
       estado text NOT NULL DEFAULT 'pendiente',
       creada_por bigint NOT NULL,
-      creada_en timestamp DEFAULT now()
+      creada_en timestamp DEFAULT now(),
+      motivo_codigo text,
+      resuelta_por bigint,
+      resuelta_en timestamp,
+      observacion_resolucion text
+    );
+
+    CREATE TABLE IF NOT EXISTS discrepancia_comprobante (
+      discrepancia_id bigint PRIMARY KEY,
+      nombre_archivo text NOT NULL,
+      tipo_mime text NOT NULL,
+      contenido bytea NOT NULL,
+      tamano_bytes bigint NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS discrepancia_ajuste (
+      id serial PRIMARY KEY,
+      discrepancia_id bigint NOT NULL,
+      remito_id bigint,
+      comercio_id bigint,
+      tipo text NOT NULL,
+      importe_centavos bigint NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS discrepancia_notificacion (
+      id serial PRIMARY KEY,
+      discrepancia_id bigint NOT NULL,
+      usuario_id bigint NOT NULL,
+      mensaje text NOT NULL,
+      creada_en timestamp DEFAULT now(),
+      leida_en timestamp
     );
 
     CREATE VIEW remito_saldo AS
+    WITH pagos AS (
+      SELECT remito_id, SUM(importe_centavos) AS importe_centavos FROM imputacion WHERE anulado = false GROUP BY remito_id
+    ), ajustes AS (
+      SELECT remito_id, SUM(importe_centavos) AS importe_centavos FROM discrepancia_ajuste WHERE tipo = 'reduccion_saldo' GROUP BY remito_id
+    )
     SELECT  r.id AS remito_id,
             r.comercio_id,
             r.marca_id,
             r.importe_centavos,
-            COALESCE(SUM(i.importe_centavos), 0) AS imputado_centavos,
-            r.importe_centavos - COALESCE(SUM(i.importe_centavos), 0) AS saldo_centavos,
+            COALESCE(p.importe_centavos, 0) AS imputado_centavos,
+            r.importe_centavos - COALESCE(p.importe_centavos, 0) - COALESCE(a.importe_centavos, 0) AS saldo_centavos,
             CASE
-                WHEN r.importe_centavos = COALESCE(SUM(i.importe_centavos), 0) THEN 'saldado'
-                WHEN COALESCE(SUM(i.importe_centavos), 0) > 0 THEN 'parcial'
+                WHEN r.importe_centavos = COALESCE(p.importe_centavos, 0) + COALESCE(a.importe_centavos, 0) THEN 'saldado'
+                WHEN COALESCE(p.importe_centavos, 0) + COALESCE(a.importe_centavos, 0) > 0 THEN 'parcial'
                 ELSE 'pendiente'
             END AS estado_pago
     FROM remito r
-    LEFT JOIN imputacion i ON i.remito_id = r.id AND i.anulado = false
-    GROUP BY r.id, r.comercio_id, r.marca_id, r.importe_centavos;
+    LEFT JOIN pagos p ON p.remito_id = r.id
+    LEFT JOIN ajustes a ON a.remito_id = r.id;
   `);
 
   // Seeds iniciales
