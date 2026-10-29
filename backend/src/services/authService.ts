@@ -167,7 +167,7 @@ export const authService = {
 
       // 7. Determinar redirección según rol
       const redirectMap: Record<string, string> = {
-        'Administrador del sistema': '/dashboard',
+        'Administrador del sistema': '/dashboard/configuracion',
         Administrativo: '/dashboard',
         Transportista: '/mobile-dispatch',
         Supervisor: '/operations/routes',
