@@ -203,7 +203,7 @@ export function DetalleParadaPantalla({
       </View>
 
       {/* Botón de Acción para Iniciar Entrega */}
-      <View style={{ marginTop: 12, gap: 10 }}>
+      <View style={{ marginTop: 12 }}>
         <Pressable
           style={estilos.boton}
           onPress={() => onIniciarEntrega(parada.visitaPrincipal)}
@@ -215,15 +215,6 @@ export function DetalleParadaPantalla({
               ? 'Ver registro de entrega y cobro →'
               : 'Iniciar entrega →'}
           </Text>
-        </Pressable>
-
-        <Pressable
-          style={estilos.botonSecundario}
-          onPress={onVolver}
-          accessibilityRole="button"
-          accessibilityLabel="Volver a la hoja de ruta"
-        >
-          <Text style={estilos.botonSecundarioTexto}>Volver a hoja de ruta</Text>
         </Pressable>
       </View>
     </ScrollView>

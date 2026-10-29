@@ -54,24 +54,42 @@ export function HojaDeRutaPantalla({ guardada, cola, error, cargando, enLinea, m
         </Pressable>
       </View>
 
-      {hoja ? (
-        <Text style={estilos.subtitulo}>
-          {hoja.fechaReparto.split('-').reverse().join('/')} · {hoja.sucursal}
-          {hoja.patente ? ` · ${hoja.patente}` : ''}
-        </Text>
-      ) : null}
-
-      {/* Corrección 8: botón visible para actualizar (además de deslizar hacia abajo) */}
-      <Pressable
-        style={[estilos.botonSecundario, { paddingVertical: 10, flexDirection: 'row', gap: 8 }, cargando && { borderColor: colores.deshabilitado }]}
-        onPress={onRecargar}
-        disabled={cargando}
-        accessibilityRole="button"
-        accessibilityLabel="Actualizar hoja de ruta"
-      >
-        {cargando ? <ActivityIndicator color={colores.enlace} /> : null}
-        <Text style={estilos.botonSecundarioTexto}>{cargando ? 'Actualizando…' : '↻ Actualizar'}</Text>
-      </Pressable>
+      <View style={[estilos.fila, { alignItems: 'center' }]}>
+        {hoja ? (
+          <Text style={[estilos.subtitulo, { flex: 1 }]}>
+            {hoja.fechaReparto.split('-').reverse().join('/')} · {hoja.sucursal}
+            {hoja.patente ? ` · ${hoja.patente}` : ''}
+          </Text>
+        ) : (
+          <View style={{ flex: 1 }} />
+        )}
+        <Pressable
+          onPress={onRecargar}
+          disabled={cargando}
+          accessibilityRole="button"
+          accessibilityLabel="Actualizar hoja de ruta"
+          hitSlop={8}
+          style={[
+            {
+              width: 36,
+              height: 36,
+              borderRadius: 8,
+              borderWidth: 1.5,
+              borderColor: colores.enlace,
+              backgroundColor: colores.marcaSuave,
+              alignItems: 'center',
+              justifyContent: 'center',
+            },
+            cargando && { opacity: 0.6 },
+          ]}
+        >
+          {cargando ? (
+            <ActivityIndicator size="small" color={colores.enlace} />
+          ) : (
+            <Text style={{ fontSize: 18, color: colores.enlace, fontWeight: '700', lineHeight: 20 }}>↻</Text>
+          )}
+        </Pressable>
+      </View>
 
       {!enLinea ? (
         <Aviso tono="info">
@@ -147,22 +165,19 @@ export function HojaDeRutaPantalla({ guardada, cola, error, cargando, enLinea, m
               </View>
             </View>
 
-            <Text style={estilos.textoSuave}>
+            <Text style={[estilos.texto, { fontSize: 15, color: colores.texto, fontWeight: '500' }]}>
               {parada.comercio.domicilio}
               {parada.comercio.localidad ? `, ${parada.comercio.localidad}` : ''}
             </Text>
 
-            {/* El texto de marcas se achica y baja de línea; el importe nunca se corta. */}
             <View style={[estilos.fila, { alignItems: 'flex-start' }]}>
               <Text style={[estilos.resumenCargaTexto, estilos.textoFlexible]}>
-                {parada.totalRemitos} remito{parada.totalRemitos !== 1 ? 's' : ''}
-                {parada.marcas.length ? ` · ${parada.marcas.join(', ')}` : ''}
+                {parada.totalRemitos} {parada.totalRemitos === 1 ? 'remito' : 'remitos'}
               </Text>
               <Text style={[estilos.texto, estilos.importeFijo]}>
                 {parada.sinCobroEnDestino ? 'Sin cobro' : formatearPesos(parada.totalImporteCentavos)}
               </Text>
             </View>
-            <Text style={[estilos.botonDesgloseTexto, { alignSelf: 'flex-end', fontSize: 15 }]}>Abrir ›</Text>
           </Pressable>
         );
       }}

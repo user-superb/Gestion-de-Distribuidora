@@ -115,6 +115,21 @@ describe('HU #29 · Cobro combinado', () => {
     assert.equal(importeRestante([fila('efectivo', '40000')], TOTAL), 1750050);
     assert.equal(importeRestante([fila('efectivo', '90000')], TOTAL), 0);
   });
+
+  it('separa errores específicos por medio de pago y errores generales', () => {
+    // Medio 1: sin importe; Medio 2: transferencia sin referencia
+    const resultado = validarCobro(
+      [fila('efectivo', ''), fila('transferencia', '10000', '')],
+      TOTAL,
+      true
+    );
+    assert.equal(resultado.puedeConfirmar, false);
+    assert.equal(resultado.erroresPorPago.length, 2);
+    assert.deepEqual(resultado.erroresPorPago[0], ['Ingresá un importe válido.']);
+    assert.deepEqual(resultado.erroresPorPago[1], ['Falta el comprobante o referencia bancaria de la transferencia.']);
+    // Error general de suma restante
+    assert.ok(resultado.erroresGenerales.some((e) => e.includes('Faltan')));
+  });
 });
 
 describe('HU #22 · Confirmación de entrega de remitos', () => {

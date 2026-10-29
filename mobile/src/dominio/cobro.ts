@@ -28,37 +28,50 @@ export interface ResultadoValidacion {
   diferenciaCentavos: number;
   declaradoCentavos: number;
   errores: string[];
+  erroresPorPago: string[][];
+  erroresGenerales: string[];
 }
 
 export function validarCobro(pagos: PagoEnCarga[], totalExigibleCentavos: number, enLinea: boolean): ResultadoValidacion {
   const errores: string[] = [];
+  const erroresPorPago: string[][] = pagos.map(() => []);
+  const erroresGenerales: string[] = [];
   let declaradoCentavos = 0;
 
   if (totalExigibleCentavos === 0) {
     // HU #25 ESCENARIO 2: sin cobro en destino, no se exige recaudación.
+    const errSinCobro = pagos.length ? ['La visita no tiene cobro en destino.'] : [];
     return {
       puedeConfirmar: pagos.length === 0,
       diferenciaCentavos: 0,
       declaradoCentavos: 0,
-      errores: pagos.length ? ['La visita no tiene cobro en destino.'] : [],
+      errores: errSinCobro,
+      erroresPorPago,
+      erroresGenerales: errSinCobro,
     };
   }
-  if (pagos.length === 0) errores.push('Elegí un medio de pago.');
+  if (pagos.length === 0) {
+    errores.push('Elegí un medio de pago.');
+    erroresGenerales.push('Elegí un medio de pago.');
+  }
 
   pagos.forEach((pago, i) => {
     const fila = pagos.length > 1 ? ` (medio ${i + 1})` : '';
     const importe = parsearPesos(pago.importeTexto);
     if (importe === null || importe <= 0) {
       errores.push(`Ingresá un importe válido${fila}.`);
+      erroresPorPago[i].push('Ingresá un importe válido.');
     } else {
       declaradoCentavos += importe;
     }
     // HU #28 ESCENARIO 3 y HU #29 ESCENARIO 4.
     if (pago.medioPago === 'transferencia' && !pago.referencia.trim()) {
       errores.push(`Falta la referencia bancaria de la transferencia${fila}.`);
+      erroresPorPago[i].push('Falta el comprobante o referencia bancaria de la transferencia.');
     }
     if (!enLinea && MEDIOS_SOLO_EN_LINEA.includes(pago.medioPago)) {
       errores.push('El cobro por QR necesita conexión a internet.');
+      erroresPorPago[i].push('El cobro por QR necesita conexión a internet.');
     }
   });
 
@@ -66,15 +79,25 @@ export function validarCobro(pagos: PagoEnCarga[], totalExigibleCentavos: number
     .filter((pago) => pago.medioPago === 'transferencia' && pago.referencia.trim())
     .map((pago) => pago.referencia.trim().toUpperCase());
   if (new Set(referencias).size !== referencias.length) {
-    errores.push('La misma referencia de transferencia se cargó dos veces.');
+    const errDup = 'La misma referencia de transferencia se cargó dos veces.';
+    errores.push(errDup);
+    erroresGenerales.push(errDup);
   }
 
   // HU #26 ESCENARIO 3 y HU #29 ESCENARIO 3: la suma tiene que ser exacta.
   const diferenciaCentavos = declaradoCentavos - totalExigibleCentavos;
-  if (diferenciaCentavos < 0) errores.push(`Faltan ${formatearPesos(-diferenciaCentavos)} para completar el total.`);
-  if (diferenciaCentavos > 0) errores.push(`Sobran ${formatearPesos(diferenciaCentavos)} sobre el total.`);
+  if (diferenciaCentavos < 0) {
+    const errFalta = `Faltan ${formatearPesos(-diferenciaCentavos)} para completar el total.`;
+    errores.push(errFalta);
+    erroresGenerales.push(errFalta);
+  }
+  if (diferenciaCentavos > 0) {
+    const errSobra = `Sobran ${formatearPesos(diferenciaCentavos)} sobre el total.`;
+    errores.push(errSobra);
+    erroresGenerales.push(errSobra);
+  }
 
-  return { puedeConfirmar: errores.length === 0, diferenciaCentavos, declaradoCentavos, errores };
+  return { puedeConfirmar: errores.length === 0, diferenciaCentavos, declaradoCentavos, errores, erroresPorPago, erroresGenerales };
 }
 
 /** Importe para precargar una fila nueva: lo que falta para llegar al total. */

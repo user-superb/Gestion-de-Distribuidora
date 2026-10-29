@@ -25,11 +25,12 @@ export default function App() {
   const red = useNetInfo();
   const enLinea = red.isConnected === true && red.isInternetReachable !== false;
 
-  // Botón atrás de Android: vuelve de la visita al detalle o del detalle a la hoja de ruta.
+  // Botón atrás de Android: vuelve a la hoja de ruta.
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       if (visitaAbierta) {
         setVisitaAbierta(null);
+        setParadaDetalle(null);
         return true;
       }
       if (paradaDetalle) {
@@ -168,7 +169,10 @@ export default function App() {
             cola={jornada.cola}
             enLinea={enLinea}
             onCambio={jornada.recargar}
-            onVolver={() => setVisitaAbierta(null)}
+            onVolver={() => {
+              setVisitaAbierta(null);
+              setParadaDetalle(null);
+            }}
             onListo={(texto) => {
               setMensaje(texto);
               setVisitaAbierta(null);

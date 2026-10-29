@@ -288,18 +288,12 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
         {avisoEntrega ? <Aviso tono="ok">{avisoEntrega}</Aviso> : null}
         {errorEntrega ? <Aviso tono="error">{errorEntrega}</Aviso> : null}
 
-        {/* HU #25: importe de solo lectura, con desglose por marca */}
+        {/* HU #25: importe de solo lectura */}
         <Text style={estilos.seccionTitulo}>Cobro</Text>
         <View style={estilos.tarjeta} accessibilityLabel={`Importe a cobrar ${formatearPesos(importe.totalCentavos)}`}>
           <Text style={estilos.textoSuave}>Importe a cobrar</Text>
           <Text style={{ fontSize: 34, fontWeight: '800', color: colores.texto }}>{formatearPesos(importe.totalCentavos)}</Text>
           {importe.sinCobroEnDestino ? <Text style={[estilos.texto, { fontWeight: '700' }]}>Sin cobro en destino</Text> : null}
-          {importe.subtotalesPorMarca.map((subtotal) => (
-            <View key={subtotal.marca} style={[estilos.fila, { alignItems: 'flex-start' }]}>
-              <Text style={[estilos.texto, estilos.textoFlexible]}>{subtotal.marca}</Text>
-              <Text style={[estilos.texto, estilos.importeFijo, { fontWeight: '400' }]}>{formatearPesos(subtotal.importeCentavos)}</Text>
-            </View>
-          ))}
           {importe.remitosExcluidos.length ? (
             <Text style={estilos.textoSuave}>Se descontaron remitos rechazados: {importe.remitosExcluidos.join(', ')}</Text>
           ) : null}
@@ -313,34 +307,42 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
           <BotonConfirmar texto="Cerrar parada" habilitado={!guardando} guardando={guardando} onPress={confirmarCobro} />
         ) : (
           <>
-            {pagos.map((pago, i) => (
-              <View key={i} style={estilos.tarjeta}>
-                <View style={estilos.fila}>
-                  <Text style={[estilos.texto, { fontWeight: '700' }]}>{NOMBRE_MEDIO[pago.medioPago]}</Text>
-                  <Pressable onPress={() => setPagos(pagos.filter((_, j) => j !== i))} accessibilityRole="button" hitSlop={12}>
-                    <Text style={{ color: colores.error, fontWeight: '700' }}>Quitar</Text>
-                  </Pressable>
+            {pagos.map((pago, i) => {
+              const erroresPago = validacion.erroresPorPago?.[i] || [];
+              return (
+                <View key={i} style={{ gap: 6 }}>
+                  <View style={estilos.tarjeta}>
+                    <View style={estilos.fila}>
+                      <Text style={[estilos.texto, { fontWeight: '700' }]}>{NOMBRE_MEDIO[pago.medioPago]}</Text>
+                      <Pressable onPress={() => setPagos(pagos.filter((_, j) => j !== i))} accessibilityRole="button" hitSlop={12}>
+                        <Text style={{ color: colores.error, fontWeight: '700' }}>Quitar</Text>
+                      </Pressable>
+                    </View>
+                    <TextInput
+                      style={estilos.input}
+                      value={pago.importeTexto}
+                      onChangeText={(importeTexto) => actualizarPago(i, { importeTexto })}
+                      keyboardType="decimal-pad"
+                      placeholder="Importe"
+                      accessibilityLabel={`Importe en ${NOMBRE_MEDIO[pago.medioPago]}`}
+                    />
+                    {pago.medioPago === 'transferencia' ? (
+                      <TextInput
+                        style={estilos.input}
+                        value={pago.referencia}
+                        onChangeText={(referencia) => actualizarPago(i, { referencia })}
+                        autoCapitalize="characters"
+                        placeholder="Referencia del comprobante"
+                        accessibilityLabel="Referencia del comprobante bancario"
+                      />
+                    ) : null}
+                  </View>
+                  {erroresPago.map((mensaje, idx) => (
+                    <Aviso key={idx} tono="error">{mensaje}</Aviso>
+                  ))}
                 </View>
-                <TextInput
-                  style={estilos.input}
-                  value={pago.importeTexto}
-                  onChangeText={(importeTexto) => actualizarPago(i, { importeTexto })}
-                  keyboardType="decimal-pad"
-                  placeholder="Importe"
-                  accessibilityLabel={`Importe en ${NOMBRE_MEDIO[pago.medioPago]}`}
-                />
-                {pago.medioPago === 'transferencia' ? (
-                  <TextInput
-                    style={estilos.input}
-                    value={pago.referencia}
-                    onChangeText={(referencia) => actualizarPago(i, { referencia })}
-                    autoCapitalize="characters"
-                    placeholder="Referencia del comprobante"
-                    accessibilityLabel="Referencia del comprobante bancario"
-                  />
-                ) : null}
-              </View>
-            ))}
+              );
+            })}
 
             <Text style={estilos.textoSuave}>{pagos.length ? 'Agregar otro medio de pago:' : 'Elegí el medio de pago:'}</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -367,7 +369,7 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
             {pagos.length ? (
               <>
                 {/* HU #29 ESCENARIO 3: se resalta la diferencia y se bloquea la confirmación */}
-                {validacion.errores.map((mensaje) => (
+                {(validacion.erroresGenerales || []).map((mensaje) => (
                   <Aviso key={mensaje} tono="error">{mensaje}</Aviso>
                 ))}
                 <BotonConfirmar
