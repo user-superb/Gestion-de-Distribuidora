@@ -161,7 +161,7 @@ export function DetalleParadaPantalla({
                     </View>
 
                     {doc.motivoNoEntrega ? (
-                      <Text style={[estilos.textoSuave, { color: colores.error, fontSize: 13 }]}>
+                      <Text style={[estilos.textoSuave, { color: colores.error, fontSize: 13, marginTop: 4, fontWeight: '600' }]}>
                         Motivo no entrega: {doc.motivoNoEntrega}
                       </Text>
                     ) : null}

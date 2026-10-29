@@ -39,6 +39,7 @@ const SIN_GPS = 'No se pudo obtener la ubicación GPS, y la entrega la exige. Ac
 function colorEstado(info: InfoEstadoRemito): string {
   if (info.texto.includes('sin sincronizar')) return colores.alerta;
   if (info.puedeOperar && info.motivo) return colores.error; // el servidor rechazó la operación
+  if (info.esRechazado) return colores.error; // remitos no entregados o devueltos
   if (info.texto === 'Entregado') return colores.ok;
   return colores.textoSuave;
 }
@@ -243,9 +244,16 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
                   <Text style={[estilos.texto, estilos.importeFijo]}>{formatearPesos(remito.importeCentavos)}</Text>
                 </View>
                 {!pendiente || info.motivo ? (
-                  <Text style={{ fontWeight: '700', color: colorEstado(info) }}>
-                    {info.texto}{info.motivo ? ` · ${info.motivo}` : ''}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
+                    <Text style={{ fontWeight: '700', color: colorEstado(info) }}>
+                      {info.texto}
+                    </Text>
+                    {info.motivo ? (
+                      <Text style={{ color: colorEstado(info), fontSize: 13, flexShrink: 1 }}>
+                        · Motivo: {info.motivo}
+                      </Text>
+                    ) : null}
+                  </View>
                 ) : null}
               </Pressable>
             );
