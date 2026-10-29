@@ -221,6 +221,7 @@ export const estilos = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 8,
   },
   totalizadorValor: {
     fontSize: 16,
@@ -239,6 +240,7 @@ export const estilos = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
   },
   marcaBadge: {
     backgroundColor: colores.marcaSuave,
@@ -305,4 +307,7 @@ export const estilos = StyleSheet.create({
     fontWeight: '800',
   },
   fila: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  // En una fila "texto · importe": el texto ocupa lo que sobra y baja de línea; el importe no se achica.
+  textoFlexible: { flex: 1, flexShrink: 1 },
+  importeFijo: { flexShrink: 0, fontWeight: '700', textAlign: 'right' },
 });

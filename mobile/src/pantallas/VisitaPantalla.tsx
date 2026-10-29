@@ -239,8 +239,8 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
                       {marcado ? <Text style={{ color: colores.primarioTexto, fontWeight: '800', fontSize: 16 }}>✓</Text> : null}
                     </View>
                   ) : null}
-                  <Text style={[estilos.texto, { flex: 1 }]}>{remito.numero} · {remito.marca}</Text>
-                  <Text style={[estilos.texto, { fontWeight: '700' }]}>{formatearPesos(remito.importeCentavos)}</Text>
+                  <Text style={[estilos.texto, estilos.textoFlexible]}>{remito.numero} · {remito.marca}</Text>
+                  <Text style={[estilos.texto, estilos.importeFijo]}>{formatearPesos(remito.importeCentavos)}</Text>
                 </View>
                 {!pendiente || info.motivo ? (
                   <Text style={{ fontWeight: '700', color: colorEstado(info) }}>
@@ -287,9 +287,9 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
           <Text style={{ fontSize: 34, fontWeight: '800', color: colores.texto }}>{formatearPesos(importe.totalCentavos)}</Text>
           {importe.sinCobroEnDestino ? <Text style={[estilos.texto, { fontWeight: '700' }]}>Sin cobro en destino</Text> : null}
           {importe.subtotalesPorMarca.map((subtotal) => (
-            <View key={subtotal.marca} style={estilos.fila}>
-              <Text style={estilos.texto}>{subtotal.marca}</Text>
-              <Text style={estilos.texto}>{formatearPesos(subtotal.importeCentavos)}</Text>
+            <View key={subtotal.marca} style={[estilos.fila, { alignItems: 'flex-start' }]}>
+              <Text style={[estilos.texto, estilos.textoFlexible]}>{subtotal.marca}</Text>
+              <Text style={[estilos.texto, estilos.importeFijo, { fontWeight: '400' }]}>{formatearPesos(subtotal.importeCentavos)}</Text>
             </View>
           ))}
           {importe.remitosExcluidos.length ? (

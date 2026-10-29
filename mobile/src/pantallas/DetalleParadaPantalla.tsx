@@ -104,10 +104,10 @@ export function DetalleParadaPantalla({
           <View key={grupo.marca} style={estilos.tarjetaMarca}>
             {/* Cabecera del Grupo de Marca */}
             <View style={estilos.marcaCabecera}>
-              <View style={estilos.marcaBadge}>
+              <View style={[estilos.marcaBadge, { flexShrink: 1 }]}>
                 <Text style={estilos.marcaBadgeTexto}>🏷️ {grupo.marca}</Text>
               </View>
-              <Text style={[estilos.textoSuave, { fontWeight: '600', fontSize: 13 }]}>
+              <Text style={[estilos.textoSuave, { fontWeight: '600', fontSize: 13, flexShrink: 0 }]}>
                 {grupo.totalBultos} {grupo.totalBultos === 1 ? 'bulto' : 'bultos'} · {grupo.totalRemitos} {grupo.totalRemitos === 1 ? 'remito' : 'remitos'}
               </Text>
             </View>
@@ -152,10 +152,10 @@ export function DetalleParadaPantalla({
                     </View>
 
                     <View style={estilos.remitoItemDetalleFila}>
-                      <Text style={estilos.textoSuave}>
+                      <Text style={[estilos.textoSuave, estilos.textoFlexible]}>
                         📦 {doc.bultos} {doc.bultos === 1 ? 'bulto' : 'bultos'}
                       </Text>
-                      <Text style={[estilos.texto, { fontWeight: '600' }]}>
+                      <Text style={[estilos.texto, estilos.importeFijo, { fontWeight: '600' }]}>
                         {formatearPesos(doc.importeCentavos)}
                       </Text>
                     </View>
@@ -191,8 +191,8 @@ export function DetalleParadaPantalla({
         </View>
 
         <View style={estilos.tarjetaTotalizadorFila}>
-          <Text style={estilos.resumenCargaTexto}>💰 Importe Consolidado:</Text>
-          <Text style={[estilos.totalizadorValor, { color: colores.texto }]}>
+          <Text style={[estilos.resumenCargaTexto, estilos.textoFlexible]}>💰 Importe Consolidado:</Text>
+          <Text style={[estilos.totalizadorValor, estilos.importeFijo, { color: colores.texto }]}>
             {parada.sinCobroEnDestino
               ? 'Sin cobro en destino'
               : parada.totalImporteCentavos > 0

@@ -152,12 +152,13 @@ export function HojaDeRutaPantalla({ guardada, cola, error, cargando, enLinea, m
               {parada.comercio.localidad ? `, ${parada.comercio.localidad}` : ''}
             </Text>
 
-            <View style={estilos.fila}>
-              <Text style={estilos.resumenCargaTexto}>
+            {/* El texto de marcas se achica y baja de línea; el importe nunca se corta. */}
+            <View style={[estilos.fila, { alignItems: 'flex-start' }]}>
+              <Text style={[estilos.resumenCargaTexto, estilos.textoFlexible]}>
                 {parada.totalRemitos} remito{parada.totalRemitos !== 1 ? 's' : ''}
                 {parada.marcas.length ? ` · ${parada.marcas.join(', ')}` : ''}
               </Text>
-              <Text style={[estilos.texto, { fontWeight: '700' }]}>
+              <Text style={[estilos.texto, estilos.importeFijo]}>
                 {parada.sinCobroEnDestino ? 'Sin cobro' : formatearPesos(parada.totalImporteCentavos)}
               </Text>
             </View>
