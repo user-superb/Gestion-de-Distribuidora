@@ -54,23 +54,22 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
   const isSysAdmin = session.role === 'Administrador del sistema';
 
   const [seccion, setSeccion] = useState<Seccion>(() => {
-    if (session.role === 'Administrador del sistema') return 'configuracion';
     const path = window.location.pathname;
+    if (isSysAdmin && path.startsWith('/dashboard/configuracion')) return 'configuracion';
     if (path.endsWith('/conciliacion')) return 'conciliacion';
     return 'hojas';
   });
 
   useEffect(() => {
-    if (isSysAdmin) {
-      setSeccion('configuracion');
-      if (!window.location.pathname.startsWith('/dashboard/configuracion') && !window.location.pathname.endsWith('/usuarios')) {
-        window.history.replaceState(null, '', '/dashboard/configuracion');
-      }
-      return;
-    }
     const syncSection = () => {
       const path = window.location.pathname;
-      setSeccion(path.endsWith('/conciliacion') ? 'conciliacion' : 'hojas');
+      setSeccion(
+        isSysAdmin && path.startsWith('/dashboard/configuracion')
+          ? 'configuracion'
+          : path.endsWith('/conciliacion')
+            ? 'conciliacion'
+            : 'hojas'
+      );
     };
     window.addEventListener('popstate', syncSection);
     return () => window.removeEventListener('popstate', syncSection);
@@ -158,12 +157,11 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
   };
 
   if (isAdmin) {
-    const navItems = isSysAdmin
-      ? [{ id: 'configuracion' as const, label: 'Configuración', icon: Settings, path: '/dashboard/configuracion' }]
-      : [
-          { id: 'hojas' as const, label: 'Hojas de ruta', icon: Route, path: '/dashboard' },
-          { id: 'conciliacion' as const, label: 'Conciliación', icon: Landmark, path: '/dashboard/conciliacion' },
-        ];
+    const navItems = [
+      { id: 'hojas' as const, label: 'Hojas de ruta', icon: Route, path: '/dashboard' },
+      { id: 'conciliacion' as const, label: 'Conciliación', icon: Landmark, path: '/dashboard/conciliacion' },
+      ...(isSysAdmin ? [{ id: 'configuracion' as const, label: 'Configuración', icon: Settings, path: '/dashboard/configuracion' }] : []),
+    ];
 
     return (
       <div className="min-h-screen bg-[#F8FAFC]">
@@ -269,7 +267,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
                   </a>
                 );
               })}
-              {!isSysAdmin && [
+              {[
                 { label: 'Efectivo', icon: Banknote },
                 { label: 'Reportes', icon: ChartNoAxesCombined },
               ].map(({ label, icon: Icon }) => (
@@ -293,7 +291,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
         <main className="mx-auto max-w-screen-2xl px-4 py-6 sm:px-6 lg:py-8">
           <div className="mb-5">
             <h1 className="text-2xl font-extrabold text-marca-azul">
-              {isSysAdmin
+              {seccion === 'configuracion'
                 ? 'Configuración'
                 : seccion === 'hojas'
                 ? subseccionHojas === 'armadas'
@@ -302,7 +300,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
                 : 'Conciliación de transferencias'}
             </h1>
             <p className="mt-1 text-sm text-slate-600">
-              {isSysAdmin
+              {seccion === 'configuracion'
                 ? 'Administrá usuarios, marcas, comercios, sucursales y permisos.'
                 : seccion === 'hojas'
                 ? subseccionHojas === 'armadas'
@@ -311,7 +309,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
                 : 'Imputá los movimientos de la cuenta a los remitos pendientes.'}
             </p>
           </div>
-          {isSysAdmin ? (
+          {seccion === 'configuracion' && isSysAdmin ? (
             <Configuracion session={session} />
           ) : seccion === 'hojas' ? (
             <AgrupadorRemitos vistaInicial={subseccionHojas} onCambioVista={setSubseccionHojas} />
