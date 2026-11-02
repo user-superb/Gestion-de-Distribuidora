@@ -1,7 +1,7 @@
 // Cliente HTTP de la API móvil.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ErrorApi, ErrorRed } from './errores';
-import type { CobroDto, EntregaDto, HojaDeRuta, ItemEntregaLote, RechazoDto, Sesion } from './tipos';
+import type { AnulacionRendicionDto, CobroDto, EntregaDto, HojaDeRuta, ItemEntregaLote, RechazoDto, RendicionDto, Sesion } from './tipos';
 
 // Servidor predeterminado configurado para acceso desde celular / túnel
 export const DEFAULT_API_URL =
@@ -173,4 +173,14 @@ export async function confirmarTodaLaVisita(
 
 export async function enviarCobro(token: string, visitaId: string, cuerpo: CobroDto): Promise<void> {
   await pedir(`/movil/visitas/${visitaId}/cobro`, { method: 'POST', body: JSON.stringify(cuerpo) }, token);
+}
+
+/** HU #46: declara el efectivo que lleva el transportista al terminar la ruta. */
+export async function declararEfectivo(token: string, cuerpo: RendicionDto): Promise<void> {
+  await pedir('/movil/rendicion', { method: 'POST', body: JSON.stringify(cuerpo) }, token);
+}
+
+/** HU #47 E2: retracta la declaración antes de llegar a la caja. */
+export async function anularDeclaracion(token: string, cuerpo: AnulacionRendicionDto): Promise<void> {
+  await pedir('/movil/rendicion/anular', { method: 'POST', body: JSON.stringify(cuerpo) }, token);
 }

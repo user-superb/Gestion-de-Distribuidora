@@ -1,6 +1,7 @@
 // Hoja de ruta del día: paradas en el orden planificado (HU #20).
 // Correcciones del cliente (24/10): dos pantallas "Por entregar" / "Entregadas", botón Actualizar
 // y sin el desglose de remitos en la lista (los remitos se ven al entrar a la parada).
+// HU #46: acceso a "Rendir efectivo", destacado cuando ya no quedan paradas por entregar.
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Image, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import type { HojaGuardada } from '../almacenamiento';
@@ -9,6 +10,7 @@ import { formatearPesos } from '../dominio/dinero';
 import type { ColaPorClave } from '../dominio/estadoVisita';
 import { faltaCobrar, separarParadas } from '../dominio/organizacion';
 import { consolidarParadas } from '../dominio/parada';
+import { estadoDeclaracion, textoEstadoDeclaracion } from '../dominio/rendicion';
 import { colores, estilos } from '../estilos';
 import type { EstadoOperativoParada, ParadaConsolidada } from '../tipos';
 
@@ -21,6 +23,7 @@ interface Props {
   mensaje: string | null;
   onRecargar: () => void;
   onAbrirParada: (parada: ParadaConsolidada) => void;
+  onRendir: () => void;
   onCerrarSesion: () => void;
 }
 
@@ -33,7 +36,7 @@ const ESTILO_BADGE_ESTADO: Record<EstadoOperativoParada, { contenedor: any; text
   Rechazado: { contenedor: estilos.badgeRechazado, texto: estilos.badgeRechazadoTexto },
 };
 
-export function HojaDeRutaPantalla({ guardada, cola, error, cargando, enLinea, mensaje, onRecargar, onAbrirParada, onCerrarSesion }: Props) {
+export function HojaDeRutaPantalla({ guardada, cola, error, cargando, enLinea, mensaje, onRecargar, onAbrirParada, onRendir, onCerrarSesion }: Props) {
   const hoja = guardada?.hoja;
   const sinSincronizar = [...cola.values()].filter((item) => item.estado === 'pendiente').length;
   const [pestana, setPestana] = useState<Pestana>('porEntregar');
@@ -41,6 +44,9 @@ export function HojaDeRutaPantalla({ guardada, cola, error, cargando, enLinea, m
   const paradas = useMemo(() => consolidarParadas(hoja?.visitas || [], cola), [hoja?.visitas, cola]);
   const { porEntregar, entregadas } = useMemo(() => separarParadas(paradas, cola), [paradas, cola]);
   const lista = pestana === 'porEntregar' ? porEntregar : entregadas;
+  const declaracion = hoja ? estadoDeclaracion(hoja, cola) : null;
+  const rutaTerminada = paradas.length > 0 && porEntregar.length === 0;
+  const destacarRendicion = rutaTerminada && declaracion?.estado === 'sin_declarar';
 
   const encabezado = (
     <View style={{ gap: 10 }}>
@@ -102,6 +108,30 @@ export function HojaDeRutaPantalla({ guardada, cola, error, cargando, enLinea, m
       {sinSincronizar > 0 ? <Aviso tono="info">{sinSincronizar} operación(es) pendientes de sincronizar.</Aviso> : null}
       {mensaje ? <Aviso tono="ok">{mensaje}</Aviso> : null}
       {error ? <Aviso tono="error">{error}</Aviso> : null}
+
+      {/* HU #46: declarar el efectivo al terminar la ruta */}
+      {hoja && paradas.length > 0 && declaracion ? (
+        <Pressable
+          onPress={onRendir}
+          accessibilityRole="button"
+          accessibilityLabel={`Rendir efectivo, ${textoEstadoDeclaracion(declaracion)}`}
+          style={[
+            destacarRendicion ? estilos.boton : estilos.botonSecundario,
+            { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, gap: 8 },
+          ]}
+        >
+          <Text style={[destacarRendicion ? estilos.botonTexto : estilos.botonSecundarioTexto, { fontSize: 17 }]}>💵 Rendir efectivo</Text>
+          <Text
+            style={[
+              { fontSize: 14, fontWeight: '700', flexShrink: 1, textAlign: 'right' },
+              { color: destacarRendicion ? colores.primarioTexto : declaracion.estado === 'sin_sincronizar' ? colores.alerta : colores.textoSuave },
+            ]}
+            numberOfLines={1}
+          >
+            {textoEstadoDeclaracion(declaracion)}
+          </Text>
+        </Pressable>
+      ) : null}
 
       {/* Corrección 7: dos pantallas, por entregar y entregadas */}
       {paradas.length > 0 ? (
