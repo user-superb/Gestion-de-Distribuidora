@@ -360,29 +360,47 @@ CREATE INDEX movimiento_pendientes_idx
     WHERE estado IN ('sin_imputar','parcial');
 
 -- Rendición física del efectivo de una jornada, validada por un supervisor.
--- Es un circuito distinto de la conciliación bancaria.
+-- Es un circuito distinto de la conciliación bancaria (Épica 2.3, HU #46 a #50).
+-- Estados: pendiente (declarada desde la app) · anulada (retractada por el transportista)
+--          con_diferencia (contada, con faltante o sobrante justificado) · validada (cierra la hoja).
 CREATE TABLE rendicion_efectivo (
     id                      bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     hoja_de_ruta_id         bigint      NOT NULL REFERENCES hoja_de_ruta(id),
+    transportista_id        bigint      REFERENCES usuario(id),
     declarado_centavos      bigint      NOT NULL DEFAULT 0,
+    declarado_en            timestamptz,
+    -- Idempotencia de la sincronización offline de la app.
+    clave_idempotencia      uuid,
+    anulada_en              timestamptz,
     rendido_centavos        bigint,
+    -- Conteo de billetes del supervisor: { billetes: { "<centavos>": cantidad }, monedasCentavos }.
+    conteo_billetes         jsonb,
     motivo_diferencia       text,
+    diferencia_registrada_por bigint    REFERENCES usuario(id),
+    diferencia_registrada_en  timestamptz,
     estado                  text        NOT NULL DEFAULT 'pendiente',
     validado_por            bigint      REFERENCES usuario(id),
     validado_en             timestamptz,
-    CONSTRAINT rendicion_unica_por_hoja UNIQUE (hoja_de_ruta_id),
+    creado_en               timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT rendicion_estado_valido
-        CHECK (estado IN ('pendiente','validada','rechazada')),
-    -- No se puede cerrar una rendición con diferencia sin explicar por qué.
+        CHECK (estado IN ('pendiente','con_diferencia','validada','rechazada','anulada')),
+    CONSTRAINT rendicion_importes_no_negativos
+        CHECK (declarado_centavos >= 0 AND (rendido_centavos IS NULL OR rendido_centavos >= 0)),
+    -- No se puede registrar ni cerrar una rendición con diferencia sin explicar por qué.
     CONSTRAINT rendicion_motivo_si_hay_diferencia
         CHECK (
-            estado <> 'validada'
+            estado NOT IN ('validada','con_diferencia')
             OR rendido_centavos = declarado_centavos
             OR motivo_diferencia IS NOT NULL
         ),
     CONSTRAINT rendicion_validacion_coherente
-        CHECK (estado = 'pendiente' OR (validado_por IS NOT NULL AND validado_en IS NOT NULL))
+        CHECK (estado NOT IN ('validada','rechazada') OR (validado_por IS NOT NULL AND validado_en IS NOT NULL))
 );
+
+-- Una hoja puede tener declaraciones anuladas, pero una sola activa.
+CREATE UNIQUE INDEX rendicion_activa_por_hoja ON rendicion_efectivo (hoja_de_ruta_id) WHERE estado <> 'anulada';
+CREATE UNIQUE INDEX rendicion_clave_unica ON rendicion_efectivo (clave_idempotencia) WHERE clave_idempotencia IS NOT NULL;
+CREATE INDEX rendicion_estado_idx ON rendicion_efectivo (estado, declarado_en DESC);
 
 -- Un cobro cuelga de la VISITA, no del remito: en una visita se puede
 -- pagar con varios medios a la vez. La relación con los remitos que

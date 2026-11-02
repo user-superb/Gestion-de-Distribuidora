@@ -271,6 +271,19 @@ export const cobroService = {
       [hoja.id]
     );
 
+    // HU #46: efectivo cobrado por visita, para sugerir el total a rendir en la app.
+    const efectivoRes = await db.query(
+      `SELECT co.visita_id::text AS visita_id, co.importe_centavos
+       FROM cobro co
+       JOIN visita v ON v.id = co.visita_id
+       WHERE v.hoja_de_ruta_id::text = $1 AND co.medio_pago = 'efectivo'`,
+      [hoja.id]
+    );
+    const efectivoPorVisita = new Map<string, number>();
+    for (const row of efectivoRes.rows) {
+      efectivoPorVisita.set(row.visita_id, (efectivoPorVisita.get(row.visita_id) || 0) + Number(row.importe_centavos));
+    }
+
     const visitas = [];
     for (const v of visitasRes.rows) {
       const remitos = await getRemitosVisita(db, v.id);
@@ -291,6 +304,7 @@ export const cobroService = {
         },
         remitos,
         importe: calcularImporteVisita(remitos),
+        efectivoCobradoCentavos: efectivoPorVisita.get(v.id) || 0,
       });
     }
 

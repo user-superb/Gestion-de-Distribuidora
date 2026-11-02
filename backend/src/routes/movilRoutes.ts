@@ -3,6 +3,7 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { requireAuth } from './authRoutes.js';
 import { CobroError, cobroService, fechaArgentina } from '../services/cobroService.js';
+import { RendicionError, rendicionService } from '../services/rendicionService.js';
 
 export const movilRouter = Router();
 
@@ -38,7 +39,9 @@ movilRouter.get('/hoja-de-ruta', async (req, res) => {
     if (!hoja) {
       return res.json(null);
     }
-    return res.json(hoja);
+    // HU #46: la app necesita saber si ya se declaró el efectivo de esta hoja.
+    const rendicion = await rendicionService.getRendicionActivaDeHoja(hoja.id).catch(() => null);
+    return res.json({ ...hoja, rendicion });
   } catch (error) {
     return responderError(error, res);
   }
@@ -51,5 +54,31 @@ movilRouter.post('/visitas/:id/cobro', async (req, res) => {
     return res.status(resultado.duplicado ? 200 : 201).json(resultado);
   } catch (error) {
     return responderError(error, res);
+  }
+});
+
+function responderErrorRendicion(error: unknown, res: Response) {
+  if (error instanceof RendicionError) {
+    return res.status(error.status).json({ error: 'RENDICION_INVALIDA', message: error.message, ...error.details });
+  }
+  return responderError(error, res);
+}
+
+/** POST /api/movil/rendicion · HU #46: declaración del efectivo al terminar la ruta. */
+movilRouter.post('/rendicion', async (req, res) => {
+  try {
+    const resultado = await rendicionService.declarar(getUsuarioId(req), req.body);
+    return res.status(resultado.duplicado ? 200 : 201).json(resultado);
+  } catch (error) {
+    return responderErrorRendicion(error, res);
+  }
+});
+
+/** POST /api/movil/rendicion/anular · HU #47 E2: el transportista retracta su declaración. */
+movilRouter.post('/rendicion/anular', async (req, res) => {
+  try {
+    return res.json(await rendicionService.anular(getUsuarioId(req), req.body));
+  } catch (error) {
+    return responderErrorRendicion(error, res);
   }
 });
