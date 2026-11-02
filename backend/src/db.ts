@@ -190,6 +190,25 @@ function setupMemoryDb() {
       creado_en timestamp DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS rendicion_efectivo (
+      id serial PRIMARY KEY,
+      hoja_de_ruta_id bigint NOT NULL,
+      transportista_id bigint,
+      declarado_centavos bigint NOT NULL DEFAULT 0,
+      declarado_en timestamp,
+      clave_idempotencia text,
+      anulada_en timestamp,
+      rendido_centavos bigint,
+      conteo_billetes jsonb,
+      motivo_diferencia text,
+      diferencia_registrada_por bigint,
+      diferencia_registrada_en timestamp,
+      estado text NOT NULL DEFAULT 'pendiente',
+      validado_por bigint,
+      validado_en timestamp,
+      creado_en timestamp DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS auditoria (
       id serial PRIMARY KEY,
       entidad text NOT NULL,

@@ -10,6 +10,7 @@ import { estilos, marca } from './src/estilos';
 import { DetalleParadaPantalla } from './src/pantallas/DetalleParadaPantalla';
 import { VisitaPantalla } from './src/pantallas/VisitaPantalla';
 import { HojaDeRutaPantalla } from './src/pantallas/HojaDeRutaPantalla';
+import { RendicionPantalla } from './src/pantallas/RendicionPantalla';
 import { LoginPantalla } from './src/pantallas/LoginPantalla';
 import type { ParadaConsolidada, Sesion } from './src/tipos';
 import { useJornada } from './src/useJornada';
@@ -20,6 +21,7 @@ export default function App() {
   const [avisoLogin, setAvisoLogin] = useState<string | null>(null);
   const [visitaAbierta, setVisitaAbierta] = useState<string | null>(null);
   const [paradaDetalle, setParadaDetalle] = useState<ParadaConsolidada | null>(null);
+  const [rendicionAbierta, setRendicionAbierta] = useState(false);
   const [mensaje, setMensaje] = useState<string | null>(null);
 
   const red = useNetInfo();
@@ -28,6 +30,10 @@ export default function App() {
   // Botón atrás de Android: vuelve a la hoja de ruta.
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (rendicionAbierta) {
+        setRendicionAbierta(false);
+        return true;
+      }
       if (visitaAbierta) {
         setVisitaAbierta(null);
         setParadaDetalle(null);
@@ -40,7 +46,7 @@ export default function App() {
       return false;
     });
     return () => sub.remove();
-  }, [visitaAbierta, paradaDetalle]);
+  }, [visitaAbierta, paradaDetalle, rendicionAbierta]);
 
   useEffect(() => {
     Promise.all([leerSesion(), leerApiUrlGuardada()]).then(([guardada]) => {
@@ -56,6 +62,7 @@ export default function App() {
     setSesion(null);
     setParadaDetalle(null);
     setVisitaAbierta(null);
+    setRendicionAbierta(false);
     setAvisoLogin('Tu sesión venció. Volvé a ingresar: lo guardado en el celular se envía después.');
   }, []);
 
@@ -78,6 +85,7 @@ export default function App() {
       setSesion(null);
       setParadaDetalle(null);
       setVisitaAbierta(null);
+      setRendicionAbierta(false);
     };
     if (pendientes > 0) {
       Alert.alert('Operaciones sin sincronizar', `Tenés ${pendientes} entrega(s) o cobro(s) sin enviar. Quedan guardados y se envían al volver a ingresar.`, [
@@ -163,6 +171,14 @@ export default function App() {
           </View>
         ) : !sesion ? (
           <LoginPantalla aviso={avisoLogin} onIngreso={ingresar} />
+        ) : rendicionAbierta && jornada.guardada ? (
+          <RendicionPantalla
+            hoja={jornada.guardada.hoja}
+            cola={jornada.cola}
+            enLinea={enLinea}
+            onCambio={jornada.recargar}
+            onVolver={() => setRendicionAbierta(false)}
+          />
         ) : visita ? (
           <VisitaPantalla
             visita={visita}
@@ -197,6 +213,10 @@ export default function App() {
             mensaje={mensaje}
             onRecargar={jornada.recargar}
             onAbrirParada={abrirParada}
+            onRendir={() => {
+              setMensaje(null);
+              setRendicionAbierta(true);
+            }}
             onCerrarSesion={salir}
           />
         )}

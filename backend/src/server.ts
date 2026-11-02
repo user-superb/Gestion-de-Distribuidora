@@ -12,6 +12,8 @@ import { usuarioRouter } from './routes/usuarioRoutes.js';
 import { configuracionRouter } from './routes/configuracionRoutes.js';
 import { movilRouter } from './routes/movilRoutes.js';
 import { transportistaRouter } from './routes/transportistaRoutes.js';
+import { efectivoRouter } from './routes/efectivoRoutes.js';
+import { asegurarEsquemaRendicion } from './services/rendicionService.js';
 
 const rootEnv = path.resolve(process.cwd(), '.env');
 const backendEnv = path.resolve(process.cwd(), 'backend', '.env');
@@ -41,6 +43,7 @@ app.get('/', async (_req, res) => {
       hojasDeRuta: '/api/hojas-de-ruta',
       movil: '/api/movil/hoja-de-ruta',
       transportista: '/api/transportista/hoja-activa',
+      efectivo: '/api/efectivo/rendiciones',
     },
     timestamp: new Date().toISOString(),
   });
@@ -61,6 +64,7 @@ app.use('/api', authRouter);
 app.use('/api/movil', movilRouter);
 app.use('/api/transportista', transportistaRouter);
 app.use('/api/conciliacion', conciliacionRouter);
+app.use('/api/efectivo', efectivoRouter);
 app.use('/api', remitoRouter);
 app.use('/api', usuarioRouter);
 app.use('/api', configuracionRouter);
@@ -96,6 +100,12 @@ if (process.env.NODE_ENV !== 'test') {
         `);
       } catch (e: any) {
         console.warn('⚠️  Aviso de sincronización DDL al inicio:', e.message);
+      }
+      try {
+        // Épica 2.3 (HU #46 a #50): columnas y estados de la rendición de efectivo.
+        await asegurarEsquemaRendicion();
+      } catch (e: any) {
+        console.warn('⚠️  No se pudo aplicar la migración de rendición de efectivo:', e.message);
       }
     } else {
       console.log(`⚠️  PostgreSQL no responde en DATABASE_URL. Verificá que el servicio esté iniciado o corré 'npm run db:init' cuando esté disponible.`);

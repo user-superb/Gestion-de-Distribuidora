@@ -153,7 +153,7 @@ describe('Cola de operaciones sin conexión', () => {
     await cola.encolar(entrega('10', '2026-10-15T07:00:00.000Z'));
     await cola.sincronizar();
     await cola.encolar(cobro('2', 'b'), new Date('2026-10-19T08:00:00.000Z'));
-    assert.deepEqual((await cola.listar()).map((item) => item.visitaId), ['2']);
+    assert.deepEqual((await cola.listar()).map((item) => ('visitaId' in item ? item.visitaId : null)), ['2']);
   });
 
   describe('HU #23 · Operación de lote multimarca sin conexión (Regla 4 y Escenario 3)', () => {

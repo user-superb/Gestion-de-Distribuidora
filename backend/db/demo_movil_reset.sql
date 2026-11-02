@@ -7,6 +7,24 @@
 
 BEGIN;
 
+-- Rendiciones de efectivo de la hoja de HOY (HU #46 a #50): primero se liberan sus cobros.
+UPDATE cobro SET rendicion_id = NULL
+WHERE rendicion_id IN (
+    SELECT re.id
+    FROM rendicion_efectivo re
+    JOIN hoja_de_ruta h ON h.id = re.hoja_de_ruta_id
+    JOIN usuario u ON u.id = h.transportista_id
+    WHERE u.usuario = 'chofer'
+      AND h.fecha_reparto = timezone('America/Argentina/Buenos_Aires', now())::date
+);
+
+DELETE FROM rendicion_efectivo re
+USING hoja_de_ruta h, usuario u
+WHERE h.id = re.hoja_de_ruta_id
+  AND u.id = h.transportista_id
+  AND u.usuario = 'chofer'
+  AND h.fecha_reparto = timezone('America/Argentina/Buenos_Aires', now())::date;
+
 DELETE FROM remito
 WHERE visita_id IN (
     SELECT v.id

@@ -43,6 +43,8 @@ export interface Visita {
   };
   remitos: Remito[];
   importe: ImporteVisita;
+  /** Efectivo ya cobrado en el servidor para esta visita (HU #46). */
+  efectivoCobradoCentavos?: number;
 }
 
 export interface HojaDeRuta {
@@ -52,6 +54,18 @@ export interface HojaDeRuta {
   estado: string;
   sucursal: string;
   visitas: Visita[];
+  /** Declaración de efectivo activa de la hoja (HU #46), o null si todavía no se declaró. */
+  rendicion?: RendicionHoja | null;
+}
+
+export type EstadoRendicionServidor = 'pendiente' | 'con_diferencia' | 'validada' | 'rechazada';
+
+export interface RendicionHoja {
+  id: string;
+  estado: EstadoRendicionServidor;
+  declaradoCentavos: number;
+  declaradoEn: string | null;
+  claveIdempotencia: string | null;
 }
 
 export type EstadoOperativoParada = 'Pendiente' | 'En curso' | 'Entregado' | 'Rechazado';
@@ -136,4 +150,18 @@ export interface CobroDto {
   pagos: PagoDto[];
   registradoEn: string;
   ubicacion: Ubicacion | null;
+}
+
+/** Cuerpo de POST /api/movil/rendicion (HU #46). */
+export interface RendicionDto {
+  hojaDeRutaId: string;
+  declaradoCentavos: number;
+  claveIdempotencia: string;
+  declaradoEn: string;
+}
+
+/** Cuerpo de POST /api/movil/rendicion/anular (HU #47 E2). */
+export interface AnulacionRendicionDto {
+  claveIdempotencia: string;
+  anuladaEn: string;
 }
