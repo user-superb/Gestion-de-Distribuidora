@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { db } from '../db.js';
+import { esRolGlobal } from '../services/conciliacionService.js';
 import { requireAuth } from './authRoutes.js';
 
 export const configuracionRouter = Router();
@@ -388,7 +389,7 @@ configuracionRouter.put('/configuracion/permisos-sucursal/:usuarioId/:sucursalId
   const client = await db.getPool().connect();
   try {
     await client.query('BEGIN');
-    const validUser = await client.query("SELECT id FROM usuario WHERE id = $1 AND activo = true AND rol <> 'Administrador del sistema'", [usuarioId]);
+    const validUser = await client.query("SELECT id, rol FROM usuario WHERE id = $1 AND activo = true AND rol <> 'Administrador del sistema'", [usuarioId]);
     const validBranch = await client.query('SELECT id FROM sucursal WHERE id = $1 AND activa = true', [sucursalId]);
     const validCodes = await Promise.all(codes.map((code) => client.query('SELECT codigo FROM permiso WHERE codigo = $1', [code])));
     if (!validUser.rows.length || !validBranch.rows.length || validCodes.some((result) => !result.rows.length)) {

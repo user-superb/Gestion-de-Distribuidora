@@ -40,7 +40,7 @@ CREATE TABLE usuario (
     -- Hash de contraseña con bcrypt / scrypt / Argon2, NUNCA SHA-256.
     -- El salt va embebido en el string del algoritmo.
     password_hash   text        NOT NULL,
-    rol             text        NOT NULL DEFAULT 'Administrativo' CHECK (rol IN ('Administrador del sistema', 'Administrativo', 'Transportista', 'Supervisor', 'Gerente')),
+    rol             text        NOT NULL DEFAULT 'Administrativo' CHECK (rol IN ('Administrador del sistema', 'Administrativo', 'Transportista', 'Supervisor', 'Gerente', 'CEO')),
     limite_autorizacion_centavos bigint NOT NULL DEFAULT 0 CHECK (limite_autorizacion_centavos >= 0),
     es_transportista boolean    NOT NULL DEFAULT false,
     dispositivo_conectado boolean NOT NULL DEFAULT true,

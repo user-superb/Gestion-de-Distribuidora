@@ -5,7 +5,7 @@ import { requireAuth } from './authRoutes.js';
 
 export const usuarioRouter = Router();
 
-const roles = ['Administrador del sistema', 'Administrativo', 'Transportista', 'Supervisor', 'Gerente'];
+const roles = ['Administrador del sistema', 'Administrativo', 'Transportista', 'Supervisor', 'Gerente', 'CEO'];
 const requireSystemAdmin = (req: any, res: any, next: any) => {
   if (req.userSession?.role !== 'Administrador del sistema') {
     return res.status(403).json({ error: 'FORBIDDEN', message: 'Solo el administrador del sistema puede administrar usuarios.' });

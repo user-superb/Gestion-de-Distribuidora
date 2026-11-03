@@ -7,7 +7,7 @@ import { ConciliacionError, conciliacionService } from '../services/conciliacion
 export const conciliacionRouter = Router();
 
 conciliacionRouter.use(requireAuth, (req: Request, res: Response, next: NextFunction) => {
-  if (!['Administrativo', 'Administrador del sistema', 'Gerente'].includes((req as any).userSession?.role)) {
+  if (!['Administrativo', 'Administrador del sistema', 'Gerente', 'CEO'].includes((req as any).userSession?.role)) {
     return res.status(403).json({ error: 'FORBIDDEN', message: 'Solo un usuario administrativo puede conciliar movimientos.' });
   }
   next();
@@ -15,7 +15,7 @@ conciliacionRouter.use(requireAuth, (req: Request, res: Response, next: NextFunc
 
 const comprobante = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }).single('comprobante');
 const requireAdministrativo = (req: Request, res: Response, next: NextFunction) => {
-  if (!['Administrativo', 'Administrador del sistema'].includes((req as any).userSession?.role)) {
+  if (!['Administrativo', 'Administrador del sistema', 'Gerente', 'CEO'].includes((req as any).userSession?.role)) {
     return res.status(403).json({ error: 'FORBIDDEN', message: 'Solo un usuario administrativo puede imputar movimientos.' });
   }
   next();
@@ -47,31 +47,31 @@ conciliacionRouter.get('/movimientos', async (req, res) => {
     return res.status(400).json({ error: 'INVALID_DATE', message: 'La fecha debe tener formato AAAA-MM-DD.' });
   }
   try {
-    return res.json(await conciliacionService.getMovimientosPendientes(fecha));
+    return res.json(await conciliacionService.getMovimientosPendientes(fecha, (req as any).userSession));
   } catch (error) {
     return responderError(error, res);
   }
 });
 
-conciliacionRouter.get('/remitos-pendientes', async (_req, res) => {
+conciliacionRouter.get('/remitos-pendientes', async (req, res) => {
   try {
-    return res.json(await conciliacionService.getRemitosPendientes());
+    return res.json(await conciliacionService.getRemitosPendientes((req as any).userSession));
   } catch (error) {
     return responderError(error, res);
   }
 });
 
-conciliacionRouter.get('/discrepancias', async (_req, res) => {
+conciliacionRouter.get('/discrepancias', async (req, res) => {
   try {
-    return res.json(await conciliacionService.getDiscrepanciasPendientes());
+    return res.json(await conciliacionService.getDiscrepanciasPendientes((req as any).userSession));
   } catch (error) {
     return responderError(error, res);
   }
 });
 
-conciliacionRouter.get('/sugerencias', async (_req, res) => {
+conciliacionRouter.get('/sugerencias', async (req, res) => {
   try {
-    return res.json(await conciliacionService.getSugerencias());
+    return res.json(await conciliacionService.getSugerencias((req as any).userSession));
   } catch (error) {
     return responderError(error, res);
   }
@@ -96,7 +96,7 @@ conciliacionRouter.get('/movimientos-huerfanos', async (req, res) => {
       cuentaId: cuentaId as string | undefined,
       desde: desde as string | undefined,
       hasta: hasta as string | undefined,
-    }));
+    }, (req as any).userSession));
   } catch (error) {
     return responderError(error, res);
   }

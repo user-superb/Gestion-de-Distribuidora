@@ -152,6 +152,13 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
           title: 'Módulo de Gestión Estratégica (/management/metrics)',
           desc: 'Conciliación bancaria consolidada, costos y métricas operativas.',
         };
+      case 'CEO':
+        return {
+          icon: <BarChart3 className="w-4 h-4 text-rose-600" />,
+          color: 'bg-rose-50 border-rose-200 text-rose-800',
+          title: 'Dirección General Ejecutiva (/management/metrics)',
+          desc: 'Visibilidad estratégica corporativa global irrestricta.',
+        };
     }
   };
 

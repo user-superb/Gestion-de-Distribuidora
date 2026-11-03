@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { UserRole, UserSession } from '../../types/auth';
 import { Check, Edit2, Plus, Shield, UserRound, X } from 'lucide-react';
 
-const roles: UserRole[] = ['Administrador del sistema', 'Administrativo', 'Transportista', 'Supervisor', 'Gerente'];
+const roles: UserRole[] = ['Administrador del sistema', 'Administrativo', 'Transportista', 'Supervisor', 'Gerente', 'CEO'];
 import { API_ROOT as API_BASE_URL } from '../../config/api';
 
 interface UserRecord {

@@ -67,6 +67,16 @@ export const GestionPermisosSucursal: React.FC<{ session: UserSession }> = ({ se
         <label className="text-sm text-slate-700">Usuario<select value={userId} onChange={(e) => { setSaved(false); setUserId(e.target.value); }} className="mt-1 w-full rounded border border-slate-300 px-3 py-2">{users.map((user) => <option key={user.id} value={user.id}>{user.nombre} · {user.rol}</option>)}</select></label>
         <label className="text-sm text-slate-700">Sucursal<select value={branchId} onChange={(e) => { setSaved(false); setBranchId(e.target.value); }} className="mt-1 w-full rounded border border-slate-300 px-3 py-2">{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.nombre}</option>)}</select></label>
       </div>
+      {(() => {
+        const currentUser = users.find((u) => u.id === userId);
+        const isGlobal = currentUser?.rol === 'CEO' || currentUser?.rol === 'Gerente';
+        if (!isGlobal) return null;
+        return (
+          <div role="status" className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            ℹ️ Este usuario posee un perfil jerárquico global inamovible ({currentUser?.rol}). El sistema ignora restricciones locales en su visibilidad de datos.
+          </div>
+        );
+      })()}
       <fieldset className="rounded border border-slate-200 bg-white p-4">
         <legend className="px-1 text-sm font-medium text-slate-800">Acciones permitidas</legend>
         <div className="grid gap-3 sm:grid-cols-2">
