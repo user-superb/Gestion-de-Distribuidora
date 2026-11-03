@@ -232,7 +232,7 @@ export const conciliacionService = {
     let fechaFiltro = '';
     if (fecha) {
       params.push(fecha);
-      fechaFiltro = "AND (mb.fecha_hora AT TIME ZONE 'America/Argentina/Buenos_Aires')::date = $" + params.length + "::date";
+      fechaFiltro = "AND mb.fecha_hora::date = $" + params.length + "::date";
     }
 
     let sucursalFiltro = '';
@@ -304,11 +304,13 @@ export const conciliacionService = {
          ) i ON i.movimiento_bancario_id = mb.id
          WHERE mb.estado IN ('sin_imputar', 'parcial')
            AND mb.importe_centavos > COALESCE(i.imputado_centavos, 0)
+           ${movSucursalFiltro}
            AND NOT EXISTS (
              SELECT 1 FROM discrepancia_conciliacion dc
              WHERE dc.estado IN ('pendiente','escalada') AND mb.id = ANY(dc.movimiento_ids)
            )
-         ORDER BY mb.fecha_hora DESC, mb.id DESC`
+         ORDER BY mb.fecha_hora DESC, mb.id DESC`,
+        paramsMov
       ),
       db.query(
         `SELECT r.id::text AS remito_id, r.numero, r.sucursal_id::text AS sucursal_id,
@@ -319,7 +321,9 @@ export const conciliacionService = {
          JOIN remito_saldo rs ON rs.remito_id = r.id
          LEFT JOIN visita v ON v.id = r.visita_id
          WHERE r.estado = 'entregado' AND rs.saldo_centavos > 0
-         ORDER BY r.entregado_en DESC NULLS LAST, r.id DESC`
+           ${remSucursalFiltro}
+         ORDER BY r.entregado_en DESC NULLS LAST, r.id DESC`,
+        paramsRem
       ),
     ]);
 
@@ -438,7 +442,8 @@ export const conciliacionService = {
        WHERE rs.saldo_centavos > 0
          AND r.estado = 'entregado'
          ${sucursalFiltro}
-       ORDER BY r.entregado_en DESC NULLS LAST, c.razon_social, r.numero`
+       ORDER BY r.entregado_en DESC NULLS LAST, c.razon_social, r.numero`,
+      params
     );
     return result.rows;
   },
