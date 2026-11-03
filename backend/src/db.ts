@@ -363,7 +363,12 @@ function setupMemoryDb() {
     ON CONFLICT (sucursal_id, alias) DO NOTHING;
 
     INSERT INTO hoja_de_ruta (sucursal_id, transportista_id, estado) VALUES
-      (1, 2, 'borrador')
+      (1, 2, 'borrador'),
+      (1, 2, 'en_curso'),
+      (1, 2, 'en_curso'),
+      (1, 2, 'en_curso'),
+      (1, 2, 'en_curso'),
+      (1, 2, 'en_curso')
     ON CONFLICT DO NOTHING;
 
     INSERT INTO marca (nombre) VALUES
