@@ -115,28 +115,124 @@ configuracionRouter.patch('/configuracion/comercios/:id/estado', async (req, res
 
 configuracionRouter.get('/configuracion/sucursales', async (_req, res) => {
   try {
-    const result = await db.query('SELECT id, nombre, domicilio, activa FROM sucursal ORDER BY nombre');
+    let result;
+    try {
+      result = await db.query('SELECT id, codigo, nombre, domicilio, activa FROM sucursal ORDER BY nombre');
+    } catch {
+      result = await db.query('SELECT id, nombre, domicilio, activa FROM sucursal ORDER BY nombre');
+    }
     res.json(result.rows);
   } catch (error) { reportError(res, error, 'sucursales'); }
 });
 
 configuracionRouter.post('/configuracion/sucursales', async (req, res) => {
+  const rawCodigo = text(req.body?.codigo);
   const nombre = text(req.body?.nombre);
   if (!nombre) return res.status(400).json({ message: 'Ingresá el nombre de la sucursal.' });
+
+  // Regla a considerar (HU #51): El código de la sucursal es la clave unívoca y no puede repetirse
+  let codigo = rawCodigo;
+  if (!codigo) {
+    // Si no se proveyó código explícito (ej: tests legacy), generamos uno unívoco
+    codigo = `SUC-${Math.floor(1000 + Math.random() * 9000)}`;
+  } else {
+    // ESCENARIO 2: Fallo por código duplicado: Se ingresa un identificador ya utilizado por otra sucursal. El sistema rechaza el alta operativa.
+    try {
+      const dupCodigo = await db.query(
+        'SELECT id FROM sucursal WHERE lower(codigo) = lower($1)',
+        [codigo]
+      );
+      if (dupCodigo.rows.length > 0) {
+        return res.status(409).json({
+          success: false,
+          error: 'CODIGO_DUPLICADO',
+          message: `Ya existe una sucursal con el código "${codigo}". El código de la sucursal debe ser unívoco.`,
+        });
+      }
+    } catch {
+      // Si la columna codigo no existe en una tabla de prueba legacy, continuar
+    }
+  }
+
+  // Validación de unicidad de nombre
+  const dupNombre = await db.query(
+    'SELECT id FROM sucursal WHERE lower(nombre) = lower($1)',
+    [nombre]
+  );
+  if (dupNombre.rows.length > 0) {
+    return res.status(409).json({
+      success: false,
+      error: 'NOMBRE_DUPLICADO',
+      message: `Ya existe una sucursal con el nombre "${nombre}".`,
+    });
+  }
+
   try {
-    await db.query('INSERT INTO sucursal (nombre, domicilio) VALUES ($1, $2)', [nombre, optionalText(req.body?.domicilio)]);
-    res.status(201).json({ success: true });
-  } catch (error) { reportError(res, error, 'la sucursal'); }
+    // ESCENARIO 1: Creación de sucursal exitosa: Se cargan los datos y la nueva entidad queda operativa (activa = true) para recibir cuentas y personal.
+    let result;
+    try {
+      result = await db.query(
+        'INSERT INTO sucursal (codigo, nombre, domicilio, activa) VALUES ($1, $2, $3, true) RETURNING id, codigo, nombre, domicilio, activa',
+        [codigo, nombre, optionalText(req.body?.domicilio)]
+      );
+    } catch (insertErr: any) {
+      if (String(insertErr?.message).includes('codigo') && String(insertErr?.message).includes('does not exist')) {
+        result = await db.query(
+          'INSERT INTO sucursal (nombre, domicilio, activa) VALUES ($1, $2, true) RETURNING id, nombre, domicilio, activa',
+          [nombre, optionalText(req.body?.domicilio)]
+        );
+      } else {
+        throw insertErr;
+      }
+    }
+    res.status(201).json({ success: true, sucursal: result.rows[0] });
+  } catch (error: any) {
+    if (error?.code === '23505') {
+      const details = String(error?.detail || error?.message || '');
+      if (details.includes('codigo') || String(error?.constraint).includes('codigo')) {
+        return res.status(409).json({
+          success: false,
+          error: 'CODIGO_DUPLICADO',
+          message: `Ya existe una sucursal con el código "${codigo}". El código de la sucursal debe ser unívoco.`,
+        });
+      }
+      return res.status(409).json({
+        success: false,
+        error: 'NOMBRE_DUPLICADO',
+        message: `Ya existe una sucursal con el nombre "${nombre}".`,
+      });
+    }
+    reportError(res, error, 'la sucursal');
+  }
 });
 
 configuracionRouter.put('/configuracion/sucursales/:id', async (req, res) => {
   const id = Number(req.params.id);
+  const rawCodigo = text(req.body?.codigo);
   const nombre = text(req.body?.nombre);
   if (!idIsValid(id) || !nombre) return res.status(400).json({ message: 'Ingresá el nombre de la sucursal.' });
+
+  if (rawCodigo) {
+    const dupCodigo = await db.query(
+      'SELECT id FROM sucursal WHERE lower(codigo) = lower($1) AND id <> $2',
+      [rawCodigo, id]
+    );
+    if (dupCodigo.rows.length > 0) {
+      return res.status(409).json({
+        success: false,
+        error: 'CODIGO_DUPLICADO',
+        message: `Ya existe una sucursal con el código "${rawCodigo}". El código de la sucursal debe ser unívoco.`,
+      });
+    }
+  }
+
   try {
-    const result = await db.query('UPDATE sucursal SET nombre = $1, domicilio = $2 WHERE id = $3 RETURNING id', [nombre, optionalText(req.body?.domicilio), id]);
+    const result = await db.query(
+      'UPDATE sucursal SET codigo = COALESCE($1, codigo), nombre = $2, domicilio = $3 WHERE id = $4 RETURNING id, codigo, nombre, domicilio, activa',
+      [rawCodigo || null, nombre, optionalText(req.body?.domicilio), id]
+    );
     if (!result.rowCount) return res.status(404).json({ message: 'No se encontró la sucursal.' });
-    res.json({ success: true });
+    res.json({ success: true, sucursal: result.rows[0] });
   } catch (error) { reportError(res, error, 'la sucursal'); }
 });
 

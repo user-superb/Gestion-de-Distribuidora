@@ -3,8 +3,8 @@ import { Check, Edit2, Plus, X } from 'lucide-react';
 import { UserSession } from '../../types/auth';
 
 import { API_ROOT as API } from '../../config/api';
-type Sucursal = { id: number; nombre: string; domicilio: string | null; activa: boolean };
-type Draft = { id?: number; nombre: string; domicilio: string };
+type Sucursal = { id: number; codigo: string; nombre: string; domicilio: string | null; activa: boolean };
+type Draft = { id?: number; codigo: string; nombre: string; domicilio: string };
 
 export const GestionSucursales: React.FC<{ session: UserSession }> = ({ session }) => {
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
@@ -50,18 +50,77 @@ export const GestionSucursales: React.FC<{ session: UserSession }> = ({ session 
   };
 
   return <section className="space-y-4">
-    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold text-slate-900">Sucursales</h2><p className="mt-1 text-sm text-slate-500">Administrá las sedes y sus domicilios.</p></div>
-      <button type="button" onClick={() => { setError(''); setDraft({ nombre: '', domicilio: '' }); }} className="inline-flex items-center gap-2 rounded bg-blue-700 px-3 py-2 text-sm text-white hover:bg-blue-800"><Plus className="h-4 w-4" />Nueva sucursal</button>
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h2 className="text-lg font-semibold text-slate-900">Sucursales</h2>
+        <p className="mt-1 text-sm text-slate-500">Administrá las sedes, sus códigos unívocos y domicilios.</p>
+      </div>
+      <button type="button" onClick={() => { setError(''); setDraft({ codigo: '', nombre: '', domicilio: '' }); }} className="inline-flex items-center gap-2 rounded bg-blue-700 px-3 py-2 text-sm text-white hover:bg-blue-800 cursor-pointer">
+        <Plus className="h-4 w-4" />Nueva sucursal
+      </button>
     </div>
     {error && <div role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div>}
-    {draft && <form onSubmit={save} className="grid gap-3 rounded border border-slate-200 bg-white p-4 sm:grid-cols-2">
-      <label className="text-sm text-slate-700">Nombre<input required value={draft.nombre} onChange={(e) => setDraft({ ...draft, nombre: e.target.value })} className="mt-1 w-full rounded border border-slate-300 px-3 py-2" /></label>
-      <label className="text-sm text-slate-700">Domicilio<input value={draft.domicilio} onChange={(e) => setDraft({ ...draft, domicilio: e.target.value })} className="mt-1 w-full rounded border border-slate-300 px-3 py-2" /></label>
-      <div className="flex gap-2 sm:col-span-2"><button disabled={busy} className="inline-flex items-center gap-2 rounded bg-blue-700 px-3 py-2 text-sm text-white disabled:opacity-50"><Check className="h-4 w-4" />Guardar</button><button type="button" onClick={() => setDraft(null)} className="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-2 text-sm"><X className="h-4 w-4" />Cancelar</button></div>
+    {draft && <form onSubmit={save} className="grid gap-3 rounded border border-slate-200 bg-white p-4 sm:grid-cols-3">
+      <label className="text-sm text-slate-700">
+        Código <span className="text-xs text-slate-400 font-normal">(Clave unívoca)</span>
+        <input required value={draft.codigo} onChange={(e) => setDraft({ ...draft, codigo: e.target.value.toUpperCase() })} placeholder="Ej: SUC-001" className="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-mono uppercase" />
+      </label>
+      <label className="text-sm text-slate-700">
+        Nombre
+        <input required value={draft.nombre} onChange={(e) => setDraft({ ...draft, nombre: e.target.value })} placeholder="Ej: Sucursal Centro" className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
+      </label>
+      <label className="text-sm text-slate-700">
+        Domicilio
+        <input value={draft.domicilio} onChange={(e) => setDraft({ ...draft, domicilio: e.target.value })} placeholder="Ej: Calle 12 N° 500" className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
+      </label>
+      <div className="flex gap-2 sm:col-span-3">
+        <button disabled={busy} className="inline-flex items-center gap-2 rounded bg-blue-700 px-3 py-2 text-sm text-white disabled:opacity-50 cursor-pointer">
+          <Check className="h-4 w-4" />Guardar
+        </button>
+        <button type="button" onClick={() => setDraft(null)} className="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-2 text-sm cursor-pointer">
+          <X className="h-4 w-4" />Cancelar
+        </button>
+      </div>
     </form>}
-    <div className="overflow-x-auto rounded border border-slate-200 bg-white"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">Sucursal</th><th className="px-4 py-3">Domicilio</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3">Acciones</th></tr></thead><tbody className="divide-y divide-slate-100">
-      {sucursales.map((sucursal) => <tr key={sucursal.id}><td className="px-4 py-3 font-medium text-slate-900">{sucursal.nombre}</td><td className="px-4 py-3 text-slate-600">{sucursal.domicilio || '—'}</td><td className="px-4 py-3"><span className={sucursal.activa ? 'text-emerald-700' : 'text-slate-400'}>{sucursal.activa ? 'Activa' : 'Inactiva'}</span></td><td className="px-4 py-3"><div className="flex gap-3"><button type="button" onClick={() => setDraft({ id: sucursal.id, nombre: sucursal.nombre, domicilio: sucursal.domicilio || '' })} className="inline-flex items-center gap-1 text-blue-700 hover:underline"><Edit2 className="h-3.5 w-3.5" />Editar</button><button type="button" onClick={() => toggle(sucursal)} className="text-slate-600 hover:underline">{sucursal.activa ? 'Desactivar' : 'Activar'}</button></div></td></tr>)}
-      {!sucursales.length && <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">No hay sucursales para mostrar.</td></tr>}
-    </tbody></table></div>
+    <div className="overflow-x-auto rounded border border-slate-200 bg-white">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+          <tr>
+            <th className="px-4 py-3">Código</th>
+            <th className="px-4 py-3">Sucursal</th>
+            <th className="px-4 py-3">Domicilio</th>
+            <th className="px-4 py-3">Estado</th>
+            <th className="px-4 py-3">Acciones</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {sucursales.map((sucursal) => <tr key={sucursal.id}>
+            <td className="px-4 py-3">
+              <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200">
+                {sucursal.codigo || '—'}
+              </span>
+            </td>
+            <td className="px-4 py-3 font-medium text-slate-900">{sucursal.nombre}</td>
+            <td className="px-4 py-3 text-slate-600">{sucursal.domicilio || '—'}</td>
+            <td className="px-4 py-3">
+              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${sucursal.activa ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-50 text-slate-500 border border-slate-200'}`}>
+                {sucursal.activa ? 'Activa' : 'Inactiva'}
+              </span>
+            </td>
+            <td className="px-4 py-3">
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setDraft({ id: sucursal.id, codigo: sucursal.codigo || '', nombre: sucursal.nombre, domicilio: sucursal.domicilio || '' })} className="inline-flex items-center gap-1 text-blue-700 hover:underline cursor-pointer">
+                  <Edit2 className="h-3.5 w-3.5" />Editar
+                </button>
+                <button type="button" onClick={() => toggle(sucursal)} className="text-slate-600 hover:underline cursor-pointer">
+                  {sucursal.activa ? 'Desactivar' : 'Activar'}
+                </button>
+              </div>
+            </td>
+          </tr>)}
+          {!sucursales.length && <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">No hay sucursales para mostrar.</td></tr>}
+        </tbody>
+      </table>
+    </div>
   </section>;
 };

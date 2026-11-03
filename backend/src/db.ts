@@ -32,6 +32,7 @@ function setupMemoryDb() {
   mem.public.none(`
     CREATE TABLE IF NOT EXISTS sucursal (
       id serial PRIMARY KEY,
+      codigo text UNIQUE,
       nombre text NOT NULL UNIQUE,
       domicilio text,
       activa boolean NOT NULL DEFAULT true,
@@ -332,11 +333,11 @@ function setupMemoryDb() {
       ('reporte.ver', 'Consultar reportes e indicadores'),
       ('usuario.administrar', 'Administrar usuarios y permisos');
 
-    INSERT INTO sucursal (nombre, domicilio) VALUES
-      ('Sucursal Central - La Plata', 'Calle 12 N° 500, La Plata'),
-      ('Depósito Sur - Berisso', 'Av. Río de la Plata 1240, Berisso'),
-      ('Hub Central - Distribución', 'Ruta 2 Km 45, La Plata'),
-      ('Sede Administrativa Central', 'Calle 7 N° 850, La Plata')
+    INSERT INTO sucursal (codigo, nombre, domicilio) VALUES
+      ('SUC-001', 'Sucursal Central - La Plata', 'Calle 12 N° 500, La Plata'),
+      ('SUC-002', 'Depósito Sur - Berisso', 'Av. Río de la Plata 1240, Berisso'),
+      ('SUC-003', 'Hub Central - Distribución', 'Ruta 2 Km 45, La Plata'),
+      ('SUC-004', 'Sede Administrativa Central', 'Calle 7 N° 850, La Plata')
     ON CONFLICT (nombre) DO NOTHING;
 
     INSERT INTO usuario (usuario, nombre, email, password_hash, rol, es_transportista, activo) VALUES

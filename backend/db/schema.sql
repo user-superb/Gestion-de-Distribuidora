@@ -23,11 +23,14 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- gen_random_uuid(), no usado aún p
 
 CREATE TABLE sucursal (
     id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    codigo          text        UNIQUE,
     nombre          text        NOT NULL UNIQUE,
     domicilio       text,
     activa          boolean     NOT NULL DEFAULT true,
     creado_en       timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS sucursal_codigo_unico ON sucursal (lower(codigo)) WHERE codigo IS NOT NULL;
 
 CREATE TABLE usuario (
     id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
