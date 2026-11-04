@@ -12,7 +12,45 @@ const requireSystemAdmin = (req: Request, res: Response, next: NextFunction) => 
   next();
 };
 
-configuracionRouter.use('/configuracion', requireAuth, requireSystemAdmin);
+configuracionRouter.use('/configuracion', requireAuth, (req, res, next) => {
+  const url = req.url || '';
+  const path = req.path || '';
+  if (req.method?.toUpperCase() === 'GET' && (url.includes('/cuentas-recepcion') || path.includes('/cuentas-recepcion'))) {
+    return next();
+  }
+  return requireSystemAdmin(req, res, next);
+});
+
+export async function esUnicoAdministradorSeguridad(
+  client: any,
+  usuarioId: number,
+  sucursalId: number
+): Promise<boolean> {
+  const userAdminRes = await client.query(
+    `SELECT 1
+     FROM usuario u
+     JOIN usuario_sucursal us ON us.usuario_id = u.id AND us.sucursal_id = $2
+     JOIN usuario_sucursal_permiso usp ON usp.usuario_id = u.id AND usp.sucursal_id = $2 AND usp.permiso_codigo = 'usuario.administrar'
+     WHERE u.id = $1 AND u.activo = true`,
+    [usuarioId, sucursalId]
+  );
+
+  if (!userAdminRes.rows.length) {
+    return false;
+  }
+
+  const otrosAdminsRes = await client.query(
+    `SELECT COUNT(DISTINCT u.id)::int AS count
+     FROM usuario u
+     JOIN usuario_sucursal us ON us.usuario_id = u.id AND us.sucursal_id = $2
+     JOIN usuario_sucursal_permiso usp ON usp.usuario_id = u.id AND usp.sucursal_id = $2 AND usp.permiso_codigo = 'usuario.administrar'
+     WHERE u.id <> $1 AND u.activo = true`,
+    [usuarioId, sucursalId]
+  );
+
+  const otrosCount = Number(otrosAdminsRes.rows[0]?.count || 0);
+  return otrosCount === 0;
+}
 
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 const optionalText = (value: unknown) => text(value) || null;
@@ -312,11 +350,52 @@ configuracionRouter.patch('/configuracion/sucursales/:id/estado', async (req, re
   } catch (error) { reportError(res, error, 'la sucursal'); }
 });
 
-configuracionRouter.get('/configuracion/cuentas-recepcion', async (_req, res) => {
+configuracionRouter.get('/configuracion/cuentas-recepcion', async (req, res) => {
   try {
-    const result = await db.query(`SELECT cr.id, cr.sucursal_id, s.nombre AS sucursal, cr.alias, cr.cbu, cr.banco, cr.activa
-                                   FROM cuenta_recepcion cr JOIN sucursal s ON s.id = cr.sucursal_id
-                                   ORDER BY s.nombre, cr.alias`);
+    const userSession = (req as any).userSession;
+    const esGlobal = esRolGlobal(userSession?.role);
+    let sucursalFiltro = '';
+    const params: unknown[] = [];
+    if (!esGlobal && userSession?.id) {
+      const usuarioId = Number(String(userSession.id).replace(/^usr_/, ''));
+      if (Number.isSafeInteger(usuarioId) && usuarioId > 0) {
+        params.push(usuarioId);
+        sucursalFiltro = "WHERE cr.sucursal_id IN (SELECT sucursal_id FROM usuario_sucursal WHERE usuario_id = $1)";
+      }
+    }
+    const result = await db.query(
+      `SELECT cr.id, cr.sucursal_id, s.nombre AS sucursal, cr.alias, cr.cbu, cr.banco, cr.activa
+       FROM cuenta_recepcion cr
+       JOIN sucursal s ON s.id = cr.sucursal_id
+       ${sucursalFiltro}
+       ORDER BY s.nombre, cr.alias`,
+      params
+    );
+    res.json(result.rows);
+  } catch (error) { reportError(res, error, 'las cuentas de recepción'); }
+});
+
+configuracionRouter.get('/cuentas-recepcion', async (req, res) => {
+  try {
+    const userSession = (req as any).userSession;
+    const esGlobal = esRolGlobal(userSession?.role);
+    let sucursalFiltro = '';
+    const params: unknown[] = [];
+    if (!esGlobal && userSession?.id) {
+      const usuarioId = Number(String(userSession.id).replace(/^usr_/, ''));
+      if (Number.isSafeInteger(usuarioId) && usuarioId > 0) {
+        params.push(usuarioId);
+        sucursalFiltro = "WHERE cr.sucursal_id IN (SELECT sucursal_id FROM usuario_sucursal WHERE usuario_id = $1)";
+      }
+    }
+    const result = await db.query(
+      `SELECT cr.id, cr.sucursal_id, s.nombre AS sucursal, cr.alias, cr.cbu, cr.banco, cr.activa
+       FROM cuenta_recepcion cr
+       JOIN sucursal s ON s.id = cr.sucursal_id
+       ${sucursalFiltro}
+       ORDER BY s.nombre, cr.alias`,
+      params
+    );
     res.json(result.rows);
   } catch (error) { reportError(res, error, 'las cuentas de recepción'); }
 });
@@ -397,6 +476,20 @@ configuracionRouter.put('/configuracion/permisos-sucursal/:usuarioId/:sucursalId
       return res.status(400).json({ message: 'El usuario, la sucursal o algún permiso no es válido.' });
     }
 
+    // ESCENARIO 2 (HU #54): Fallo por carencia de administrador:
+    // Se intenta quitar el permiso al único administrador de seguridad asignado a esa sucursal.
+    // El sistema bloquea para evitar dejar una sucursal sin gestión.
+    if (!codes.includes('usuario.administrar')) {
+      const esUnico = await esUnicoAdministradorSeguridad(client, usuarioId, sucursalId);
+      if (esUnico) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'CARENCIA_ADMINISTRADOR',
+          message: 'No se puede quitar el permiso al único administrador de seguridad asignado a esta sucursal para evitar dejar una sucursal sin gestión.'
+        });
+      }
+    }
+
     await client.query('DELETE FROM usuario_sucursal_permiso WHERE usuario_id = $1 AND sucursal_id = $2', [usuarioId, sucursalId]);
     if (codes.length) {
       await client.query('INSERT INTO usuario_sucursal (usuario_id, sucursal_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [usuarioId, sucursalId]);
@@ -411,6 +504,46 @@ configuracionRouter.put('/configuracion/permisos-sucursal/:usuarioId/:sucursalId
   } catch (error) {
     await client.query('ROLLBACK');
     reportError(res, error, 'los permisos por sucursal');
+  } finally {
+    client.release();
+  }
+});
+configuracionRouter.delete('/configuracion/permisos-sucursal/:usuarioId/:sucursalId', async (req, res) => {
+  const usuarioId = Number(req.params.usuarioId);
+  const sucursalId = Number(req.params.sucursalId);
+  if (!idIsValid(usuarioId) || !idIsValid(sucursalId)) {
+    return res.status(400).json({ message: 'Indicá usuario y sucursal válidos.' });
+  }
+
+  const client = await db.getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const validUser = await client.query('SELECT id FROM usuario WHERE id = $1 AND activo = true', [usuarioId]);
+    const validBranch = await client.query('SELECT id FROM sucursal WHERE id = $1 AND activa = true', [sucursalId]);
+    if (!validUser.rows.length || !validBranch.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ message: 'El usuario o la sucursal no es válido.' });
+    }
+
+    // ESCENARIO 2 (HU #54): Fallo por carencia de administrador:
+    // Se intenta quitar el permiso al único administrador de seguridad asignado a esa sucursal.
+    // El sistema bloquea para evitar dejar una sucursal sin gestión.
+    const esUnico = await esUnicoAdministradorSeguridad(client, usuarioId, sucursalId);
+    if (esUnico) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'CARENCIA_ADMINISTRADOR',
+        message: 'No se puede quitar el permiso al único administrador de seguridad asignado a esta sucursal para evitar dejar una sucursal sin gestión.'
+      });
+    }
+
+    await client.query('DELETE FROM usuario_sucursal_permiso WHERE usuario_id = $1 AND sucursal_id = $2', [usuarioId, sucursalId]);
+    await client.query('DELETE FROM usuario_sucursal WHERE usuario_id = $1 AND sucursal_id = $2', [usuarioId, sucursalId]);
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Acceso y permisos a la sucursal revocados exitosamente.' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    reportError(res, error, 'la revocación de permisos por sucursal');
   } finally {
     client.release();
   }

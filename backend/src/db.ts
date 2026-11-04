@@ -360,6 +360,12 @@ function setupMemoryDb() {
       (7, 1)
     ON CONFLICT (usuario_id, sucursal_id) DO NOTHING;
 
+    INSERT INTO usuario_sucursal_permiso (usuario_id, sucursal_id, permiso_codigo) VALUES
+      (1, 1, 'usuario.administrar'),
+      (1, 1, 'comercio.ver'),
+      (3, 3, 'usuario.administrar')
+    ON CONFLICT DO NOTHING;
+
     INSERT INTO cuenta_recepcion (id, sucursal_id, alias, banco) VALUES
       (1, 1, 'tutucas.central', 'Banco Provincia'),
       (2, 2, 'tutucas.sur', 'Banco Santander')

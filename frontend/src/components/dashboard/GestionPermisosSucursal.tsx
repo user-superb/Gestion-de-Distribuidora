@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Check } from 'lucide-react';
+import { Check, UserX } from 'lucide-react';
 import { UserSession } from '../../types/auth';
 
 import { API_ROOT as API } from '../../config/api';
@@ -57,6 +57,21 @@ export const GestionPermisosSucursal: React.FC<{ session: UserSession }> = ({ se
     finally { setBusy(false); }
   };
 
+    const revocarAcceso = async () => {
+    setBusy(true); setError(''); setSaved(false);
+    try {
+      const response = await fetch(`${API}/api/configuracion/permisos-sucursal/${userId}/${branchId}`, {
+        method: 'DELETE', headers,
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'No se pudo revocar el acceso a la sucursal.');
+      await load();
+      setSelected([]);
+      setSaved(true);
+    } catch (e: any) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
   const assignmentExists = assignments.some((item) => item.usuario_id === userId && item.sucursal_id === branchId);
 
   return <section className="space-y-4">
@@ -83,7 +98,18 @@ export const GestionPermisosSucursal: React.FC<{ session: UserSession }> = ({ se
           {permissions.map((permission) => <label key={permission.codigo} className="flex items-start gap-2 rounded border border-slate-100 p-3 text-sm hover:bg-slate-50"><input type="checkbox" checked={selected.includes(permission.codigo)} onChange={(e) => setSelected(e.target.checked ? [...selected, permission.codigo] : selected.filter((code) => code !== permission.codigo))} className="mt-0.5" /><span><span className="block font-medium text-slate-800">{permission.descripcion}</span><span className="mt-0.5 block font-mono text-xs text-slate-500">{permission.codigo}</span></span></label>)}
         </div>
       </fieldset>
-      <div className="flex flex-wrap items-center gap-3"><button type="button" disabled={busy} onClick={save} className="inline-flex items-center gap-2 rounded bg-blue-700 px-3 py-2 text-sm text-white disabled:opacity-50"><Check className="h-4 w-4" />Guardar permisos</button>{saved && <span role="status" className="text-sm text-emerald-700">Permisos guardados.</span>}<span className="text-xs text-slate-500">{assignmentExists ? 'El usuario ya está asignado a esta sucursal.' : 'Guardar al menos un permiso también habilita esta sucursal para el usuario.'}</span></div>
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" disabled={busy} onClick={save} className="inline-flex items-center gap-2 rounded bg-blue-700 px-3 py-2 text-sm text-white disabled:opacity-50">
+          <Check className="h-4 w-4" />Guardar permisos
+        </button>
+        {assignmentExists && (
+          <button type="button" disabled={busy} onClick={revocarAcceso} className="inline-flex items-center gap-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50">
+            <UserX className="h-4 w-4" />Revocar acceso a sucursal
+          </button>
+        )}
+        {saved && <span role="status" className="text-sm text-emerald-700">Operación exitosa.</span>}
+        <span className="text-xs text-slate-500">{assignmentExists ? 'El usuario ya está asignado a esta sucursal.' : 'Guardar al menos un permiso también habilita esta sucursal para el usuario.'}</span>
+      </div>
     </> : <div className="rounded border border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">Necesitás al menos un usuario activo y una sucursal activa.</div>}
   </section>;
 };
