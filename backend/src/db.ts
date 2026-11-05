@@ -248,9 +248,19 @@ function setupMemoryDb() {
       concepto text,
       referencia_externa text,
       importe_centavos bigint NOT NULL,
+      origen text NOT NULL DEFAULT 'Extracto Bancario',
       estado text NOT NULL DEFAULT 'sin_imputar',
       creado_en timestamp DEFAULT now(),
       UNIQUE (cuenta_id, referencia_externa)
+    );
+
+    CREATE TABLE IF NOT EXISTS movimiento_bancario_comprobante (
+      movimiento_id bigint PRIMARY KEY,
+      nombre_archivo text NOT NULL,
+      tipo_mime text NOT NULL,
+      contenido bytea NOT NULL,
+      tamano_bytes bigint NOT NULL,
+      subido_en timestamp DEFAULT now()
     );
 
     CREATE TABLE IF NOT EXISTS imputacion (

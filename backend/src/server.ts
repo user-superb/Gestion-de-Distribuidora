@@ -94,6 +94,17 @@ if (process.env.NODE_ENV !== 'test') {
         await db.query("ALTER TABLE cuenta_recepcion ADD COLUMN IF NOT EXISTS moneda text NOT NULL DEFAULT 'ARS';");
         await db.query('ALTER TABLE cuenta_recepcion ADD COLUMN IF NOT EXISTS actualizado_en timestamptz NOT NULL DEFAULT now();');
         await db.query('ALTER TABLE movimiento_bancario ADD COLUMN IF NOT EXISTS concepto text;');
+        await db.query("ALTER TABLE movimiento_bancario ADD COLUMN IF NOT EXISTS origen text NOT NULL DEFAULT 'Extracto Bancario';");
+        await db.query(`
+          CREATE TABLE IF NOT EXISTS movimiento_bancario_comprobante (
+            movimiento_id bigint PRIMARY KEY REFERENCES movimiento_bancario(id) ON DELETE CASCADE,
+            nombre_archivo text NOT NULL,
+            tipo_mime text NOT NULL CHECK (tipo_mime IN ('application/pdf','image/jpeg','image/png')),
+            contenido bytea NOT NULL,
+            tamano_bytes bigint NOT NULL CHECK (tamano_bytes > 0 AND tamano_bytes <= 5242880),
+            subido_en timestamptz NOT NULL DEFAULT now()
+          );
+        `);
         await db.query('DROP INDEX IF EXISTS visita_comercio_unico_idx;');
         await db.query(`
           UPDATE hoja_de_ruta

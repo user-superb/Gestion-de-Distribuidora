@@ -51,6 +51,14 @@ conciliacionRouter.get('/cuentas-recepcion', async (req, res) => {
   }
 });
 
+conciliacionRouter.get('/comercios', async (_req, res) => {
+  try {
+    return res.json(await conciliacionService.getComerciosParaConciliacion());
+  } catch (error) {
+    return responderError(error, res);
+  }
+});
+
 conciliacionRouter.post(
   '/extractos/importar',
   requireAdministrativo,
@@ -78,6 +86,81 @@ conciliacionRouter.post(
     }
   }
 );
+
+conciliacionRouter.post(
+  '/movimientos/manual/transferencia',
+  requireAdministrativo,
+  (req, res, next) =>
+    comprobante(req, res, (error: any) => {
+      if (error) {
+        return res.status(400).json({
+          error: 'COMPROBANTE_INVALIDO',
+          message: 'El comprobante de respaldo debe ser un archivo PDF, JPG o PNG y no superar 5 MB.',
+          camposInvalidos: ['comprobante'],
+        });
+      }
+      next();
+    }),
+  async (req, res) => {
+    try {
+      const result = await conciliacionService.registrarTransferenciaManual(
+        {
+          cuentaId: req.body?.cuentaId ?? req.body?.cuenta_id,
+          fechaContable: req.body?.fechaContable ?? req.body?.fecha_contable ?? req.body?.fecha,
+          importe: req.body?.importe ?? req.body?.monto,
+          numeroOperacion: req.body?.numeroOperacion ?? req.body?.numero_operacion ?? req.body?.referencia,
+          ordenante: req.body?.ordenante,
+          ordenanteCuit: req.body?.ordenanteCuit ?? req.body?.ordenante_cuit ?? req.body?.cuit,
+          concepto: req.body?.concepto,
+        },
+        req.file || null,
+        getUsuarioId(req)
+      );
+      return res.status(201).json({ success: true, ...result });
+    } catch (error) {
+      return responderError(error, res);
+    }
+  }
+);
+
+conciliacionRouter.post(
+  '/movimientos/manual/qr',
+  requireAdministrativo,
+  async (req, res) => {
+    try {
+      const result = await conciliacionService.registrarIngresoQrManual(
+        {
+          cuentaId: req.body?.cuentaId ?? req.body?.cuenta_id,
+          fechaContable: req.body?.fechaContable ?? req.body?.fecha_contable ?? req.body?.fecha,
+          importe: req.body?.importe ?? req.body?.monto,
+          idTransaccion: req.body?.idTransaccion ?? req.body?.id_transaccion ?? req.body?.referencia,
+          ordenante: req.body?.ordenante,
+          ordenanteCuit: req.body?.ordenanteCuit ?? req.body?.ordenante_cuit ?? req.body?.cuit,
+          concepto: req.body?.concepto,
+        },
+        getUsuarioId(req)
+      );
+      return res.status(201).json({ success: true, ...result });
+    } catch (error) {
+      return responderError(error, res);
+    }
+  }
+);
+
+conciliacionRouter.get('/movimientos/:id/comprobante', async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT c.nombre_archivo, c.tipo_mime, c.contenido
+       FROM movimiento_bancario_comprobante c
+       WHERE c.movimiento_id = $1`,
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ message: 'No se encontró el comprobante de respaldo.' });
+    return res.type(result.rows[0].tipo_mime).attachment(result.rows[0].nombre_archivo).send(result.rows[0].contenido);
+  } catch (error) {
+    return responderError(error, res);
+  }
+});
 
 conciliacionRouter.get('/movimientos', async (req, res) => {
   const fecha = typeof req.query.fecha === 'string' ? req.query.fecha : undefined;

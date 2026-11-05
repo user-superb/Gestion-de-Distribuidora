@@ -353,6 +353,7 @@ CREATE TABLE movimiento_bancario (
     concepto            text,
     referencia_externa  text,
     importe_centavos    bigint      NOT NULL,
+    origen              text        NOT NULL DEFAULT 'Extracto Bancario',
     estado              text        NOT NULL DEFAULT 'sin_imputar',
     creado_en           timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT movimiento_importe_positivo CHECK (importe_centavos > 0),
@@ -360,6 +361,15 @@ CREATE TABLE movimiento_bancario (
         CHECK (estado IN ('sin_imputar','parcial','imputado','descartado')),
     CONSTRAINT movimiento_referencia_unica
         UNIQUE (cuenta_id, referencia_externa)
+);
+
+CREATE TABLE movimiento_bancario_comprobante (
+    movimiento_id   bigint PRIMARY KEY REFERENCES movimiento_bancario(id) ON DELETE CASCADE,
+    nombre_archivo  text NOT NULL,
+    tipo_mime       text NOT NULL CHECK (tipo_mime IN ('application/pdf','image/jpeg','image/png')),
+    contenido       bytea NOT NULL,
+    tamano_bytes    bigint NOT NULL CHECK (tamano_bytes > 0 AND tamano_bytes <= 5242880),
+    subido_en       timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE INDEX movimiento_pendientes_idx

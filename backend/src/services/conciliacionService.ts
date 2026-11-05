@@ -587,7 +587,65 @@ async function enTransaccion<T>(action: (client: PoolClient) => Promise<T>): Pro
   }
 }
 
+function fechaActualArgentina(): string {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return formatter.format(new Date());
+}
+
+function validarComprobanteAdjunto(archivo: ArchivoImportacion | null): ArchivoImportacion {
+  if (!archivo || !archivo.buffer || archivo.size < 1) {
+    throw new ConciliacionError(
+      'El comprobante de respaldo es obligatorio para registrar manualmente una transferencia.',
+      400,
+      { errorCode: 'COMPROBANTE_OBLIGATORIO', camposInvalidos: ['comprobante'] }
+    );
+  }
+  const mime = (archivo.mimetype || '').toLowerCase();
+  if (!['application/pdf', 'image/jpeg', 'image/png'].includes(mime) || archivo.size > 5 * 1024 * 1024) {
+    throw new ConciliacionError(
+      'El comprobante de respaldo debe ser un archivo PDF, JPG o PNG y no superar 5 MB.',
+      400,
+      { errorCode: 'COMPROBANTE_INVALIDO', camposInvalidos: ['comprobante'] }
+    );
+  }
+  const firma = archivo.buffer.subarray(0, 8);
+  const formatoValido =
+    mime === 'application/pdf'
+      ? firma.subarray(0, 4).toString() === '%PDF'
+      : mime === 'image/png'
+        ? firma.equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+        : firma[0] === 0xff && firma[1] === 0xd8 && firma[2] === 0xff;
+  if (!formatoValido) {
+    throw new ConciliacionError(
+      'El contenido del comprobante adjunto no coincide con su formato (PDF, JPG o PNG).',
+      400,
+      { errorCode: 'COMPROBANTE_INVALIDO', camposInvalidos: ['comprobante'] }
+    );
+  }
+  return archivo;
+}
+
 export const conciliacionService = {
+  async getComerciosParaConciliacion() {
+    const res = await db.query(
+      `SELECT id::text AS id, razon_social, nombre_fantasia, cuit
+       FROM comercio
+       WHERE activo = true
+       ORDER BY razon_social`
+    );
+    return res.rows.map((r: any) => ({
+      id: String(r.id),
+      razon_social: String(r.razon_social || '').trim(),
+      nombre_fantasia: r.nombre_fantasia ? String(r.nombre_fantasia).trim() : null,
+      cuit: r.cuit ? String(r.cuit).trim() : null,
+    }));
+  },
+
   async getCuentasRecepcionParaExtracto(usuarioId: number, rol: string) {
     const isAdminSistema = rol === 'Administrador del sistema' || rol === 'Gerente';
     const query = isAdminSistema
@@ -830,31 +888,428 @@ export const conciliacionService = {
     });
   },
 
-  async getMovimientosPendientes(fecha?: string) {
-    const params: unknown[] = [];
-    let fechaFiltro = '';
-    if (fecha) {
-      params.push(fecha);
-      fechaFiltro = db.isMemory()
-        ? 'AND mb.fecha_hora::date = $1::date'
-        : "AND (mb.fecha_hora AT TIME ZONE 'America/Argentina/Buenos_Aires')::date = $1::date";
+  async registrarTransferenciaManual(
+    payload: {
+      cuentaId?: unknown;
+      fechaContable?: unknown;
+      importe?: unknown;
+      numeroOperacion?: unknown;
+      ordenante?: unknown;
+      ordenanteCuit?: unknown;
+      concepto?: unknown;
+    },
+    archivo: ArchivoImportacion | null,
+    usuarioId: number
+  ) {
+    const cuentaId = Number(payload.cuentaId);
+    if (!Number.isSafeInteger(cuentaId) || cuentaId <= 0) {
+      throw new ConciliacionError(
+        'Seleccioná una cuenta bancaria de recepción activa.',
+        400,
+        { errorCode: 'CUENTA_INVALIDA', camposInvalidos: ['cuentaId'] }
+      );
     }
-    const result = await db.query(
-      `SELECT mb.id::text AS id, mb.fecha_hora, mb.ordenante,
+
+    const rawFecha = String(payload.fechaContable ?? '').trim();
+    const fechaParsed = parsearFechaExtracto(rawFecha);
+    const hoyClave = fechaActualArgentina();
+    if (!fechaParsed) {
+      throw new ConciliacionError(
+        'Ingresá una fecha contable válida.',
+        400,
+        { errorCode: 'FECHA_INVALIDA', camposInvalidos: ['fechaContable'] }
+      );
+    }
+    if (fechaParsed.fechaClave > hoyClave) {
+      throw new ConciliacionError(
+        'No se admiten movimientos bancarios anticipados: la fecha contable no puede ser posterior al día de la carga.',
+        422,
+        { errorCode: 'FECHA_CONTABLE_FUTURA', camposInvalidos: ['fechaContable'] }
+      );
+    }
+
+    const rawImporte = String(payload.importe ?? '').trim();
+    const importeCentavos = parsearImporteCentavos(rawImporte);
+    if (importeCentavos === null || importeCentavos <= 0n) {
+      throw new ConciliacionError(
+        'El importe debe ser un monto positivo mayor a cero.',
+        422,
+        { errorCode: 'IMPORTE_INVALIDO', camposInvalidos: ['importe'] }
+      );
+    }
+
+    const numeroOperacion = String(payload.numeroOperacion ?? '').trim();
+    if (!numeroOperacion) {
+      throw new ConciliacionError(
+        'El número de operación o referencia bancaria es obligatorio.',
+        400,
+        { errorCode: 'OPERACION_OBLIGATORIA', camposInvalidos: ['numeroOperacion'] }
+      );
+    }
+
+    const rawCuit = String(payload.ordenanteCuit ?? '').replace(/\D/g, '');
+    if (rawCuit && rawCuit.length !== 11) {
+      throw new ConciliacionError(
+        'El CUIT del ordenante debe contener exactamente 11 dígitos.',
+        400,
+        { errorCode: 'CUIT_INVALIDO', camposInvalidos: ['ordenanteCuit'] }
+      );
+    }
+
+    const comprobanteValido = validarComprobanteAdjunto(archivo);
+    const conceptoFinal = String(payload.concepto ?? '').trim() || 'Transferencia bancaria manual';
+    const ordenanteFinal = String(payload.ordenante ?? '').trim() || conceptoFinal;
+
+    return enTransaccion(async (client) => {
+      const cuentaRes = await client.query(
+        `SELECT cr.id, cr.sucursal_id, cr.alias, cr.cbu, cr.banco, cr.moneda, cr.activa,
+                s.activa AS sucursal_activa
+         FROM cuenta_recepcion cr
+         JOIN sucursal s ON s.id = cr.sucursal_id
+         WHERE cr.id = $1`,
+        [cuentaId]
+      );
+
+      if (!cuentaRes.rowCount) {
+        throw new ConciliacionError(
+          'La cuenta de recepción seleccionada no existe.',
+          422,
+          { errorCode: 'CUENTA_NO_IDENTIFICADA', camposInvalidos: ['cuentaId'] }
+        );
+      }
+
+      const cuenta = cuentaRes.rows[0];
+      if (!cuenta.activa || !cuenta.sucursal_activa) {
+        throw new ConciliacionError(
+          'La cuenta de recepción seleccionada se encuentra inactiva y no admite cargas manuales.',
+          422,
+          { errorCode: 'CUENTA_INACTIVA', camposInvalidos: ['cuentaId'] }
+        );
+      }
+
+      // Verificar que el número de operación/referencia no exista en la misma cuenta de recepción (Escenario 3)
+      const dupRes = await client.query(
+        `SELECT id::text AS id, referencia_externa
+         FROM movimiento_bancario
+         WHERE cuenta_id = $1 AND referencia_externa IS NOT NULL`,
+        [cuentaId]
+      );
+
+      const opNormalizada = numeroOperacion.trim().toLowerCase();
+      const existeDuplicado = dupRes.rows.some(
+        (r: any) => String(r.referencia_externa || '').trim().toLowerCase() === opNormalizada
+      );
+
+      if (existeDuplicado) {
+        throw new ConciliacionError(
+          `El número de operación o referencia bancaria "${numeroOperacion}" ya se encuentra registrado en la cuenta "${cuenta.alias}". No se admiten duplicaciones contables.`,
+          409,
+          { errorCode: 'OPERACION_BANCARIA_DUPLICADA', camposInvalidos: ['numeroOperacion'] }
+        );
+      }
+
+      const insertRes = await client.query(
+        `INSERT INTO movimiento_bancario
+           (cuenta_id, fecha_hora, ordenante, ordenante_cuit, concepto, referencia_externa, importe_centavos, origen, estado)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'Carga Manual', 'sin_imputar')
+         RETURNING id::text AS id, fecha_hora, origen, estado`,
+        [
+          cuentaId,
+          fechaParsed.fechaHora,
+          ordenanteFinal,
+          rawCuit || null,
+          conceptoFinal,
+          numeroOperacion,
+          importeCentavos.toString(),
+        ]
+      );
+
+      const movimientoId = insertRes.rows[0].id;
+      const nombreLimpio = comprobanteValido.originalname.replace(/[\\/\r\n\"]/g, '_').slice(0, 255) || 'comprobante';
+
+      await client.query(
+        `INSERT INTO movimiento_bancario_comprobante
+           (movimiento_id, nombre_archivo, tipo_mime, contenido, tamano_bytes)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          movimientoId,
+          nombreLimpio,
+          comprobanteValido.mimetype || 'application/pdf',
+          comprobanteValido.buffer,
+          comprobanteValido.size,
+        ]
+      );
+
+      await client.query(
+        `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
+         VALUES ('movimiento_bancario', $1, 'alta_manual_transferencia', $2, $3::jsonb, $4)`,
+        [
+          movimientoId,
+          usuarioId,
+          JSON.stringify({
+            id: movimientoId,
+            cuentaId: String(cuentaId),
+            cuentaAlias: cuenta.alias,
+            fechaContable: fechaParsed.fechaClave,
+            importeCentavos: importeCentavos.toString(),
+            referenciaExterna: numeroOperacion,
+            ordenante: ordenanteFinal,
+            ordenanteCuit: rawCuit || null,
+            origen: 'Carga Manual',
+            estado: 'sin_imputar',
+            comprobante: nombreLimpio,
+          }),
+          'Carga Manual de transferencia bancaria con comprobante de respaldo',
+        ]
+      );
+
+      return {
+        id: movimientoId,
+        cuenta_id: String(cuentaId),
+        cuenta: cuenta.alias,
+        fecha_hora: new Date(insertRes.rows[0].fecha_hora).toISOString(),
+        ordenante: ordenanteFinal,
+        ordenante_cuit: rawCuit || null,
+        concepto: conceptoFinal,
+        referencia_externa: numeroOperacion,
+        importe_centavos: importeCentavos.toString(),
+        origen: 'Carga Manual',
+        estado: 'sin_imputar',
+        comprobante_nombre: nombreLimpio,
+        mensaje: `Transferencia manual #${numeroOperacion} registrada bajo "Carga Manual" y disponible en la bandeja de pendientes de conciliación.`,
+      };
+    });
+  },
+
+  async registrarIngresoQrManual(
+    payload: {
+      cuentaId?: unknown;
+      fechaContable?: unknown;
+      importe?: unknown;
+      idTransaccion?: unknown;
+      ordenante?: unknown;
+      ordenanteCuit?: unknown;
+      concepto?: unknown;
+    },
+    usuarioId: number
+  ) {
+    const cuentaId = Number(payload.cuentaId);
+    if (!Number.isSafeInteger(cuentaId) || cuentaId <= 0) {
+      throw new ConciliacionError(
+        'Seleccioná una cuenta o billetera de acreditación activa.',
+        400,
+        { errorCode: 'CUENTA_INVALIDA', camposInvalidos: ['cuentaId'] }
+      );
+    }
+
+    const camposInvalidos: string[] = [];
+    const rawFecha = String(payload.fechaContable ?? '').trim();
+    const fechaParsed = parsearFechaExtracto(rawFecha);
+    const hoyClave = fechaActualArgentina();
+    const fechaFutura = !!fechaParsed && fechaParsed.fechaClave > hoyClave;
+    if (!fechaParsed || fechaFutura) {
+      camposInvalidos.push('fechaContable');
+    }
+
+    const rawImporte = String(payload.importe ?? '').trim();
+    const importeCentavos = parsearImporteCentavos(rawImporte);
+    if (importeCentavos === null || importeCentavos <= 0n) {
+      camposInvalidos.push('importe');
+    }
+
+    if (camposInvalidos.length > 0) {
+      const detalleMensajes: string[] = [];
+      if (camposInvalidos.includes('fechaContable')) {
+        detalleMensajes.push(
+          fechaFutura
+            ? 'la fecha contable no puede ser futura (no se admiten movimientos anticipados)'
+            : 'la fecha contable no es válida'
+        );
+      }
+      if (camposInvalidos.includes('importe')) {
+        detalleMensajes.push('el importe debe ser un monto positivo mayor a cero');
+      }
+      throw new ConciliacionError(
+        `Inconsistencia en los datos del cobro QR: ${detalleMensajes.join(' y ')}.`,
+        422,
+        {
+          errorCode: fechaFutura && camposInvalidos.length === 1 ? 'FECHA_CONTABLE_FUTURA' : 'DATOS_QR_INVALIDOS',
+          camposInvalidos,
+        }
+      );
+    }
+
+    const idTransaccion = String(payload.idTransaccion ?? '').trim();
+    if (!idTransaccion) {
+      throw new ConciliacionError(
+        'El ID de transacción provisto por la pasarela de pagos es obligatorio.',
+        400,
+        { errorCode: 'TRANSACCION_QR_OBLIGATORIA', camposInvalidos: ['idTransaccion'] }
+      );
+    }
+
+    const rawCuit = String(payload.ordenanteCuit ?? '').replace(/\D/g, '');
+    if (rawCuit && rawCuit.length !== 11) {
+      throw new ConciliacionError(
+        'El CUIT del comercio/ordenante debe contener exactamente 11 dígitos.',
+        400,
+        { errorCode: 'CUIT_INVALIDO', camposInvalidos: ['ordenanteCuit'] }
+      );
+    }
+
+    const conceptoFinal = String(payload.concepto ?? '').trim() || 'Acreditación por cobro QR';
+    const ordenanteFinal = String(payload.ordenante ?? '').trim() || conceptoFinal;
+
+    return enTransaccion(async (client) => {
+      const cuentaRes = await client.query(
+        `SELECT cr.id, cr.sucursal_id, cr.alias, cr.cbu, cr.banco, cr.moneda, cr.activa,
+                s.activa AS sucursal_activa
+         FROM cuenta_recepcion cr
+         JOIN sucursal s ON s.id = cr.sucursal_id
+         WHERE cr.id = $1`,
+        [cuentaId]
+      );
+
+      if (!cuentaRes.rowCount) {
+        throw new ConciliacionError(
+          'La cuenta o billetera de acreditación seleccionada no existe.',
+          422,
+          { errorCode: 'CUENTA_NO_IDENTIFICADA', camposInvalidos: ['cuentaId'] }
+        );
+      }
+
+      const cuenta = cuentaRes.rows[0];
+      if (!cuenta.activa || !cuenta.sucursal_activa) {
+        throw new ConciliacionError(
+          'La cuenta o billetera de acreditación seleccionada se encuentra inactiva.',
+          422,
+          { errorCode: 'CUENTA_INACTIVA', camposInvalidos: ['cuentaId'] }
+        );
+      }
+
+      // El ID de transacción QR de la pasarela debe ser único en todo el sistema (cargado manualmente o recibido previamente) (Escenario 2)
+      const dupMovRes = await client.query(
+        `SELECT id::text AS id, referencia_externa
+         FROM movimiento_bancario
+         WHERE referencia_externa IS NOT NULL`
+      );
+
+      const dupCobroRes = await client.query(
+        `SELECT id::text AS id, referencia_transferencia
+         FROM cobro
+         WHERE medio_pago = 'qr' AND referencia_transferencia IS NOT NULL`
+      );
+
+      const idQrNormalizado = idTransaccion.trim().toLowerCase();
+      const existeEnMovimientos = dupMovRes.rows.some(
+        (r: any) => String(r.referencia_externa || '').trim().toLowerCase() === idQrNormalizado
+      );
+      const existeEnCobros = dupCobroRes.rows.some(
+        (r: any) => String(r.referencia_transferencia || '').trim().toLowerCase() === idQrNormalizado
+      );
+
+      if (existeEnMovimientos || existeEnCobros) {
+        throw new ConciliacionError(
+          `El comprobante con ID de transacción QR "${idTransaccion}" ya fue registrado previamente en el sistema. Se bloquea el alta para impedir dobles imputaciones.`,
+          409,
+          { errorCode: 'TRANSACCION_QR_DUPLICADA', camposInvalidos: ['idTransaccion'] }
+        );
+      }
+
+      const insertRes = await client.query(
+        `INSERT INTO movimiento_bancario
+           (cuenta_id, fecha_hora, ordenante, ordenante_cuit, concepto, referencia_externa, importe_centavos, origen, estado)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'QR - Carga Manual', 'sin_imputar')
+         RETURNING id::text AS id, fecha_hora, origen, estado`,
+        [
+          cuentaId,
+          fechaParsed!.fechaHora,
+          ordenanteFinal,
+          rawCuit || null,
+          conceptoFinal,
+          idTransaccion,
+          importeCentavos!.toString(),
+        ]
+      );
+
+      const movimientoId = insertRes.rows[0].id;
+
+      await client.query(
+        `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
+         VALUES ('movimiento_bancario', $1, 'alta_manual_qr', $2, $3::jsonb, $4)`,
+        [
+          movimientoId,
+          usuarioId,
+          JSON.stringify({
+            id: movimientoId,
+            cuentaId: String(cuentaId),
+            cuentaAlias: cuenta.alias,
+            fechaContable: fechaParsed!.fechaClave,
+            importeCentavos: importeCentavos!.toString(),
+            idTransaccion,
+            ordenante: ordenanteFinal,
+            ordenanteCuit: rawCuit || null,
+            origen: 'QR - Carga Manual',
+            estado: 'sin_imputar',
+          }),
+          'QR - Carga Manual de ingreso de billetera virtual homologado para conciliación',
+        ]
+      );
+
+      return {
+        id: movimientoId,
+        cuenta_id: String(cuentaId),
+        cuenta: cuenta.alias,
+        fecha_hora: new Date(insertRes.rows[0].fecha_hora).toISOString(),
+        ordenante: ordenanteFinal,
+        ordenante_cuit: rawCuit || null,
+        concepto: conceptoFinal,
+        referencia_externa: idTransaccion,
+        importe_centavos: importeCentavos!.toString(),
+        origen: 'QR - Carga Manual',
+        estado: 'sin_imputar',
+        comprobante_nombre: null,
+        mensaje: `Ingreso por cobro QR #${idTransaccion} registrado bajo "QR - Carga Manual" y habilitado en la bandeja de pendientes de conciliación.`,
+      };
+    });
+  },
+
+  async getMovimientosPendientes(fecha?: string) {
+    const buildQuery = (useSimpleDateCast: boolean) => {
+      const fechaFiltro = fecha
+        ? useSimpleDateCast
+          ? 'AND mb.fecha_hora::date = $1::date'
+          : "AND (mb.fecha_hora AT TIME ZONE 'America/Argentina/Buenos_Aires')::date = $1::date"
+        : '';
+      return `SELECT mb.id::text AS id, mb.fecha_hora, mb.ordenante, mb.ordenante_cuit,
+              mb.concepto, mb.referencia_externa,
+              COALESCE(mb.origen, 'Extracto Bancario') AS origen,
               (mb.importe_centavos - COALESCE(i.imputado_centavos, 0))::text AS importe_centavos,
-              mb.cuenta_id::text AS cuenta_id, cr.alias AS cuenta
+              mb.cuenta_id::text AS cuenta_id, cr.alias AS cuenta,
+              mbc.nombre_archivo AS comprobante_nombre
        FROM movimiento_bancario mb
        JOIN cuenta_recepcion cr ON cr.id = mb.cuenta_id
        LEFT JOIN (
          SELECT movimiento_bancario_id, SUM(importe_centavos) AS imputado_centavos
          FROM imputacion WHERE movimiento_bancario_id IS NOT NULL GROUP BY movimiento_bancario_id
        ) i ON i.movimiento_bancario_id = mb.id
+       LEFT JOIN movimiento_bancario_comprobante mbc ON mbc.movimiento_id = mb.id
        WHERE mb.estado IN ('sin_imputar', 'parcial')
          ${fechaFiltro}
-       ORDER BY mb.fecha_hora DESC, mb.id DESC`,
-      params
-    );
-    return result.rows;
+       ORDER BY mb.fecha_hora DESC, mb.id DESC`;
+    };
+
+    const params = fecha ? [fecha] : [];
+    try {
+      const result = await db.query(buildQuery(db.isMemory()), params);
+      return result.rows;
+    } catch (err: any) {
+      if (fecha && String(err?.message || '').includes('AT TIME ZONE')) {
+        const fallbackRes = await db.query(buildQuery(true), params);
+        return fallbackRes.rows;
+      }
+      throw err;
+    }
   },
 
   async getSugerencias() {

@@ -52,10 +52,10 @@ async function dispatchImport(body: any, file: any, token: string) {
   };
   const res = responseMock();
 
-  for (const layer of conciliacionRouter.stack.filter((item: any) => !item.route)) {
-    for (const handle of layer. stack ? layer.stack.map((s: any) => s.handle) : [layer.handle]) {
+  for (const layer of (conciliacionRouter as any).stack.filter((item: any) => !item.route)) {
+    for (const handle of layer.stack ? layer.stack.map((s: any) => s.handle) : [layer.handle]) {
       let continued = false;
-      await handle(req, res, (err?: unknown) => {
+      await handle(req, res as any, (err?: unknown) => {
         if (err) throw err;
         continued = true;
       });
@@ -63,7 +63,7 @@ async function dispatchImport(body: any, file: any, token: string) {
     }
   }
 
-  const routeLayer = conciliacionRouter.stack.find(
+  const routeLayer: any = (conciliacionRouter as any).stack.find(
     (item: any) => item.route?.path === '/extractos/importar' && item.route.methods.post
   );
   assert.ok(routeLayer, 'No existe POST /extractos/importar');
@@ -71,10 +71,10 @@ async function dispatchImport(body: any, file: any, token: string) {
   // Ejecutar requireAdministrativo y el handler final (omitiendo el middleware de multer porque inyectamos req.file en el test)
   const stack = routeLayer.route.stack;
   let passedRole = false;
-  await stack[0].handle(req, res, () => { passedRole = true; });
+  await stack[0].handle(req, res as any, () => { passedRole = true; });
   if (!passedRole) return res;
 
-  await stack[stack.length - 1].handle(req, res, () => undefined);
+  await stack[stack.length - 1].handle(req, res as any, () => undefined);
   return res;
 }
 
