@@ -172,17 +172,27 @@ export const remitoService = {
     try {
       visitasRes = await db.query(
         `SELECT id::text as id, comercio_id::text as "comercioId",
-                hoja_de_ruta_id::text as "hojaDeRutaId", orden, estado, observacion
+                hoja_de_ruta_id::text as "hojaDeRutaId", orden, estado, observacion,
+                COALESCE(sincronizacion_pendiente, false) as "sincronizacionPendiente"
          FROM visita
          ORDER BY COALESCE(orden, 999999), id ASC`
       );
     } catch {
-      visitasRes = await db.query(
-        `SELECT id::text as id, comercio_id::text as "comercioId",
-                hoja_de_ruta_id::text as "hojaDeRutaId", orden, estado
-         FROM visita
-         ORDER BY COALESCE(orden, 999999), id ASC`
-      );
+      try {
+        visitasRes = await db.query(
+          `SELECT id::text as id, comercio_id::text as "comercioId",
+                  hoja_de_ruta_id::text as "hojaDeRutaId", orden, estado, observacion
+           FROM visita
+           ORDER BY COALESCE(orden, 999999), id ASC`
+        );
+      } catch {
+        visitasRes = await db.query(
+          `SELECT id::text as id, comercio_id::text as "comercioId",
+                  hoja_de_ruta_id::text as "hojaDeRutaId", orden, estado
+           FROM visita
+           ORDER BY COALESCE(orden, 999999), id ASC`
+        );
+      }
     }
 
     const visitas: Visita[] = [];
@@ -225,6 +235,7 @@ export const remitoService = {
         hojaDeRutaId: v.hojaDeRutaId || null,
         estado: v.estado,
         observacion: v.observacion || null,
+        sincronizacionPendiente: Boolean(v.sincronizacionPendiente),
       });
     }
 
@@ -626,6 +637,7 @@ export const remitoService = {
     }
 
     let transportistaNombre: string | null = null;
+    let transportistaConectado = false;
     if (row.transportistaId) {
       try {
         const uRes = await db.query(
@@ -635,6 +647,7 @@ export const remitoService = {
         if (uRes.rows.length > 0) {
           transportistaNombre = uRes.rows[0].nombre;
         }
+        transportistaConectado = await this.evaluarConexionTransportista(String(row.transportistaId));
       } catch {
         transportistaNombre = null;
       }
@@ -643,6 +656,7 @@ export const remitoService = {
     const cantidadVisitas = visitasRuta.length;
     const cantidadRemitos = visitasRuta.reduce((acc, v) => acc + v.remitos.length, 0);
     const importeTotal = visitasRuta.reduce((acc, v) => acc + v.importeTotal, 0);
+    const tieneSincronizacionPendiente = visitasRuta.some((v) => Boolean(v.sincronizacionPendiente));
 
     return {
       id: idStr,
@@ -650,12 +664,14 @@ export const remitoService = {
       sucursalId: row.sucursalId ? String(row.sucursalId) : undefined,
       transportistaId: row.transportistaId ? String(row.transportistaId) : null,
       transportistaNombre,
+      transportistaConectado,
       fechaReparto: normalizarFechaISO(row.fechaReparto),
       estado: row.estado,
       visitas: visitasRuta,
       cantidadVisitas,
       cantidadRemitos,
       importeTotal,
+      tieneSincronizacionPendiente,
     };
   },
 
@@ -992,23 +1008,104 @@ export const remitoService = {
     return { success: true, visitas: visitasActualizadas };
   },
 
-  async getTransportistasHabilitados(): Promise<Transportista[]> {
+  async evaluarConexionTransportista(transportistaId: string): Promise<boolean> {
+    const cleanId = String(transportistaId || '').replace(/^usr_/, '').trim();
+    if (!cleanId) return false;
     try {
       const res = await db.query(
-        `SELECT id::text as id, nombre, usuario, email, rol, activo, es_transportista as "esTransportista"
+        `SELECT COALESCE(dispositivo_conectado, false) as "dispositivoConectado",
+                ultimo_latido_movil as "ultimoLatidoMovil"
          FROM usuario
-         WHERE activo = true AND (es_transportista = true OR rol = 'Transportista')
-         ORDER BY nombre ASC`
+         WHERE id::text = $1`,
+        [cleanId]
       );
-      return res.rows.map((r: any) => ({
-        id: String(r.id),
-        nombre: r.nombre,
-        usuario: r.usuario,
-        email: r.email || null,
-        rol: r.rol,
-        activo: Boolean(r.activo),
-        esTransportista: Boolean(r.esTransportista),
-      }));
+      if (res.rows.length === 0) return false;
+      const row = res.rows[0];
+      if (!row.dispositivoConectado) return false;
+      if (row.ultimoLatidoMovil) {
+        const latidoMs = new Date(row.ultimoLatidoMovil).getTime();
+        if (!Number.isNaN(latidoMs)) {
+          const diffMs = Date.now() - latidoMs;
+          // Si el celular reportaba latido y dejó de reportar por más de 10s (ej. Modo Avión o app cerrada), está desconectado
+          if (diffMs > 10000) {
+            await db.query('UPDATE usuario SET dispositivo_conectado = false WHERE id::text = $1', [cleanId]).catch(() => undefined);
+            return false;
+          }
+          return true;
+        }
+      }
+      return Boolean(row.dispositivoConectado);
+    } catch {
+      try {
+        const fallback = await db.query(
+          'SELECT COALESCE(dispositivo_conectado, false) as "dispositivoConectado" FROM usuario WHERE id::text = $1',
+          [cleanId]
+        );
+        if (fallback.rows.length > 0) {
+          return Boolean(fallback.rows[0].dispositivoConectado);
+        }
+      } catch {
+        // ignorar
+      }
+      return false;
+    }
+  },
+
+  async registrarLatidoMovil(transportistaId: string | number): Promise<void> {
+    const cleanId = String(transportistaId || '').replace(/^usr_/, '').trim();
+    if (!cleanId) return;
+    try {
+      await db.query(
+        'UPDATE usuario SET dispositivo_conectado = true, ultimo_latido_movil = $1 WHERE id::text = $2',
+        [new Date().toISOString(), cleanId]
+      );
+    } catch {
+      try {
+        await db.query(
+          'UPDATE usuario SET dispositivo_conectado = true WHERE id::text = $1',
+          [cleanId]
+        );
+      } catch {
+        // ignorar
+      }
+    }
+  },
+
+  async getTransportistasHabilitados(): Promise<Transportista[]> {
+    try {
+      let res;
+      try {
+        res = await db.query(
+          `SELECT id::text as id, nombre, usuario, email, rol, activo, es_transportista as "esTransportista",
+                  COALESCE(dispositivo_conectado, false) as "dispositivoConectado",
+                  ultimo_latido_movil as "ultimoLatidoMovil"
+           FROM usuario
+           WHERE activo = true AND (es_transportista = true OR rol = 'Transportista')
+           ORDER BY nombre ASC`
+        );
+      } catch {
+        res = await db.query(
+          `SELECT id::text as id, nombre, usuario, email, rol, activo, es_transportista as "esTransportista"
+           FROM usuario
+           WHERE activo = true AND (es_transportista = true OR rol = 'Transportista')
+           ORDER BY nombre ASC`
+        );
+      }
+      const transportistas: Transportista[] = [];
+      for (const r of res.rows) {
+        const conectado = await this.evaluarConexionTransportista(String(r.id));
+        transportistas.push({
+          id: String(r.id),
+          nombre: r.nombre,
+          usuario: r.usuario,
+          email: r.email || null,
+          rol: r.rol,
+          activo: Boolean(r.activo),
+          esTransportista: Boolean(r.esTransportista),
+          dispositivoConectado: conectado,
+        });
+      }
+      return transportistas;
     } catch {
       return [];
     }
@@ -1320,14 +1417,23 @@ export const remitoService = {
     if (!transportistaId) {
       return { success: false, error: 'Debe especificar el transportista.' };
     }
+    const cleanId = String(transportistaId).replace(/^usr_/, '').trim();
     try {
-      await db.query('UPDATE usuario SET dispositivo_conectado = $1 WHERE id::text = $2', [
-        Boolean(conectado),
-        String(transportistaId),
-      ]);
+      await db.query(
+        'UPDATE usuario SET dispositivo_conectado = $1, ultimo_latido_movil = NULL WHERE id::text = $2',
+        [Boolean(conectado), cleanId]
+      );
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch {
+      try {
+        await db.query('UPDATE usuario SET dispositivo_conectado = $1 WHERE id::text = $2', [
+          Boolean(conectado),
+          cleanId,
+        ]);
+        return { success: true };
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
     }
   },
 
@@ -1438,17 +1544,7 @@ export const remitoService = {
     if (opciones?.dispositivoConectado !== undefined) {
       reportaConexion = Boolean(opciones.dispositivoConectado);
     } else if (hojaRow.transportistaId) {
-      try {
-        const tRes = await db.query(
-          'SELECT COALESCE(dispositivo_conectado, true) as "dispositivoConectado" FROM usuario WHERE id::text = $1',
-          [String(hojaRow.transportistaId)]
-        );
-        if (tRes.rows.length > 0) {
-          reportaConexion = Boolean(tRes.rows[0].dispositivoConectado);
-        }
-      } catch {
-        reportaConexion = true;
-      }
+      reportaConexion = await this.evaluarConexionTransportista(String(hojaRow.transportistaId));
     } else {
       // Si no tiene transportista asignado, se marca sincronización pendiente para cuando se asigne
       reportaConexion = false;
@@ -1475,15 +1571,26 @@ export const remitoService = {
         [remitoRow.comercioId, String(hojaDeRutaId), nuevoOrden, sincronizacionPendiente]
       );
       nuevaVisitaId = vInsert.rows[0].id;
-    } catch {
-      // Fallback en caso de que la tabla visita en test no tenga sincronizacion_pendiente
-      const vInsert = await db.query(
-        `INSERT INTO visita (comercio_id, hoja_de_ruta_id, orden, estado)
-         VALUES ($1::bigint, $2::bigint, $3, 'pendiente')
-         RETURNING id::text as id`,
-        [remitoRow.comercioId, String(hojaDeRutaId), nuevoOrden]
-      );
-      nuevaVisitaId = vInsert.rows[0].id;
+    } catch (err: any) {
+      if (err?.code === '23505' || String(err?.message || '').includes('visita_comercio_unico_idx')) {
+        await db.query('DROP INDEX IF EXISTS visita_comercio_unico_idx;');
+        const vInsert = await db.query(
+          `INSERT INTO visita (comercio_id, hoja_de_ruta_id, orden, estado, sincronizacion_pendiente)
+           VALUES ($1::bigint, $2::bigint, $3, 'pendiente', $4)
+           RETURNING id::text as id`,
+          [remitoRow.comercioId, String(hojaDeRutaId), nuevoOrden, sincronizacionPendiente]
+        );
+        nuevaVisitaId = vInsert.rows[0].id;
+      } else {
+        // Fallback en caso de que la tabla visita en test no tenga sincronizacion_pendiente
+        const vInsert = await db.query(
+          `INSERT INTO visita (comercio_id, hoja_de_ruta_id, orden, estado)
+           VALUES ($1::bigint, $2::bigint, $3, 'pendiente')
+           RETURNING id::text as id`,
+          [remitoRow.comercioId, String(hojaDeRutaId), nuevoOrden]
+        );
+        nuevaVisitaId = vInsert.rows[0].id;
+      }
     }
 
     // Asignar el remito a la visita creada

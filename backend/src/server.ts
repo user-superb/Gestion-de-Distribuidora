@@ -79,7 +79,10 @@ if (process.env.NODE_ENV !== 'test') {
       try {
         await db.query('ALTER TABLE hoja_de_ruta ALTER COLUMN transportista_id DROP NOT NULL;');
         await db.query('ALTER TABLE hoja_de_ruta DROP CONSTRAINT IF EXISTS hoja_unica_por_transportista_y_fecha;');
-        await db.query('ALTER TABLE usuario ADD COLUMN IF NOT EXISTS dispositivo_conectado boolean NOT NULL DEFAULT true;');
+        await db.query('ALTER TABLE usuario ADD COLUMN IF NOT EXISTS dispositivo_conectado boolean NOT NULL DEFAULT false;');
+        await db.query('ALTER TABLE usuario ALTER COLUMN dispositivo_conectado SET DEFAULT false;');
+        await db.query('ALTER TABLE usuario ADD COLUMN IF NOT EXISTS ultimo_latido_movil timestamptz;');
+        await db.query('UPDATE usuario SET dispositivo_conectado = false WHERE ultimo_latido_movil IS NULL OR ultimo_latido_movil < (now() - interval \'12 seconds\');');
         await db.query('ALTER TABLE visita ADD COLUMN IF NOT EXISTS sincronizacion_pendiente boolean NOT NULL DEFAULT false;');
         await db.query('ALTER TABLE visita ADD COLUMN IF NOT EXISTS cobrada_en timestamptz;');
         await db.query('ALTER TABLE cobro ADD COLUMN IF NOT EXISTS referencia_transferencia text;');
@@ -91,6 +94,7 @@ if (process.env.NODE_ENV !== 'test') {
         await db.query("ALTER TABLE cuenta_recepcion ADD COLUMN IF NOT EXISTS moneda text NOT NULL DEFAULT 'ARS';");
         await db.query('ALTER TABLE cuenta_recepcion ADD COLUMN IF NOT EXISTS actualizado_en timestamptz NOT NULL DEFAULT now();');
         await db.query('ALTER TABLE movimiento_bancario ADD COLUMN IF NOT EXISTS concepto text;');
+        await db.query('DROP INDEX IF EXISTS visita_comercio_unico_idx;');
         await db.query(`
           UPDATE hoja_de_ruta
           SET estado = 'en_curso'

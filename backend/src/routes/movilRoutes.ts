@@ -4,6 +4,8 @@ import { NextFunction, Request, Response, Router } from 'express';
 import { requireAuth } from './authRoutes.js';
 import { CobroError, cobroService, fechaArgentina } from '../services/cobroService.js';
 import { RendicionError, rendicionService } from '../services/rendicionService.js';
+import { remitoService } from '../services/remitoService.js';
+import { db } from '../db.js';
 
 export const movilRouter = Router();
 
@@ -35,13 +37,34 @@ movilRouter.get('/hoja-de-ruta', async (req, res) => {
     return res.status(400).json({ error: 'INVALID_DATE', message: 'La fecha debe tener formato AAAA-MM-DD.' });
   }
   try {
-    const hoja = await cobroService.getHojaDelDia(getUsuarioId(req), fecha);
+    const usuarioId = getUsuarioId(req);
+    // Registrar latido de conexión activa del dispositivo móvil (HU #19)
+    await remitoService.registrarLatidoMovil(usuarioId);
+
+    const hoja = await cobroService.getHojaDelDia(usuarioId, fecha);
     if (!hoja) {
       return res.json(null);
     }
+    // Al recibir la hoja en el celular conectado, limpiar las alertas de "Sincronización pendiente" (HU #19)
+    await db.query(
+      'UPDATE visita SET sincronizacion_pendiente = false WHERE hoja_de_ruta_id::text = $1 AND sincronizacion_pendiente = true',
+      [String(hoja.id)]
+    ).catch(() => undefined);
+
     // HU #46: la app necesita saber si ya se declaró el efectivo de esta hoja.
     const rendicion = await rendicionService.getRendicionActivaDeHoja(hoja.id).catch(() => null);
     return res.json({ ...hoja, rendicion });
+  } catch (error) {
+    return responderError(error, res);
+  }
+});
+
+/** POST /api/movil/latido · HU #19: reporta estado de conectividad en tiempo real desde la app móvil */
+movilRouter.post('/latido', async (req, res) => {
+  try {
+    const usuarioId = getUsuarioId(req);
+    await remitoService.registrarLatidoMovil(usuarioId);
+    return res.json({ ok: true, conectado: true, timestamp: new Date().toISOString() });
   } catch (error) {
     return responderError(error, res);
   }

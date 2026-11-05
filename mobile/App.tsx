@@ -66,7 +66,11 @@ export default function App() {
     setAvisoLogin('Tu sesión venció. Volvé a ingresar: lo guardado en el celular se envía después.');
   }, []);
 
-  const jornada = useJornada(sesion, enLinea, onSesionVencida);
+  const onParadaAnexada = useCallback((textoNotificacion: string) => {
+    setMensaje(`🔔 ${textoNotificacion}`);
+  }, []);
+
+  const jornada = useJornada(sesion, enLinea, onSesionVencida, onParadaAnexada);
 
   async function ingresar(nueva: Sesion) {
     fijarSesionActual(nueva);
@@ -102,13 +106,13 @@ export default function App() {
     setMensaje(null);
     if (enLinea && sesion) {
       try {
+        await jornada.recargar();
         const hojaServidor = await obtenerHojaDeRuta(sesion.token);
         if (hojaServidor) {
           await guardarHoja(hojaServidor);
         } else {
           await borrarHoja();
         }
-        await jornada.recargar();
 
         const verificacion = verificarParadaActiva(parada, hojaServidor, jornada.cola);
         if (!verificacion.activa) {

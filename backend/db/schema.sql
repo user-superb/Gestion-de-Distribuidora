@@ -40,7 +40,8 @@ CREATE TABLE usuario (
     rol             text        NOT NULL DEFAULT 'Administrativo' CHECK (rol IN ('Administrador del sistema', 'Administrativo', 'Transportista', 'Supervisor', 'Gerente')),
     limite_autorizacion_centavos bigint NOT NULL DEFAULT 0 CHECK (limite_autorizacion_centavos >= 0),
     es_transportista boolean    NOT NULL DEFAULT false,
-    dispositivo_conectado boolean NOT NULL DEFAULT true,
+    dispositivo_conectado boolean NOT NULL DEFAULT false,
+    ultimo_latido_movil timestamptz,
     activo          boolean     NOT NULL DEFAULT true,
     creado_en       timestamptz NOT NULL DEFAULT now(),
     actualizado_en  timestamptz NOT NULL DEFAULT now()
@@ -305,8 +306,7 @@ CREATE TABLE visita (
 
 CREATE UNIQUE INDEX visita_orden_unico_idx
     ON visita (hoja_de_ruta_id, orden) WHERE hoja_de_ruta_id IS NOT NULL AND orden IS NOT NULL;
-CREATE UNIQUE INDEX visita_comercio_unico_idx
-    ON visita (hoja_de_ruta_id, comercio_id) WHERE hoja_de_ruta_id IS NOT NULL;
+DROP INDEX IF EXISTS visita_comercio_unico_idx;
 
 -- El remito se asigna a una visita al armar la hoja de ruta.
 ALTER TABLE remito

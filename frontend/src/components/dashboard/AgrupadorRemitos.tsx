@@ -166,7 +166,7 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
       recargarDatos();
     };
     window.addEventListener('focus', handleFocus);
-    const interval = setInterval(recargarDatos, 10000);
+    const interval = setInterval(recargarDatos, 3500);
     return () => {
       window.removeEventListener('focus', handleFocus);
       clearInterval(interval);
@@ -2082,15 +2082,36 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                               <span className="text-[11px] font-semibold text-slate-600">
                                 Transportista:
                               </span>
-                              <span
-                                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
-                                  hoja.transportistaId
-                                    ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                                    : 'bg-amber-100 text-amber-900 border-amber-300'
-                                }`}
-                              >
-                                {hoja.transportistaId ? 'Asignado' : 'Sin chofer'}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                {hoja.transportistaId && (() => {
+                                  const choferObj = transportistas.find(
+                                    (tr) => String(tr.id).replace(/^usr_/, '').trim() === String(hoja.transportistaId).replace(/^usr_/, '').trim()
+                                  );
+                                  const estaConectado = choferObj ? Boolean(choferObj.dispositivoConectado) : (hoja.transportistaConectado ?? false);
+                                  return (
+                                    <span
+                                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border inline-flex items-center gap-1 ${
+                                        estaConectado
+                                          ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                          : 'bg-amber-50 text-amber-800 border-amber-300'
+                                      }`}
+                                      title={estaConectado ? 'El celular del chofer reporta señal activa' : 'El celular del chofer está sin señal / modo avión'}
+                                    >
+                                      <span className={`w-1.5 h-1.5 rounded-full ${estaConectado ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                                      {estaConectado ? 'Conectado' : 'Desconectado'}
+                                    </span>
+                                  );
+                                })()}
+                                <span
+                                  className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                                    hoja.transportistaId
+                                      ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                                      : 'bg-amber-100 text-amber-900 border-amber-300'
+                                  }`}
+                                >
+                                  {hoja.transportistaId ? 'Asignado' : 'Sin chofer'}
+                                </span>
+                              </div>
                             </div>
 
                             <div className="flex items-center gap-1.5">

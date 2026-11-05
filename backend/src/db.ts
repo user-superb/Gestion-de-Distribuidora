@@ -47,7 +47,8 @@ function setupMemoryDb() {
       rol text NOT NULL DEFAULT 'Administrativo',
       limite_autorizacion_centavos bigint NOT NULL DEFAULT 0,
       es_transportista boolean NOT NULL DEFAULT false,
-      dispositivo_conectado boolean NOT NULL DEFAULT true,
+      dispositivo_conectado boolean NOT NULL DEFAULT false,
+      ultimo_latido_movil timestamp,
       activo boolean NOT NULL DEFAULT true,
       creado_en timestamp DEFAULT now(),
       actualizado_en timestamp DEFAULT now()

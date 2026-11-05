@@ -158,6 +158,8 @@ export function agruparRemitosPorMarca(documentos: DocumentoAsociado[]): GrupoRe
 /**
  * Agrupa y consolida las visitas activas por punto de entrega (comercio),
  * garantizando el orden de secuencia planificado y consolidando carga, totalizadores por marca y documentos.
+ * Si una misma ruta contiene paradas con distinto número de secuencia (ej. una entrega anexada al final
+ * según HU #19), cada secuencia planificada se respeta como parada independiente en el orden del recorrido.
  * Oculta forzosamente las visitas canceladas o con remitos anulados.
  */
 export function consolidarParadas(visitas: Visita[], cola: ColaPorClave): ParadaConsolidada[] {
@@ -170,13 +172,14 @@ export function consolidarParadas(visitas: Visita[], cola: ColaPorClave): Parada
   // 1. Ordenar visitas de entrada según la secuencia planificada
   const visitasOrdenadas = [...visitasActivas].sort((a, b) => (a.orden ?? 9999) - (b.orden ?? 9999));
 
-  // 2. Agrupar por comercio
+  // 2. Agrupar por comercio y orden de secuencia (permite que paradas anexadas al final con nuevo orden aparezcan como parada separada)
   const grupos = new Map<string, Visita[]>();
   for (const visita of visitasOrdenadas) {
     const c = visita.comercio;
-    const clave = c.id
+    const baseComercio = c.id
       ? `id:${c.id}`
       : `${(c.razonSocial || '').trim().toLowerCase()}::${(c.domicilio || '').trim().toLowerCase()}`;
+    const clave = `${baseComercio}::orden:${visita.orden ?? 'sin_orden'}`;
 
     const existentes = grupos.get(clave);
     if (existentes) {
