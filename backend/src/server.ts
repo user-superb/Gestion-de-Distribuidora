@@ -86,6 +86,11 @@ if (process.env.NODE_ENV !== 'test') {
         await db.query('ALTER TABLE remito ADD COLUMN IF NOT EXISTS entregado_por bigint REFERENCES usuario(id);');
         await db.query('ALTER TABLE remito ADD COLUMN IF NOT EXISTS latitud numeric(9,6);');
         await db.query('ALTER TABLE remito ADD COLUMN IF NOT EXISTS longitud numeric(9,6);');
+        await db.query('ALTER TABLE cuenta_recepcion ADD COLUMN IF NOT EXISTS nombre_fantasia text;');
+        await db.query('ALTER TABLE cuenta_recepcion ADD COLUMN IF NOT EXISTS cuit_titular char(11);');
+        await db.query("ALTER TABLE cuenta_recepcion ADD COLUMN IF NOT EXISTS moneda text NOT NULL DEFAULT 'ARS';");
+        await db.query('ALTER TABLE cuenta_recepcion ADD COLUMN IF NOT EXISTS actualizado_en timestamptz NOT NULL DEFAULT now();');
+        await db.query('ALTER TABLE movimiento_bancario ADD COLUMN IF NOT EXISTS concepto text;');
         await db.query(`
           UPDATE hoja_de_ruta
           SET estado = 'en_curso'

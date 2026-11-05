@@ -350,6 +350,7 @@ CREATE TABLE movimiento_bancario (
     fecha_hora          timestamptz NOT NULL,
     ordenante           text,
     ordenante_cuit      char(11),
+    concepto            text,
     referencia_externa  text,
     importe_centavos    bigint      NOT NULL,
     estado              text        NOT NULL DEFAULT 'sin_imputar',

@@ -14,6 +14,7 @@ conciliacionRouter.use(requireAuth, (req: Request, res: Response, next: NextFunc
 });
 
 const comprobante = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }).single('comprobante');
+const extractoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }).single('archivo');
 const requireAdministrativo = (req: Request, res: Response, next: NextFunction) => {
   if (!['Administrativo', 'Administrador del sistema'].includes((req as any).userSession?.role)) {
     return res.status(403).json({ error: 'FORBIDDEN', message: 'Solo un usuario administrativo puede imputar movimientos.' });
@@ -34,11 +35,49 @@ function parsearLista(value: unknown): unknown {
 
 function responderError(error: unknown, res: Response) {
   if (error instanceof ConciliacionError) {
-    return res.status(error.status).json({ error: 'CONCILIACION_INVALIDA', message: error.message, ...error.details });
+    const code = typeof error.details?.errorCode === 'string' ? error.details.errorCode : 'CONCILIACION_INVALIDA';
+    return res.status(error.status).json({ error: code, message: error.message, ...error.details });
   }
   console.error('Error en conciliación bancaria:', error);
   return res.status(500).json({ error: 'INTERNAL_ERROR', message: 'No se pudo procesar la operación.' });
 }
+
+conciliacionRouter.get('/cuentas-recepcion', async (req, res) => {
+  try {
+    const role = (req as any).userSession?.role || 'Administrativo';
+    return res.json(await conciliacionService.getCuentasRecepcionParaExtracto(getUsuarioId(req), role));
+  } catch (error) {
+    return responderError(error, res);
+  }
+});
+
+conciliacionRouter.post(
+  '/extractos/importar',
+  requireAdministrativo,
+  (req, res, next) =>
+    extractoUpload(req, res, (error: any) => {
+      if (error) {
+        return res.status(400).json({
+          error: 'FORMATO_ARCHIVO_INVALIDO',
+          message: 'El archivo de extracto no debe superar 5 MB y debe ser un archivo CSV o XLS válido.',
+        });
+      }
+      next();
+    }),
+  async (req, res) => {
+    try {
+      const cuentaId = req.body?.cuentaId ?? req.body?.cuenta_id;
+      const result = await conciliacionService.importarExtractoBancario(
+        cuentaId,
+        req.file || null,
+        getUsuarioId(req)
+      );
+      return res.status(200).json({ success: true, ...result });
+    } catch (error) {
+      return responderError(error, res);
+    }
+  }
+);
 
 conciliacionRouter.get('/movimientos', async (req, res) => {
   const fecha = typeof req.query.fecha === 'string' ? req.query.fecha : undefined;

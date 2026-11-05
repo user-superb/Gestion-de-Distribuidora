@@ -1,9 +1,32 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, X } from 'lucide-react';
 import { UserSession } from '../../types/auth';
 
 interface ConciliadorMovimientosProps {
   session: UserSession;
   initialSelection?: { movimientoId: string; remitoId: string; fecha: string } | null;
+}
+
+interface CuentaRecepcionDisponible {
+  id: string;
+  sucursal_id: string;
+  sucursal: string;
+  nombre_fantasia: string | null;
+  alias: string;
+  cbu: string | null;
+  banco: string | null;
+  moneda: string;
+}
+
+interface ResumenImportacionExtracto {
+  cuentaId: string;
+  cuentaAlias: string;
+  moneda: string;
+  archivo: string;
+  totalProcesados: number;
+  insertados: number;
+  omitidosDuplicados: number;
+  mensaje: string;
 }
 
 interface Movimiento {
@@ -69,6 +92,15 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
 
+  // Estado para HU: Importación de extracto bancario digital
+  const [cuentasRecepcion, setCuentasRecepcion] = useState<CuentaRecepcionDisponible[]>([]);
+  const [mostrarImportador, setMostrarImportador] = useState(false);
+  const [cuentaImportacionId, setCuentaImportacionId] = useState('');
+  const [archivoExtracto, setArchivoExtracto] = useState<File | null>(null);
+  const [importandoExtracto, setImportandoExtracto] = useState(false);
+  const [errorImportacion, setErrorImportacion] = useState('');
+  const [resumenImportacion, setResumenImportacion] = useState<ResumenImportacionExtracto | null>(null);
+
   const headers = useMemo(() => ({
     Authorization: `Bearer ${session.token}`,
     'Content-Type': 'application/json',
@@ -103,6 +135,75 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
   }, [fecha, headers]);
 
   useEffect(() => { void cargar(); }, [cargar]);
+
+  useEffect(() => {
+    let active = true;
+    const cargarCuentasOperativas = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/conciliacion/cuentas-recepcion`, { headers });
+        if (res.ok && active) {
+          const data: CuentaRecepcionDisponible[] = await res.json();
+          setCuentasRecepcion(data);
+          if (data.length > 0) {
+            setCuentaImportacionId((prev) => prev || String(data[0].id));
+          }
+        }
+      } catch {
+        // Ignorar en carga inicial si el endpoint no responde en tests antiguos
+      }
+    };
+    void cargarCuentasOperativas();
+    return () => { active = false; };
+  }, [headers]);
+
+  const importarExtracto = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setErrorImportacion('');
+    setResumenImportacion(null);
+
+    if (!cuentaImportacionId) {
+      setErrorImportacion('Seleccioná la cuenta bancaria de recepción a la que corresponde el extracto.');
+      return;
+    }
+    if (!archivoExtracto) {
+      setErrorImportacion('Seleccioná un archivo de extracto bancario (.CSV o .XLS).');
+      return;
+    }
+
+    setImportandoExtracto(true);
+    try {
+      const formData = new FormData();
+      formData.set('cuentaId', cuentaImportacionId);
+      formData.set('archivo', archivoExtracto);
+
+      const response = await fetch(`${API_BASE}/conciliacion/extractos/importar`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.token}` },
+        body: formData,
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'No se pudo importar el extracto bancario.');
+      }
+
+      setResumenImportacion({
+        cuentaId: data.cuentaId,
+        cuentaAlias: data.cuentaAlias,
+        moneda: data.moneda,
+        archivo: data.archivo,
+        totalProcesados: data.totalProcesados,
+        insertados: data.insertados,
+        omitidosDuplicados: data.omitidosDuplicados,
+        mensaje: data.mensaje,
+      });
+      setArchivoExtracto(null);
+      await cargar();
+    } catch (e) {
+      setErrorImportacion(e instanceof Error ? e.message : 'Error al importar el extracto bancario.');
+    } finally {
+      setImportandoExtracto(false);
+    }
+  };
 
   const movimientosVisibles = cuentaId === 'todas' ? movimientos : movimientos.filter((item) => item.cuenta_id === cuentaId);
   const cuentas = [...new Map(movimientos.map((item) => [item.cuenta_id, item.cuenta] as const)).entries()];
@@ -208,16 +309,133 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
           <h2 className="text-sm font-bold text-slate-900">Conciliación bancaria</h2>
           <p className="text-xs text-slate-500">Seleccioná movimientos y remitos; el sistema distribuye los pagos automáticamente según los saldos pendientes.</p>
         </div>
-        <label className="text-xs text-slate-600 flex items-center gap-2">
-          Cuenta
-          <select value={cuentaId} onChange={(event) => { setCuentaId(event.target.value); setMovimientosSeleccionados(new Set()); setRemitosSeleccionados(new Set()); }} className="border border-slate-300 rounded px-2 py-1.5 text-slate-800">
-            <option value="todas">Todas</option>
-            {cuentas.map(([id, alias]) => <option key={id} value={id}>{alias}</option>)}
-          </select>
-          Fecha
-          <input type="date" value={fecha} onChange={(event) => setFecha(event.target.value)} className="border border-slate-300 rounded px-2 py-1.5 text-slate-800" />
-        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setMostrarImportador((v) => !v);
+              setErrorImportacion('');
+            }}
+            className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-100 transition-colors"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            <span>{mostrarImportador ? 'Ocultar importador' : 'Importar extracto'}</span>
+          </button>
+          <label className="text-xs text-slate-600 flex items-center gap-2">
+            Cuenta
+            <select value={cuentaId} onChange={(event) => { setCuentaId(event.target.value); setMovimientosSeleccionados(new Set()); setRemitosSeleccionados(new Set()); }} className="border border-slate-300 rounded px-2 py-1.5 text-slate-800">
+              <option value="todas">Todas</option>
+              {cuentas.map(([id, alias]) => <option key={id} value={id}>{alias}</option>)}
+            </select>
+            Fecha
+            <input type="date" value={fecha} onChange={(event) => setFecha(event.target.value)} className="border border-slate-300 rounded px-2 py-1.5 text-slate-800" />
+          </label>
+        </div>
       </header>
+
+      {mostrarImportador && (
+        <form onSubmit={importarExtracto} className="rounded-md border border-blue-200 bg-blue-50/40 p-4 space-y-3">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                <FileSpreadsheet className="h-4 w-4 text-blue-700" />
+                Importar extracto bancario en archivo digital
+              </h3>
+              <p className="mt-0.5 text-[11px] text-slate-600">
+                Cargá un archivo <strong>.CSV</strong> o <strong>.XLS</strong> con las columnas obligatorias (<code>fecha</code>, <code>concepto</code>, <code>importe</code>, <code>referencia</code>). Los movimientos duplicados se omitirán automáticamente.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMostrarImportador(false)}
+              className="text-slate-400 hover:text-slate-600"
+              aria-label="Cerrar importador"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs text-slate-700 font-medium">
+              Cuenta bancaria de recepción destino *
+              <select
+                required
+                aria-label="Cuenta bancaria de recepción destino"
+                value={cuentaImportacionId}
+                onChange={(e) => {
+                  setCuentaImportacionId(e.target.value);
+                  setErrorImportacion('');
+                }}
+                className="mt-1 w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800"
+              >
+                <option value="">Seleccionar cuenta receptora...</option>
+                {cuentasRecepcion.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.alias} ({c.banco || 'Banco'} · {c.moneda || 'ARS'} · {c.sucursal})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-xs text-slate-700 font-medium">
+              Archivo de extracto (.CSV / .XLS) *
+              <input
+                required
+                type="file"
+                aria-label="Archivo de extracto bancario"
+                accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel"
+                onChange={(e) => {
+                  setArchivoExtracto(e.target.files?.[0] || null);
+                  setErrorImportacion('');
+                }}
+                className="mt-1 block w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
+              />
+            </label>
+          </div>
+
+          {errorImportacion && (
+            <div role="alert" className="flex items-start gap-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-red-600 mt-0.5" />
+              <span>{errorImportacion}</span>
+            </div>
+          )}
+
+          {resumenImportacion && (
+            <div role="status" className="rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 space-y-1.5">
+              <div className="flex items-center gap-1.5 font-bold text-emerald-800">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                <span>Resumen consolidado de importación ({resumenImportacion.archivo})</span>
+              </div>
+              <p>{resumenImportacion.mensaje}</p>
+              <div className="grid grid-cols-3 gap-2 pt-1 text-[11px]">
+                <div className="rounded bg-white/80 px-2.5 py-1.5 border border-emerald-200">
+                  <span className="text-slate-500 block">Total leídos</span>
+                  <strong className="text-sm text-slate-900">{resumenImportacion.totalProcesados}</strong>
+                </div>
+                <div className="rounded bg-white/80 px-2.5 py-1.5 border border-emerald-200">
+                  <span className="text-slate-500 block">Registros insertados</span>
+                  <strong className="text-sm text-emerald-700">{resumenImportacion.insertados}</strong>
+                </div>
+                <div className="rounded bg-white/80 px-2.5 py-1.5 border border-emerald-200">
+                  <span className="text-slate-500 block">Duplicados descartados</span>
+                  <strong className="text-sm text-amber-700">{resumenImportacion.omitidosDuplicados}</strong>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="submit"
+              disabled={importandoExtracto}
+              className="inline-flex items-center gap-1.5 rounded-md bg-blue-700 hover:bg-blue-800 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm disabled:opacity-50"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              <span>{importandoExtracto ? 'Importando extracto…' : 'Procesar extracto'}</span>
+            </button>
+          </div>
+        </form>
+      )}
 
       {error && <p role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">{error}</p>}
       {mensaje && <p role="status" className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">{mensaje}</p>}

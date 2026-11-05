@@ -11,6 +11,378 @@ export class ConciliacionError extends Error {
   }
 }
 
+export interface ArchivoImportacion {
+  originalname: string;
+  mimetype?: string;
+  size: number;
+  buffer: Buffer;
+}
+
+export interface MovimientoExtractoParseado {
+  fila: number;
+  fechaHora: Date;
+  fechaClave: string;
+  concepto: string;
+  ordenante: string;
+  ordenanteCuit: string | null;
+  importeCentavos: bigint;
+  referenciaExterna: string;
+  cbuFila?: string;
+  cuentaFila?: string;
+  monedaFila?: string;
+}
+
+interface MetadataExtracto {
+  cbu?: string;
+  numeroCuenta?: string;
+  moneda?: string;
+  alias?: string;
+}
+
+function normalizarEncabezado(valor: string): string {
+  return valor
+    .replace(/^\uFEFF/, '')
+    .trim()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '');
+}
+
+function dividirLineaDelimited(linea: string, delimitador: string): string[] {
+  const resultado: string[] = [];
+  let actual = '';
+  let enComillas = false;
+  for (let i = 0; i < linea.length; i++) {
+    const char = linea[i];
+    if (char === '"') {
+      if (enComillas && linea[i + 1] === '"') {
+        actual += '"';
+        i++;
+      } else {
+        enComillas = !enComillas;
+      }
+    } else if (char === delimitador && !enComillas) {
+      resultado.push(actual.trim());
+      actual = '';
+    } else {
+      actual += char;
+    }
+  }
+  resultado.push(actual.trim());
+  return resultado;
+}
+
+function detectarDelimitador(linea: string): string {
+  const candidatos = [';', ',', '\t'];
+  let mejor = ',';
+  let max = -1;
+  for (const delim of candidatos) {
+    const partes = dividirLineaDelimited(linea, delim);
+    if (partes.length > max) {
+      max = partes.length;
+      mejor = delim;
+    }
+  }
+  return mejor;
+}
+
+function parsearFechaExtracto(raw: string): { fechaHora: Date; fechaClave: string } | null {
+  const limpio = raw.trim();
+  if (!limpio) return null;
+
+  // Formato ISO o YYYY-MM-DD[ HH:mm[:ss]]
+  const isoMatch = limpio.match(/^(\d{4})[-/](\d{2})[-/](\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$/);
+  if (isoMatch) {
+    const [, y, m, d, hh = '12', mm = '00', ss = '00'] = isoMatch;
+    const year = Number(y);
+    const month = Number(m);
+    const day = Number(d);
+    const date = new Date(Date.UTC(year, month - 1, day, Number(hh), Number(mm), Number(ss)));
+    if (
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day
+    ) {
+      return { fechaHora: date, fechaClave: `${y}-${m}-${d}` };
+    }
+    return null;
+  }
+
+  // Formato DD/MM/YYYY o DD-MM-YYYY [HH:mm[:ss]]
+  const arMatch = limpio.match(/^(\d{2})[/-](\d{2})[/-](\d{4})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (arMatch) {
+    const [, d, m, y, hh = '12', mm = '00', ss = '00'] = arMatch;
+    const year = Number(y);
+    const month = Number(m);
+    const day = Number(d);
+    const date = new Date(Date.UTC(year, month - 1, day, Number(hh), Number(mm), Number(ss)));
+    if (
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day
+    ) {
+      return { fechaHora: date, fechaClave: `${y}-${m}-${d}` };
+    }
+    return null;
+  }
+
+  return null;
+}
+
+function parsearImporteCentavos(raw: string): bigint | null {
+  let limpio = raw.trim().replace(/[$ARSUSD\s]/gi, '');
+  if (!limpio) return null;
+  // No se admiten signos negativos ni cero para ingresos bancarios
+  if (limpio.startsWith('-')) return null;
+  limpio = limpio.replace(/^\+/, '');
+
+  // Determinar separador decimal: si tiene ',' y '.', el último es el decimal
+  const ultimaComa = limpio.lastIndexOf(',');
+  const ultimoPunto = limpio.lastIndexOf('.');
+
+  if (ultimaComa !== -1 && ultimoPunto !== -1) {
+    if (ultimaComa > ultimoPunto) {
+      // Formato 15.700,50
+      limpio = limpio.replace(/\./g, '').replace(',', '.');
+    } else {
+      // Formato 15,700.50
+      limpio = limpio.replace(/,/g, '');
+    }
+  } else if (ultimaComa !== -1) {
+    // Formato 15700,50
+    limpio = limpio.replace(',', '.');
+  } else if (ultimoPunto !== -1) {
+    // Si hay más de un punto (ej: 15.700.000), son separadores de miles
+    const partes = limpio.split('.');
+    if (partes.length > 2) {
+      limpio = partes.join('');
+    }
+  }
+
+  if (!/^\d+(?:\.\d{1,2})?$/.test(limpio)) return null;
+  const [entero, decimal = ''] = limpio.split('.');
+  const centavosStr = decimal.padEnd(2, '0');
+  const centavos = BigInt(entero) * 100n + BigInt(centavosStr);
+  return centavos > 0n ? centavos : null;
+}
+
+function extraerFilasDeTexto(contenido: string): { metadata: MetadataExtracto; filas: string[][] } {
+  const metadata: MetadataExtracto = {};
+  const trimmed = contenido.trim();
+
+  // Soporte de tabla XML/HTML de XLS bancario estándar si el archivo exportado por el banco es HTML/XML
+  if (/^<(?:!DOCTYPE|html|table|\?xml)/i.test(trimmed)) {
+    const filas: string[][] = [];
+    const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    let trMatch: RegExpExecArray | null;
+    while ((trMatch = trRegex.exec(trimmed)) !== null) {
+      const celdas: string[] = [];
+      const tdRegex = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+      let tdMatch: RegExpExecArray | null;
+      while ((tdMatch = tdRegex.exec(trMatch[1])) !== null) {
+        const textoCelda = tdMatch[1].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
+        celdas.push(textoCelda);
+      }
+      if (celdas.some((c) => c.length > 0)) filas.push(celdas);
+    }
+    return { metadata, filas };
+  }
+
+  const lineasBrutas = contenido.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const lineasDatos: string[] = [];
+
+  for (const linea of lineasBrutas) {
+    const sinBom = linea.replace(/^\uFEFF/, '').trim();
+    if (!sinBom) continue;
+
+    // Detectar metadatos de cabecera del extracto (ej: "# CBU: 2850...", "CBU;2850...", "MONEDA: ARS", "CUENTA: ...")
+    const metaMatch = sinBom.match(/^(?:#\s*)?(cbu|nro_cuenta|numero_cuenta|cuenta|moneda|divisa|alias)\s*[:=;,\t]\s*([^\r\n;,\t]+)/i);
+    if (metaMatch && lineasDatos.length === 0) {
+      const clave = normalizarEncabezado(metaMatch[1]);
+      const valor = metaMatch[2].trim();
+      if (clave === 'cbu') metadata.cbu = valor;
+      else if (clave === 'moneda' || clave === 'divisa') metadata.moneda = valor.toUpperCase();
+      else if (clave === 'alias') metadata.alias = valor;
+      else metadata.numeroCuenta = valor;
+      continue;
+    }
+
+    if (sinBom.startsWith('#')) continue;
+    lineasDatos.push(sinBom);
+  }
+
+  if (lineasDatos.length === 0) return { metadata, filas: [] };
+  const delimitador = detectarDelimitador(lineasDatos[0]);
+  const filas = lineasDatos.map((l) => dividirLineaDelimited(l, delimitador));
+  return { metadata, filas };
+}
+
+function parsearArchivoExtracto(archivo: ArchivoImportacion): { metadata: MetadataExtracto; movimientos: MovimientoExtractoParseado[] } {
+  const nombre = (archivo.originalname || '').trim().toLowerCase();
+  const extensionValida = nombre.endsWith('.csv') || nombre.endsWith('.xls') || nombre.endsWith('.xlsx');
+  if (!extensionValida) {
+    throw new ConciliacionError(
+      'El formato del archivo no es válido. Solo se admiten extractos bancarios en formato .CSV o .XLS.',
+      400,
+      { errorCode: 'FORMATO_ARCHIVO_INVALIDO' }
+    );
+  }
+
+  if (!archivo.buffer || archivo.buffer.length === 0 || archivo.size <= 0) {
+    throw new ConciliacionError(
+      'El archivo de extracto bancario está vacío o dañado.',
+      400,
+      { errorCode: 'FORMATO_ARCHIVO_INVALIDO' }
+    );
+  }
+
+  // Detectar bytes nulos o binarios corruptos no legibles
+  if (archivo.buffer.includes(0x00)) {
+    throw new ConciliacionError(
+      'El archivo contiene datos corruptos o codificación binaria no soportada.',
+      400,
+      { errorCode: 'FORMATO_ARCHIVO_INVALIDO' }
+    );
+  }
+
+  const contenido = archivo.buffer.toString('utf-8');
+  if (contenido.includes('\uFFFD')) {
+    throw new ConciliacionError(
+      'El archivo presenta errores de codificación o caracteres corruptos. Utilizá codificación UTF-8.',
+      400,
+      { errorCode: 'FORMATO_ARCHIVO_INVALIDO' }
+    );
+  }
+
+  const { metadata, filas } = extraerFilasDeTexto(contenido);
+  if (filas.length < 2) {
+    throw new ConciliacionError(
+      'El extracto bancario no contiene encabezados o registros de movimientos válidos.',
+      400,
+      { errorCode: 'ESTRUCTURA_ARCHIVO_INVALIDA' }
+    );
+  }
+
+  const encabezados = filas[0].map(normalizarEncabezado);
+  const buscarColumna = (aliasList: string[]) => encabezados.findIndex((h) => aliasList.includes(h));
+
+  const idxFecha = buscarColumna(['fecha', 'fecha_hora', 'fecha_movimiento', 'fecha_operacion', 'fecha_valor']);
+  const idxConcepto = buscarColumna(['concepto', 'descripcion', 'detalle', 'motivo']);
+  const idxImporte = buscarColumna(['importe', 'monto', 'importe_pesos', 'credito', 'valor']);
+  const idxReferencia = buscarColumna(['referencia', 'referencia_externa', 'id_transaccion', 'nro_transaccion', 'id_movimiento', 'comprobante', 'numero_operacion']);
+  const idxOrdenante = buscarColumna(['ordenante', 'cliente', 'razon_social', 'origen', 'titular_origen']);
+  const idxCuit = buscarColumna(['cuit', 'ordenante_cuit', 'cuit_ordenante', 'cuit_origen']);
+  const idxCbu = buscarColumna(['cbu', 'cbu_cuenta', 'cbu_destino', 'cuenta_cbu']);
+  const idxCuenta = buscarColumna(['cuenta', 'nro_cuenta', 'numero_cuenta', 'cuenta_destino']);
+  const idxMoneda = buscarColumna(['moneda', 'divisa', 'currency']);
+
+  const faltantes: string[] = [];
+  if (idxFecha === -1) faltantes.push('fecha');
+  if (idxConcepto === -1) faltantes.push('concepto');
+  if (idxImporte === -1) faltantes.push('importe');
+  if (idxReferencia === -1) faltantes.push('referencia');
+
+  if (faltantes.length > 0) {
+    throw new ConciliacionError(
+      `El archivo no respeta la estructura mínima obligatoria. Faltan las columnas: ${faltantes.join(', ')}.`,
+      400,
+      { errorCode: 'ESTRUCTURA_ARCHIVO_INVALIDA', columnasFaltantes: faltantes }
+    );
+  }
+
+  const movimientos: MovimientoExtractoParseado[] = [];
+  const numColumnasEsperadas = filas[0].length;
+
+  for (let i = 1; i < filas.length; i++) {
+    const fila = filas[i];
+    const nroFila = i + 1;
+
+    if (fila.every((celda) => !celda.trim())) continue;
+
+    if (fila.length < 4 || fila.length > numColumnasEsperadas + 2) {
+      throw new ConciliacionError(
+        `Error de formato en la fila ${nroFila}: la estructura de columnas está corrupta o incompleta.`,
+        400,
+        { errorCode: 'DATOS_CORRUPTOS', fila: nroFila }
+      );
+    }
+
+    const rawFecha = fila[idxFecha] || '';
+    const rawConcepto = (fila[idxConcepto] || '').trim();
+    const rawImporte = fila[idxImporte] || '';
+    const rawReferencia = (fila[idxReferencia] || '').trim();
+    const rawOrdenante = idxOrdenante !== -1 ? (fila[idxOrdenante] || '').trim() : '';
+    const rawCuit = idxCuit !== -1 ? (fila[idxCuit] || '').replace(/\D/g, '') : '';
+    const rawCbu = idxCbu !== -1 ? (fila[idxCbu] || '').trim() : undefined;
+    const rawCuenta = idxCuenta !== -1 ? (fila[idxCuenta] || '').trim() : undefined;
+    const rawMoneda = idxMoneda !== -1 ? (fila[idxMoneda] || '').trim().toUpperCase() : undefined;
+
+    const fechaParsed = parsearFechaExtracto(rawFecha);
+    if (!fechaParsed) {
+      throw new ConciliacionError(
+        `Datos corruptos o inválidos en la fila ${nroFila}: la fecha "${rawFecha}" no tiene un formato válido.`,
+        400,
+        { errorCode: 'DATOS_CORRUPTOS', fila: nroFila }
+      );
+    }
+
+    if (!rawConcepto) {
+      throw new ConciliacionError(
+        `Datos incompletos en la fila ${nroFila}: el campo concepto es obligatorio.`,
+        400,
+        { errorCode: 'DATOS_CORRUPTOS', fila: nroFila }
+      );
+    }
+
+    const importeCentavos = parsearImporteCentavos(rawImporte);
+    if (importeCentavos === null) {
+      throw new ConciliacionError(
+        `Datos corruptos o inválidos en la fila ${nroFila}: el importe "${rawImporte}" no es un monto positivo válido.`,
+        400,
+        { errorCode: 'DATOS_CORRUPTOS', fila: nroFila }
+      );
+    }
+
+    if (rawCuit && rawCuit.length !== 11) {
+      throw new ConciliacionError(
+        `Datos inválidos en la fila ${nroFila}: el CUIT del ordenante debe tener 11 dígitos.`,
+        400,
+        { errorCode: 'DATOS_CORRUPTOS', fila: nroFila }
+      );
+    }
+
+    const referenciaFinal = rawReferencia || `REF-${fechaParsed.fechaClave}-${importeCentavos.toString()}-${normalizarNombre(rawConcepto).slice(0, 20)}`;
+    const ordenanteFinal = rawOrdenante || rawConcepto;
+
+    movimientos.push({
+      fila: nroFila,
+      fechaHora: fechaParsed.fechaHora,
+      fechaClave: fechaParsed.fechaClave,
+      concepto: rawConcepto,
+      ordenante: ordenanteFinal,
+      ordenanteCuit: rawCuit || null,
+      importeCentavos,
+      referenciaExterna: referenciaFinal,
+      cbuFila: rawCbu || undefined,
+      cuentaFila: rawCuenta || undefined,
+      monedaFila: rawMoneda || undefined,
+    });
+  }
+
+  if (movimientos.length === 0) {
+    throw new ConciliacionError(
+      'El extracto bancario no contiene registros de movimientos para procesar.',
+      400,
+      { errorCode: 'ESTRUCTURA_ARCHIVO_INVALIDA' }
+    );
+  }
+
+  return { metadata, movimientos };
+}
+
 function normalizarNombre(value: string | null | undefined): string {
   return (value || '')
     .normalize('NFD')
@@ -216,12 +588,256 @@ async function enTransaccion<T>(action: (client: PoolClient) => Promise<T>): Pro
 }
 
 export const conciliacionService = {
+  async getCuentasRecepcionParaExtracto(usuarioId: number, rol: string) {
+    const isAdminSistema = rol === 'Administrador del sistema' || rol === 'Gerente';
+    const query = isAdminSistema
+      ? `SELECT cr.id::text AS id, cr.sucursal_id::text AS sucursal_id, s.nombre AS sucursal,
+                cr.nombre_fantasia, cr.alias, cr.cbu, cr.banco, COALESCE(cr.moneda, 'ARS') AS moneda
+         FROM cuenta_recepcion cr
+         JOIN sucursal s ON s.id = cr.sucursal_id
+         WHERE cr.activa = true AND s.activa = true
+         ORDER BY s.nombre, cr.alias`
+      : `SELECT cr.id::text AS id, cr.sucursal_id::text AS sucursal_id, s.nombre AS sucursal,
+                cr.nombre_fantasia, cr.alias, cr.cbu, cr.banco, COALESCE(cr.moneda, 'ARS') AS moneda
+         FROM cuenta_recepcion cr
+         JOIN sucursal s ON s.id = cr.sucursal_id
+         JOIN usuario_sucursal us ON us.sucursal_id = cr.sucursal_id
+         WHERE us.usuario_id = $1 AND cr.activa = true AND s.activa = true
+         ORDER BY s.nombre, cr.alias`;
+    const res = await db.query(query, isAdminSistema ? [] : [usuarioId]);
+    return res.rows.map((r: any) => ({
+      ...r,
+      cbu: r.cbu ? String(r.cbu).trim() : null,
+    }));
+  },
+
+  async importarExtractoBancario(cuentaIdValue: unknown, archivo: ArchivoImportacion | null, usuarioId: number) {
+    const cuentaId = Number(cuentaIdValue);
+    if (!Number.isSafeInteger(cuentaId) || cuentaId <= 0) {
+      throw new ConciliacionError('Seleccioná una cuenta bancaria de recepción válida para importar el extracto.', 400, {
+        errorCode: 'CUENTA_NO_IDENTIFICADA',
+      });
+    }
+    if (!archivo) {
+      throw new ConciliacionError('Adjuntá un archivo de extracto bancario (.CSV o .XLS).', 400, {
+        errorCode: 'FORMATO_ARCHIVO_INVALIDO',
+      });
+    }
+
+    // 1. Parsear y validar estructura del archivo ANTES de abrir o persistir en BD (Escenario 2)
+    const { metadata, movimientos } = parsearArchivoExtracto(archivo);
+
+    return enTransaccion(async (client) => {
+      // 2. Validar existencia y vigencia de la cuenta receptora seleccionada (Escenario 3)
+      const cuentaRes = await client.query(
+        `SELECT cr.id, cr.sucursal_id, cr.alias, cr.cbu, cr.banco, cr.moneda, cr.activa,
+                s.activa AS sucursal_activa, s.nombre AS sucursal_nombre
+         FROM cuenta_recepcion cr
+         JOIN sucursal s ON s.id = cr.sucursal_id
+         WHERE cr.id = $1`,
+        [cuentaId]
+      );
+
+      if (!cuentaRes.rowCount) {
+        throw new ConciliacionError(
+          'La cuenta bancaria de recepción seleccionada no existe o no fue identificada en el sistema.',
+          422,
+          { errorCode: 'CUENTA_NO_IDENTIFICADA' }
+        );
+      }
+
+      const cuenta = cuentaRes.rows[0];
+      if (!cuenta.activa || !cuenta.sucursal_activa) {
+        throw new ConciliacionError(
+          'La cuenta de recepción seleccionada o su sucursal se encuentra inactiva y no admite importaciones.',
+          422,
+          { errorCode: 'CUENTA_INCONSISTENTE' }
+        );
+      }
+
+      const cbuCuenta = (cuenta.cbu || '').trim();
+      const aliasCuenta = (cuenta.alias || '').trim().toLowerCase();
+      const monedaCuenta = (cuenta.moneda || 'ARS').trim().toUpperCase();
+
+      const coincideNumeroCuenta = (valorArchivo: string) => {
+        const limpio = valorArchivo.trim();
+        const soloDigitos = limpio.replace(/\D/g, '');
+        if (limpio.toLowerCase() === aliasCuenta) return true;
+        if (cbuCuenta && limpio === cbuCuenta) return true;
+        // En CBU argentino, los últimos 14 dígitos corresponden al bloque de número de cuenta + verificador
+        if (cbuCuenta && soloDigitos.length >= 6 && cbuCuenta.includes(soloDigitos)) return true;
+        return false;
+      };
+
+      // Validar metadatos de cabecera del extracto contra la cuenta destino (Escenario 3)
+      if (metadata.cbu) {
+        const cbuArchivo = metadata.cbu.replace(/\D/g, '');
+        if (!cbuCuenta || cbuArchivo !== cbuCuenta) {
+          throw new ConciliacionError(
+            `El CBU informado en el extracto (${metadata.cbu}) no coincide con el CBU de la cuenta de recepción seleccionada (${cbuCuenta || 'sin CBU'}).`,
+            422,
+            { errorCode: 'CUENTA_INCONSISTENTE', detalle: 'cbu' }
+          );
+        }
+      }
+
+      if (metadata.numeroCuenta && !coincideNumeroCuenta(metadata.numeroCuenta)) {
+        throw new ConciliacionError(
+          `El número de cuenta o identificador del extracto (${metadata.numeroCuenta}) no corresponde a la cuenta de recepción seleccionada (${cuenta.alias}).`,
+          422,
+          { errorCode: 'CUENTA_INCONSISTENTE', detalle: 'numero_cuenta' }
+        );
+      }
+
+      if (metadata.alias && metadata.alias.trim().toLowerCase() !== aliasCuenta) {
+        throw new ConciliacionError(
+          `El alias del extracto (${metadata.alias}) no coincide con la cuenta de recepción seleccionada (${cuenta.alias}).`,
+          422,
+          { errorCode: 'CUENTA_INCONSISTENTE', detalle: 'alias' }
+        );
+      }
+
+      if (metadata.moneda && metadata.moneda.toUpperCase() !== monedaCuenta) {
+        throw new ConciliacionError(
+          `La moneda del extracto (${metadata.moneda}) no coincide con la moneda configurada en la cuenta de recepción (${monedaCuenta}).`,
+          422,
+          { errorCode: 'CUENTA_INCONSISTENTE', detalle: 'moneda' }
+        );
+      }
+
+      // Validar también columnas por fila si el extracto incluye CBU, cuenta o moneda en cada registro (Escenario 3)
+      for (const mov of movimientos) {
+        if (mov.cbuFila) {
+          const cbuFilaLimpio = mov.cbuFila.replace(/\D/g, '');
+          if (!cbuCuenta || cbuFilaLimpio !== cbuCuenta) {
+            throw new ConciliacionError(
+              `Inconsistencia en la fila ${mov.fila}: el CBU del movimiento (${mov.cbuFila}) no coincide con el CBU de la cuenta seleccionada (${cbuCuenta || 'sin CBU'}).`,
+              422,
+              { errorCode: 'CUENTA_INCONSISTENTE', detalle: 'cbu', fila: mov.fila }
+            );
+          }
+        }
+        if (mov.cuentaFila && !coincideNumeroCuenta(mov.cuentaFila)) {
+          throw new ConciliacionError(
+            `Inconsistencia en la fila ${mov.fila}: la cuenta del movimiento (${mov.cuentaFila}) no corresponde a la cuenta seleccionada (${cuenta.alias}).`,
+            422,
+            { errorCode: 'CUENTA_INCONSISTENTE', detalle: 'numero_cuenta', fila: mov.fila }
+          );
+        }
+        if (mov.monedaFila && mov.monedaFila !== monedaCuenta) {
+          throw new ConciliacionError(
+            `Inconsistencia en la fila ${mov.fila}: la moneda del movimiento (${mov.monedaFila}) no coincide con la moneda de la cuenta seleccionada (${monedaCuenta}).`,
+            422,
+            { errorCode: 'CUENTA_INCONSISTENTE', detalle: 'moneda', fila: mov.fila }
+          );
+        }
+      }
+
+      // 3. Consultar movimientos existentes en la cuenta para garantizar idempotencia por referencia_externa o (fecha, importe, referencia) (Escenario 1)
+      const existentesRes = await client.query(
+        `SELECT id::text AS id, referencia_externa, importe_centavos::text AS importe_centavos, fecha_hora
+         FROM movimiento_bancario
+         WHERE cuenta_id = $1`,
+        [cuentaId]
+      );
+
+      const referenciasExistentes = new Set<string>();
+      const clavesCompuestasExistentes = new Set<string>();
+
+      for (const row of existentesRes.rows) {
+        const ref = (row.referencia_externa || '').trim().toLowerCase();
+        if (ref) referenciasExistentes.add(ref);
+        const fechaIso = row.fecha_hora ? new Date(row.fecha_hora).toISOString().slice(0, 10) : '';
+        const claveCompuesta = `${fechaIso}|${row.importe_centavos}|${ref}`;
+        clavesCompuestasExistentes.add(claveCompuesta);
+      }
+
+      let insertados = 0;
+      let omitidosDuplicados = 0;
+      const movimientosInsertados: Array<{
+        id: string;
+        referencia_externa: string;
+        importe_centavos: string;
+        ordenante: string;
+        fecha_hora: string;
+      }> = [];
+
+      for (const mov of movimientos) {
+        const refNorm = mov.referenciaExterna.trim().toLowerCase();
+        const claveCompuesta = `${mov.fechaClave}|${mov.importeCentavos.toString()}|${refNorm}`;
+
+        if (referenciasExistentes.has(refNorm) || clavesCompuestasExistentes.has(claveCompuesta)) {
+          omitidosDuplicados++;
+          continue;
+        }
+
+        const insertRes = await client.query(
+          `INSERT INTO movimiento_bancario
+             (cuenta_id, fecha_hora, ordenante, ordenante_cuit, concepto, referencia_externa, importe_centavos, estado)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'sin_imputar')
+           RETURNING id::text AS id, fecha_hora`,
+          [
+            cuentaId,
+            mov.fechaHora,
+            mov.ordenante,
+            mov.ordenanteCuit,
+            mov.concepto,
+            mov.referenciaExterna,
+            mov.importeCentavos.toString(),
+          ]
+        );
+
+        referenciasExistentes.add(refNorm);
+        clavesCompuestasExistentes.add(claveCompuesta);
+        insertados++;
+
+        movimientosInsertados.push({
+          id: insertRes.rows[0].id,
+          referencia_externa: mov.referenciaExterna,
+          importe_centavos: mov.importeCentavos.toString(),
+          ordenante: mov.ordenante,
+          fecha_hora: new Date(insertRes.rows[0].fecha_hora).toISOString(),
+        });
+      }
+
+      await client.query(
+        `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
+         VALUES ('cuenta_recepcion', $1, 'importacion_extracto', $2, $3::jsonb, $4)`,
+        [
+          cuentaId,
+          usuarioId,
+          JSON.stringify({
+            archivo: archivo.originalname,
+            totalProcesados: movimientos.length,
+            insertados,
+            omitidosDuplicados,
+          }),
+          `Importación de extracto bancario (${insertados} insertados, ${omitidosDuplicados} duplicados omitidos)`,
+        ]
+      );
+
+      return {
+        cuentaId: String(cuentaId),
+        cuentaAlias: cuenta.alias,
+        moneda: monedaCuenta,
+        archivo: archivo.originalname,
+        totalProcesados: movimientos.length,
+        insertados,
+        omitidosDuplicados,
+        movimientosInsertados,
+        mensaje: `Importación finalizada: ${insertados} movimiento(s) nuevo(s) insertado(s) y ${omitidosDuplicados} registro(s) duplicado(s) omitido(s).`,
+      };
+    });
+  },
+
   async getMovimientosPendientes(fecha?: string) {
     const params: unknown[] = [];
     let fechaFiltro = '';
     if (fecha) {
       params.push(fecha);
-      fechaFiltro = "AND (mb.fecha_hora AT TIME ZONE 'America/Argentina/Buenos_Aires')::date = $1::date";
+      fechaFiltro = db.isMemory()
+        ? 'AND mb.fecha_hora::date = $1::date'
+        : "AND (mb.fecha_hora AT TIME ZONE 'America/Argentina/Buenos_Aires')::date = $1::date";
     }
     const result = await db.query(
       `SELECT mb.id::text AS id, mb.fecha_hora, mb.ordenante,
@@ -344,7 +960,7 @@ export const conciliacionService = {
   async getRemitosPendientes() {
     const result = await db.query(
       `SELECT r.id::text AS id, r.numero, r.estado,
-              COALESCE(r.entregado_en, v.registrada_en)::text AS fecha_entrega,
+              COALESCE(r.entregado_en, v.registrada_en) AS fecha_entrega,
               c.id::text AS comercio_id, c.razon_social,
               m.nombre AS marca, rs.importe_centavos::text AS importe_centavos,
               rs.saldo_centavos::text AS saldo_centavos,
@@ -370,9 +986,10 @@ export const conciliacionService = {
               dc.importe_seleccionado::text AS importe_seleccionado,
               dc.diferencia_centavos::text AS diferencia_centavos, dc.nota, dc.motivo_codigo,
               dc.remito_ids::text AS remito_ids, dc.estado, dc.creada_por::text AS creada_por,
-              (SELECT nombre_archivo FROM discrepancia_comprobante WHERE discrepancia_id = dc.id) AS comprobante_nombre
+              dcomp.nombre_archivo AS comprobante_nombre
        FROM discrepancia_conciliacion dc
        JOIN movimiento_bancario mb ON mb.id = dc.movimiento_id
+       LEFT JOIN discrepancia_comprobante dcomp ON dcomp.discrepancia_id = dc.id
        WHERE dc.estado IN ('pendiente','escalada')
        ORDER BY dc.creada_en DESC`
     );

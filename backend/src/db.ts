@@ -71,12 +71,28 @@ function setupMemoryDb() {
     CREATE TABLE IF NOT EXISTS cuenta_recepcion (
       id serial PRIMARY KEY,
       sucursal_id bigint NOT NULL,
+      nombre_fantasia text,
       alias text NOT NULL,
       cbu char(22),
       banco text,
+      cuit_titular char(11),
+      moneda text NOT NULL DEFAULT 'ARS',
       activa boolean NOT NULL DEFAULT true,
       creado_en timestamp DEFAULT now(),
+      actualizado_en timestamp DEFAULT now(),
       UNIQUE (sucursal_id, alias)
+    );
+
+    CREATE TABLE IF NOT EXISTS liquidacion (
+      id serial PRIMARY KEY,
+      marca_id bigint,
+      sucursal_id bigint NOT NULL,
+      periodo_desde date NOT NULL DEFAULT CURRENT_DATE,
+      periodo_hasta date NOT NULL DEFAULT CURRENT_DATE,
+      importe_centavos bigint NOT NULL DEFAULT 0,
+      estado text NOT NULL DEFAULT 'abierta',
+      generada_por bigint,
+      generada_en timestamp DEFAULT now()
     );
 
     CREATE TABLE IF NOT EXISTS sesion_usuario (
@@ -228,10 +244,12 @@ function setupMemoryDb() {
       fecha_hora timestamp DEFAULT now(),
       ordenante text NOT NULL,
       ordenante_cuit char(11),
+      concepto text,
       referencia_externa text,
       importe_centavos bigint NOT NULL,
       estado text NOT NULL DEFAULT 'sin_imputar',
-      creado_en timestamp DEFAULT now()
+      creado_en timestamp DEFAULT now(),
+      UNIQUE (cuenta_id, referencia_externa)
     );
 
     CREATE TABLE IF NOT EXISTS imputacion (
@@ -292,16 +310,16 @@ function setupMemoryDb() {
 
     CREATE VIEW remito_saldo AS
     WITH pagos AS (
-      SELECT remito_id, SUM(importe_centavos) AS importe_centavos FROM imputacion WHERE anulado = false GROUP BY remito_id
+      SELECT remito_id, SUM(importe_centavos)::bigint AS importe_centavos FROM imputacion WHERE anulado = false GROUP BY remito_id
     ), ajustes AS (
-      SELECT remito_id, SUM(importe_centavos) AS importe_centavos FROM discrepancia_ajuste WHERE tipo = 'reduccion_saldo' GROUP BY remito_id
+      SELECT remito_id, SUM(importe_centavos)::bigint AS importe_centavos FROM discrepancia_ajuste WHERE tipo = 'reduccion_saldo' GROUP BY remito_id
     )
     SELECT  r.id AS remito_id,
             r.comercio_id,
             r.marca_id,
             r.importe_centavos,
             COALESCE(p.importe_centavos, 0) AS imputado_centavos,
-            r.importe_centavos - COALESCE(p.importe_centavos, 0) - COALESCE(a.importe_centavos, 0) AS saldo_centavos,
+            (r.importe_centavos - COALESCE(p.importe_centavos, 0) - COALESCE(a.importe_centavos, 0))::bigint AS saldo_centavos,
             CASE
                 WHEN r.importe_centavos = COALESCE(p.importe_centavos, 0) + COALESCE(a.importe_centavos, 0) THEN 'saldado'
                 WHEN COALESCE(p.importe_centavos, 0) + COALESCE(a.importe_centavos, 0) > 0 THEN 'parcial'
@@ -357,8 +375,8 @@ function setupMemoryDb() {
       (6, 1)
     ON CONFLICT (usuario_id, sucursal_id) DO NOTHING;
 
-    INSERT INTO cuenta_recepcion (sucursal_id, alias, banco)
-    SELECT id, 'Cuenta operativa demo', 'Banco Demo' FROM sucursal WHERE nombre = 'Sucursal Central - La Plata'
+    INSERT INTO cuenta_recepcion (sucursal_id, nombre_fantasia, alias, cbu, banco, cuit_titular, moneda, activa)
+    SELECT id, 'Cuenta Operativa Principal', 'Cuenta operativa demo', '2850590940090418135201', 'Banco Demo', '30712345678', 'ARS', true FROM sucursal WHERE nombre = 'Sucursal Central - La Plata'
     ON CONFLICT (sucursal_id, alias) DO NOTHING;
 
     INSERT INTO hoja_de_ruta (sucursal_id, transportista_id, estado) VALUES
@@ -376,12 +394,16 @@ function setupMemoryDb() {
       ('Autoservicio Luna', 'Belgrano 1230, Avellaneda', 'Avellaneda'),
       ('Distribuidora Los Andes', 'Camino Gral. Belgrano 1800, Gerli', 'Gerli');
 
-    INSERT INTO remito (numero, marca_id, comercio_id, sucursal_id, importe_centavos, estado) VALUES
-      ('R-0001-45120', 1, 1, 1, 15000000, 'pendiente'),
-      ('R-0002-89310', 2, 1, 1, 700000, 'pendiente'),
-      ('R-0001-45121', 1, 2, 1, 6200000, 'pendiente'),
-      ('R-0003-11200', 3, 2, 1, 11000000, 'pendiente'),
-      ('R-0002-89315', 2, 3, 1, 9400000, 'pendiente');
+    INSERT INTO remito (numero, marca_id, comercio_id, sucursal_id, importe_centavos, estado, entregado_en) VALUES
+      ('R-0001-45120', 1, 1, 1, 15000000, 'entregado', now()),
+      ('R-0002-89310', 2, 1, 1, 700000, 'entregado', now()),
+      ('R-0001-45121', 1, 2, 1, 6200000, 'entregado', now()),
+      ('R-0003-11200', 3, 2, 1, 11000000, 'pendiente', null),
+      ('R-0002-89315', 2, 3, 1, 9400000, 'entregado', now());
+
+    INSERT INTO movimiento_bancario (cuenta_id, fecha_hora, ordenante, concepto, referencia_externa, importe_centavos) VALUES
+      (1, now(), 'Mayorista El Sol S.R.L.', 'Transferencia acreditada', 'DEMO-E5-04-001', 15700000),
+      (1, now(), 'Mayorista El Sol S.R.L.', 'Transferencia con diferencia', 'DEMO-E5-04-002', 15600000);
   `);
 
   memDbInstance = mem.adapters.createPg().Pool;
@@ -394,8 +416,18 @@ export const db = {
     try {
       return await activePool.query(text, params);
     } catch (err: any) {
-      // Si la base de datos física no está accesible y no hemos activado memoria aún, activar fallback
       if (!isMemoryFallback && (err.code === 'ECONNREFUSED' || err.message?.includes('connect'))) {
+        // Reintentar hasta ~16s por si el motor PostgreSQL local está terminando de levantar en paralelo
+        for (let i = 0; i < 20; i++) {
+          await new Promise((r) => setTimeout(r, 800));
+          try {
+            return await activePool.query(text, params);
+          } catch (retryErr: any) {
+            if (retryErr.code !== 'ECONNREFUSED' && !retryErr.message?.includes('connect')) {
+              throw retryErr;
+            }
+          }
+        }
         console.log('ℹ️  PostgreSQL externo offline. Activando motor PostgreSQL in-memory (pg-mem) para desarrollo...');
         setupMemoryDb();
         return await activePool.query(text, params);
@@ -413,14 +445,17 @@ export const db = {
   },
 
   async checkConnection(): Promise<boolean> {
-    try {
-      const res = await activePool.query('SELECT 1 as connected');
-      return !!res.rows[0];
-    } catch {
-      // Intentar fallback en memoria
-      setupMemoryDb();
-      return true;
+    for (let i = 0; i < 20; i++) {
+      try {
+        const res = await activePool.query('SELECT 1 as connected');
+        if (res.rows[0]) return true;
+      } catch {
+        await new Promise((r) => setTimeout(r, 800));
+      }
     }
+    // Intentar fallback en memoria solo si tras esperar no levantó PostgreSQL
+    setupMemoryDb();
+    return true;
   },
 
   isMemory(): boolean {
