@@ -322,13 +322,19 @@ CREATE INDEX remito_visita_idx ON remito (visita_id);
 CREATE TABLE cuenta_recepcion (
     id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     sucursal_id     bigint      NOT NULL REFERENCES sucursal(id),
+    nombre_fantasia text,
     alias           text        NOT NULL,
     cbu             char(22),
     banco           text,
+    cuit_titular    char(11),
+    moneda          text        NOT NULL DEFAULT 'ARS',
     activa          boolean     NOT NULL DEFAULT true,
     creado_en       timestamptz NOT NULL DEFAULT now(),
+    actualizado_en  timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT cuenta_alias_unico UNIQUE (sucursal_id, alias),
-    CONSTRAINT cuenta_cbu_formato CHECK (cbu IS NULL OR cbu ~ '^[0-9]{22}$')
+    CONSTRAINT cuenta_cbu_formato CHECK (cbu IS NULL OR cbu ~ '^[0-9]{22}$'),
+    CONSTRAINT cuenta_cuit_titular_formato CHECK (cuit_titular IS NULL OR cuit_titular ~ '^[0-9]{11}$'),
+    CONSTRAINT cuenta_moneda_valida CHECK (moneda IN ('ARS', 'USD'))
 );
 -- PENDIENTE: la cardinalidad sucursal–cuenta no quedó cerrada en la
 -- entrevista. El modelo permite N cuentas por sucursal, que es el caso
