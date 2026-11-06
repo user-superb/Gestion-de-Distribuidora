@@ -1,0 +1,34 @@
+<table>
+  <tr>
+    <th>Fecha</th>
+    <th>Concepto</th>
+    <th>Importe</th>
+    <th>Referencia</th>
+    <th>Ordenante</th>
+    <th>CUIT</th>
+  </tr>
+  <tr>
+    <td>2026-11-05</td>
+    <td>Transferencia Interbancaria MEP</td>
+    <td>$ 110.000,00</td>
+    <td>XLS-DEMO-101</td>
+    <td>Autoservicio Luna</td>
+    <td>30222333445</td>
+  </tr>
+  <tr>
+    <td>2026-11-05</td>
+    <td>Pago electrónico proveedores</td>
+    <td>$ 70.000,00</td>
+    <td>XLS-DEMO-102</td>
+    <td>Mayorista El Sol S.R.L.</td>
+    <td>30111222334</td>
+  </tr>
+  <tr>
+    <td>2026-11-05</td>
+    <td>Transferencia Interbancaria MEP (Duplicado)</td>
+    <td>$ 110.000,00</td>
+    <td>XLS-DEMO-101</td>
+    <td>Autoservicio Luna</td>
+    <td>30222333445</td>
+  </tr>
+</table>

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, X, Landmark, QrCode, FileText } from 'lucide-react';
 import { UserSession } from '../../types/auth';
 
 interface ConciliadorMovimientosProps {
@@ -6,10 +7,44 @@ interface ConciliadorMovimientosProps {
   initialSelection?: { movimientoId: string; remitoId: string; fecha: string } | null;
 }
 
+interface CuentaRecepcionDisponible {
+  id: string;
+  sucursal_id: string;
+  sucursal: string;
+  nombre_fantasia: string | null;
+  alias: string;
+  cbu: string | null;
+  banco: string | null;
+  moneda: string;
+}
+
+interface ComercioOpcion {
+  id: string;
+  razon_social: string;
+  nombre_fantasia?: string | null;
+  cuit?: string | null;
+}
+
+interface ResumenImportacionExtracto {
+  cuentaId: string;
+  cuentaAlias: string;
+  moneda: string;
+  archivo: string;
+  totalProcesados: number;
+  insertados: number;
+  omitidosDuplicados: number;
+  mensaje: string;
+}
+
 interface Movimiento {
   id: string;
   fecha_hora: string;
   ordenante: string | null;
+  ordenante_cuit?: string | null;
+  concepto?: string | null;
+  referencia_externa?: string | null;
+  origen?: string;
+  comprobante_nombre?: string | null;
   importe_centavos: string;
   cuenta: string;
   cuenta_id: string;
@@ -69,6 +104,32 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
 
+  // Estado para HU: Importación de extracto bancario digital y Cargas Manuales (Transferencia y QR)
+  const [cuentasRecepcion, setCuentasRecepcion] = useState<CuentaRecepcionDisponible[]>([]);
+  const [comerciosCatalogo, setComerciosCatalogo] = useState<ComercioOpcion[]>([]);
+  const [mostrarSugerenciasComercio, setMostrarSugerenciasComercio] = useState(false);
+  const [indiceComercioActivo, setIndiceComercioActivo] = useState(0);
+  const [panelCargaActiva, setPanelCargaActiva] = useState<'ninguno' | 'extracto' | 'transferencia' | 'qr'>('ninguno');
+  const [cuentaImportacionId, setCuentaImportacionId] = useState('');
+  const [archivoExtracto, setArchivoExtracto] = useState<File | null>(null);
+  const [importandoExtracto, setImportandoExtracto] = useState(false);
+  const [errorImportacion, setErrorImportacion] = useState('');
+  const [resumenImportacion, setResumenImportacion] = useState<ResumenImportacionExtracto | null>(null);
+
+  // Estado compartido/homogéneo para Carga Manual (Transferencia y Cobro QR)
+  const [cuentaManualId, setCuentaManualId] = useState('');
+  const [fechaManual, setFechaManual] = useState(() => fechaLocal());
+  const [importeManual, setImporteManual] = useState('');
+  const [referenciaManual, setReferenciaManual] = useState('');
+  const [ordenanteManual, setOrdenanteManual] = useState('');
+  const [cuitManual, setCuitManual] = useState('');
+  const [conceptoManual, setConceptoManual] = useState('');
+  const [comprobanteManual, setComprobanteManual] = useState<File | null>(null);
+  const [guardandoManual, setGuardandoManual] = useState(false);
+  const [errorManual, setErrorManual] = useState('');
+  const [exitoManual, setExitoManual] = useState('');
+  const [camposInvalidosManual, setCamposInvalidosManual] = useState<Set<string>>(new Set());
+
   const headers = useMemo(() => ({
     Authorization: `Bearer ${session.token}`,
     'Content-Type': 'application/json',
@@ -103,6 +164,264 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
   }, [fecha, headers]);
 
   useEffect(() => { void cargar(); }, [cargar]);
+
+  useEffect(() => {
+    let active = true;
+    const cargarCuentasYComercios = async () => {
+      try {
+        const [cuentasRes, comerciosRes] = await Promise.all([
+          fetch(`${API_BASE}/conciliacion/cuentas-recepcion`, { headers }),
+          fetch(`${API_BASE}/conciliacion/comercios`, { headers }),
+        ]);
+        if (cuentasRes.ok && active) {
+          const data: CuentaRecepcionDisponible[] = await cuentasRes.json();
+          setCuentasRecepcion(data);
+          if (data.length > 0) {
+            setCuentaImportacionId((prev) => prev || String(data[0].id));
+            setCuentaManualId((prev) => prev || String(data[0].id));
+          }
+        }
+        if (comerciosRes.ok && active) {
+          const dataComercios: ComercioOpcion[] = await comerciosRes.json();
+          setComerciosCatalogo(dataComercios);
+        }
+      } catch {
+        // Ignorar en carga inicial si el endpoint no responde en tests antiguos
+      }
+    };
+    void cargarCuentasYComercios();
+    return () => { active = false; };
+  }, [headers]);
+
+  const opcionesComercioDisponibles = useMemo(() => {
+    const mapa = new Map<string, ComercioOpcion>();
+    for (const c of comerciosCatalogo) {
+      if (c.razon_social) {
+        mapa.set(c.razon_social.toLocaleLowerCase('es-AR'), c);
+      }
+    }
+    for (const r of remitos) {
+      const clave = (r.razon_social || '').trim().toLocaleLowerCase('es-AR');
+      if (clave && !mapa.has(clave)) {
+        mapa.set(clave, { id: `rem-${r.id}`, razon_social: r.razon_social.trim(), cuit: null });
+      }
+    }
+    return [...mapa.values()].sort((a, b) => a.razon_social.localeCompare(b.razon_social, 'es-AR'));
+  }, [comerciosCatalogo, remitos]);
+
+  const comerciosFiltradosAutocomplete = useMemo(() => {
+    const busqueda = ordenanteManual
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLowerCase()
+      .trim();
+
+    if (!busqueda) {
+      return opcionesComercioDisponibles.slice(0, 8);
+    }
+
+    return opcionesComercioDisponibles
+      .filter((c) => {
+        const rs = (c.razon_social || '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+        const nf = (c.nombre_fantasia || '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+        const cuit = c.cuit || '';
+        return rs.includes(busqueda) || nf.includes(busqueda) || cuit.includes(busqueda);
+      })
+      .slice(0, 8);
+  }, [opcionesComercioDisponibles, ordenanteManual]);
+
+  const seleccionarComercioAutocomplete = (opcion: ComercioOpcion) => {
+    setOrdenanteManual(opcion.razon_social);
+    if (opcion.cuit && opcion.cuit.trim().length === 11) {
+      setCuitManual(opcion.cuit.trim());
+      limpiarCampoInvalido('ordenanteCuit');
+    }
+    setMostrarSugerenciasComercio(false);
+    setIndiceComercioActivo(0);
+  };
+
+  const importarExtracto = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setErrorImportacion('');
+    setResumenImportacion(null);
+
+    if (!cuentaImportacionId) {
+      setErrorImportacion('Seleccioná la cuenta bancaria de recepción a la que corresponde el extracto.');
+      return;
+    }
+    if (!archivoExtracto) {
+      setErrorImportacion('Seleccioná un archivo de extracto bancario (.CSV o .XLS).');
+      return;
+    }
+
+    setImportandoExtracto(true);
+    try {
+      const formData = new FormData();
+      formData.set('cuentaId', cuentaImportacionId);
+      formData.set('archivo', archivoExtracto);
+
+      const response = await fetch(`${API_BASE}/conciliacion/extractos/importar`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.token}` },
+        body: formData,
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'No se pudo importar el extracto bancario.');
+      }
+
+      setResumenImportacion({
+        cuentaId: data.cuentaId,
+        cuentaAlias: data.cuentaAlias,
+        moneda: data.moneda,
+        archivo: data.archivo,
+        totalProcesados: data.totalProcesados,
+        insertados: data.insertados,
+        omitidosDuplicados: data.omitidosDuplicados,
+        mensaje: data.mensaje,
+      });
+      setArchivoExtracto(null);
+      await cargar();
+    } catch (e) {
+      setErrorImportacion(e instanceof Error ? e.message : 'Error al importar el extracto bancario.');
+    } finally {
+      setImportandoExtracto(false);
+    }
+  };
+
+  const limpiarCampoInvalido = (campo: string) => {
+    setCamposInvalidosManual((prev) => {
+      if (!prev.has(campo)) return prev;
+      const next = new Set(prev);
+      next.delete(campo);
+      return next;
+    });
+    setErrorManual('');
+  };
+
+  const registrarMovimientoManual = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setErrorManual('');
+    setExitoManual('');
+    setCamposInvalidosManual(new Set());
+
+    const esQr = panelCargaActiva === 'qr';
+    const hoy = fechaLocal();
+    const invalidosLocal = new Set<string>();
+    const mensajesError: string[] = [];
+
+    if (!cuentaManualId) {
+      invalidosLocal.add('cuentaId');
+      mensajesError.push(esQr ? 'Seleccioná una cuenta o billetera de acreditación activa.' : 'Seleccioná una cuenta bancaria de recepción activa.');
+    }
+
+    if (!fechaManual || fechaManual > hoy) {
+      invalidosLocal.add('fechaContable');
+      mensajesError.push('No se admiten movimientos bancarios anticipados: la fecha contable no puede ser posterior al día de la carga.');
+    }
+
+    const importeLimpio = importeManual.trim().replace(',', '.');
+    const montoNum = Number(importeLimpio);
+    if (!importeLimpio || Number.isNaN(montoNum) || montoNum <= 0) {
+      invalidosLocal.add('importe');
+      mensajesError.push('El importe debe ser un monto positivo mayor a cero.');
+    }
+
+    if (!referenciaManual.trim()) {
+      invalidosLocal.add(esQr ? 'idTransaccion' : 'numeroOperacion');
+      mensajesError.push(esQr ? 'Ingresá el ID de transacción provisto por la pasarela de pagos.' : 'Ingresá el número de operación o referencia bancaria.');
+    }
+
+    if (!esQr && !comprobanteManual) {
+      invalidosLocal.add('comprobante');
+      mensajesError.push('Adjuntá el comprobante de respaldo obligatorio (PDF, JPG o PNG).');
+    }
+
+    if (invalidosLocal.size > 0) {
+      setCamposInvalidosManual(invalidosLocal);
+      setErrorManual(mensajesError.join(' '));
+      return;
+    }
+
+    setGuardandoManual(true);
+    try {
+      let response: Response;
+      if (esQr) {
+        response = await fetch(`${API_BASE}/conciliacion/movimientos/manual/qr`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            cuentaId: cuentaManualId,
+            fechaContable: fechaManual,
+            importe: importeManual,
+            idTransaccion: referenciaManual.trim(),
+            ordenante: ordenanteManual.trim(),
+            ordenanteCuit: cuitManual.trim(),
+            concepto: conceptoManual.trim(),
+          }),
+        });
+      } else {
+        const formData = new FormData();
+        formData.set('cuentaId', cuentaManualId);
+        formData.set('fechaContable', fechaManual);
+        formData.set('importe', importeManual);
+        formData.set('numeroOperacion', referenciaManual.trim());
+        if (ordenanteManual.trim()) formData.set('ordenante', ordenanteManual.trim());
+        if (cuitManual.trim()) formData.set('ordenanteCuit', cuitManual.trim());
+        if (conceptoManual.trim()) formData.set('concepto', conceptoManual.trim());
+        if (comprobanteManual) formData.set('comprobante', comprobanteManual);
+
+        response = await fetch(`${API_BASE}/conciliacion/movimientos/manual/transferencia`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${session.token}` },
+          body: formData,
+        });
+      }
+
+      const data = await response.json();
+      if (!response.ok) {
+        if (Array.isArray(data.camposInvalidos)) {
+          setCamposInvalidosManual(new Set(data.camposInvalidos));
+        }
+        throw new Error(data.message || 'No se pudo registrar el movimiento manual.');
+      }
+
+      setExitoManual(data.mensaje || 'Movimiento manual registrado y enviado a la bandeja de pendientes de conciliación.');
+      setImporteManual('');
+      setReferenciaManual('');
+      setOrdenanteManual('');
+      setCuitManual('');
+      setConceptoManual('');
+      setComprobanteManual(null);
+      if (fechaManual !== fecha) {
+        setFecha(fechaManual);
+      } else {
+        await cargar(fechaManual);
+      }
+    } catch (e) {
+      setErrorManual(e instanceof Error ? e.message : 'Error al registrar el movimiento manual.');
+    } finally {
+      setGuardandoManual(false);
+    }
+  };
+
+  const verComprobanteMovimiento = async (item: Movimiento, event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const response = await fetch(`${API_BASE}/conciliacion/movimientos/${item.id}/comprobante`, {
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    if (!response.ok) {
+      setError('No se pudo abrir el comprobante del movimiento.');
+      return;
+    }
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = item.comprobante_nombre || 'comprobante_transferencia';
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
 
   const movimientosVisibles = cuentaId === 'todas' ? movimientos : movimientos.filter((item) => item.cuenta_id === cuentaId);
   const cuentas = [...new Map(movimientos.map((item) => [item.cuenta_id, item.cuenta] as const)).entries()];
@@ -208,16 +527,484 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
           <h2 className="text-sm font-bold text-slate-900">Conciliación bancaria</h2>
           <p className="text-xs text-slate-500">Seleccioná movimientos y remitos; el sistema distribuye los pagos automáticamente según los saldos pendientes.</p>
         </div>
-        <label className="text-xs text-slate-600 flex items-center gap-2">
-          Cuenta
-          <select value={cuentaId} onChange={(event) => { setCuentaId(event.target.value); setMovimientosSeleccionados(new Set()); setRemitosSeleccionados(new Set()); }} className="border border-slate-300 rounded px-2 py-1.5 text-slate-800">
-            <option value="todas">Todas</option>
-            {cuentas.map(([id, alias]) => <option key={id} value={id}>{alias}</option>)}
-          </select>
-          Fecha
-          <input type="date" value={fecha} onChange={(event) => setFecha(event.target.value)} className="border border-slate-300 rounded px-2 py-1.5 text-slate-800" />
-        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setPanelCargaActiva((v) => (v === 'extracto' ? 'ninguno' : 'extracto'));
+              setErrorImportacion('');
+            }}
+            className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+              panelCargaActiva === 'extracto'
+                ? 'border-blue-600 bg-blue-600 text-white'
+                : 'border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100'
+            }`}
+          >
+            <Upload className="h-3.5 w-3.5" />
+            <span>Importar extracto</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPanelCargaActiva((v) => (v === 'transferencia' ? 'ninguno' : 'transferencia'));
+              setErrorManual('');
+              setExitoManual('');
+              setCamposInvalidosManual(new Set());
+            }}
+            className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+              panelCargaActiva === 'transferencia'
+                ? 'border-indigo-600 bg-indigo-600 text-white'
+                : 'border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100'
+            }`}
+          >
+            <Landmark className="h-3.5 w-3.5" />
+            <span>Cargar transferencia</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPanelCargaActiva((v) => (v === 'qr' ? 'ninguno' : 'qr'));
+              setErrorManual('');
+              setExitoManual('');
+              setCamposInvalidosManual(new Set());
+            }}
+            className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+              panelCargaActiva === 'qr'
+                ? 'border-purple-600 bg-purple-600 text-white'
+                : 'border-purple-200 bg-purple-50 text-purple-800 hover:bg-purple-100'
+            }`}
+          >
+            <QrCode className="h-3.5 w-3.5" />
+            <span>Cargar cobro QR</span>
+          </button>
+          <label className="text-xs text-slate-600 flex items-center gap-2 ml-1">
+            Cuenta
+            <select value={cuentaId} onChange={(event) => { setCuentaId(event.target.value); setMovimientosSeleccionados(new Set()); setRemitosSeleccionados(new Set()); }} className="border border-slate-300 rounded px-2 py-1.5 text-slate-800">
+              <option value="todas">Todas</option>
+              {cuentas.map(([id, alias]) => <option key={id} value={id}>{alias}</option>)}
+            </select>
+            Fecha
+            <input type="date" value={fecha} onChange={(event) => setFecha(event.target.value)} className="border border-slate-300 rounded px-2 py-1.5 text-slate-800" />
+          </label>
+        </div>
       </header>
+
+      {panelCargaActiva === 'extracto' && (
+        <form onSubmit={importarExtracto} className="rounded-md border border-blue-200 bg-blue-50/40 p-4 space-y-3">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                <FileSpreadsheet className="h-4 w-4 text-blue-700" />
+                Importar extracto bancario en archivo digital
+              </h3>
+              <p className="mt-0.5 text-[11px] text-slate-600">
+                Cargá un archivo <strong>.CSV</strong> o <strong>.XLS</strong> con las columnas obligatorias (<code>fecha</code>, <code>concepto</code>, <code>importe</code>, <code>referencia</code>). Los movimientos duplicados se omitirán automáticamente.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPanelCargaActiva('ninguno')}
+              className="text-slate-400 hover:text-slate-600"
+              aria-label="Cerrar importador"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs text-slate-700 font-medium">
+              Cuenta bancaria de recepción destino *
+              <select
+                required
+                aria-label="Cuenta bancaria de recepción destino"
+                value={cuentaImportacionId}
+                onChange={(e) => {
+                  setCuentaImportacionId(e.target.value);
+                  setErrorImportacion('');
+                }}
+                className="mt-1 w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800"
+              >
+                <option value="">Seleccionar cuenta receptora...</option>
+                {cuentasRecepcion.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.alias} ({c.banco || 'Banco'} · {c.moneda || 'ARS'} · {c.sucursal})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-xs text-slate-700 font-medium">
+              Archivo de extracto (.CSV / .XLS) *
+              <input
+                required
+                type="file"
+                aria-label="Archivo de extracto bancario"
+                accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel"
+                onChange={(e) => {
+                  setArchivoExtracto(e.target.files?.[0] || null);
+                  setErrorImportacion('');
+                }}
+                className="mt-1 block w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
+              />
+            </label>
+          </div>
+
+          {errorImportacion && (
+            <div role="alert" className="flex items-start gap-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-red-600 mt-0.5" />
+              <span>{errorImportacion}</span>
+            </div>
+          )}
+
+          {resumenImportacion && (
+            <div role="status" className="rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 space-y-1.5">
+              <div className="flex items-center gap-1.5 font-bold text-emerald-800">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                <span>Resumen consolidado de importación ({resumenImportacion.archivo})</span>
+              </div>
+              <p>{resumenImportacion.mensaje}</p>
+              <div className="grid grid-cols-3 gap-2 pt-1 text-[11px]">
+                <div className="rounded bg-white/80 px-2.5 py-1.5 border border-emerald-200">
+                  <span className="text-slate-500 block">Total leídos</span>
+                  <strong className="text-sm text-slate-900">{resumenImportacion.totalProcesados}</strong>
+                </div>
+                <div className="rounded bg-white/80 px-2.5 py-1.5 border border-emerald-200">
+                  <span className="text-slate-500 block">Registros insertados</span>
+                  <strong className="text-sm text-emerald-700">{resumenImportacion.insertados}</strong>
+                </div>
+                <div className="rounded bg-white/80 px-2.5 py-1.5 border border-emerald-200">
+                  <span className="text-slate-500 block">Duplicados descartados</span>
+                  <strong className="text-sm text-amber-700">{resumenImportacion.omitidosDuplicados}</strong>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="submit"
+              disabled={importandoExtracto}
+              className="inline-flex items-center gap-1.5 rounded-md bg-blue-700 hover:bg-blue-800 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm disabled:opacity-50"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              <span>{importandoExtracto ? 'Importando extracto…' : 'Procesar extracto'}</span>
+            </button>
+          </div>
+        </form>
+      )}
+
+      {(panelCargaActiva === 'transferencia' || panelCargaActiva === 'qr') && (
+        <form
+          noValidate
+          onSubmit={registrarMovimientoManual}
+          className={`rounded-md border p-4 space-y-3 ${
+            panelCargaActiva === 'qr' ? 'border-purple-200 bg-purple-50/40' : 'border-indigo-200 bg-indigo-50/40'
+          }`}
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                {panelCargaActiva === 'qr' ? (
+                  <>
+                    <QrCode className="h-4 w-4 text-purple-700" />
+                    Cargar manualmente un ingreso por cobro QR
+                  </>
+                ) : (
+                  <>
+                    <Landmark className="h-4 w-4 text-indigo-700" />
+                    Cargar manualmente un movimiento de transferencia bancaria
+                  </>
+                )}
+              </h3>
+              <p className="mt-0.5 text-[11px] text-slate-600">
+                {panelCargaActiva === 'qr' ? (
+                  <>
+                    Incorporá acreditaciones de billeteras virtuales no procesadas en línea. Quedará registrado bajo la etiqueta{' '}
+                    <strong>&quot;QR - Carga Manual&quot;</strong> en la bandeja de pendientes de conciliación.
+                  </>
+                ) : (
+                  <>
+                    Asentá ingresos por transferencia no contemplados en extractos automáticos adjuntando el comprobante de respaldo. Quedará auditado bajo{' '}
+                    <strong>&quot;Carga Manual&quot;</strong> en estado pendiente de conciliación.
+                  </>
+                )}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPanelCargaActiva('ninguno')}
+              className="text-slate-400 hover:text-slate-600"
+              aria-label="Cerrar carga manual"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="text-xs text-slate-700 font-medium">
+              {panelCargaActiva === 'qr' ? 'Cuenta / billetera de acreditación *' : 'Cuenta de recepción activa *'}
+              <select
+                aria-label={panelCargaActiva === 'qr' ? 'Cuenta o billetera de acreditación' : 'Cuenta de recepción activa'}
+                aria-invalid={camposInvalidosManual.has('cuentaId')}
+                value={cuentaManualId}
+                onChange={(e) => {
+                  setCuentaManualId(e.target.value);
+                  limpiarCampoInvalido('cuentaId');
+                }}
+                className={`mt-1 w-full rounded border bg-white px-2.5 py-1.5 text-xs text-slate-800 ${
+                  camposInvalidosManual.has('cuentaId') ? 'border-red-500 ring-1 ring-red-500 bg-red-50/40' : 'border-slate-300'
+                }`}
+              >
+                <option value="">Seleccionar cuenta activa...</option>
+                {cuentasRecepcion.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.alias} ({c.banco || 'Banco'} · {c.moneda || 'ARS'} · {c.sucursal})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-xs text-slate-700 font-medium">
+              Fecha contable (no futura) *
+              <input
+                type="date"
+                max={fechaLocal()}
+                aria-label="Fecha contable"
+                aria-invalid={camposInvalidosManual.has('fechaContable')}
+                value={fechaManual}
+                onChange={(e) => {
+                  setFechaManual(e.target.value);
+                  limpiarCampoInvalido('fechaContable');
+                }}
+                className={`mt-1 w-full rounded border bg-white px-2.5 py-1.5 text-xs text-slate-800 ${
+                  camposInvalidosManual.has('fechaContable') ? 'border-red-500 ring-1 ring-red-500 bg-red-50/40' : 'border-slate-300'
+                }`}
+              />
+            </label>
+
+            <label className="text-xs text-slate-700 font-medium">
+              Importe positivo ($) *
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="Ej: 150000.00"
+                aria-label="Importe del movimiento"
+                aria-invalid={camposInvalidosManual.has('importe')}
+                value={importeManual}
+                onChange={(e) => {
+                  setImporteManual(e.target.value);
+                  limpiarCampoInvalido('importe');
+                }}
+                className={`mt-1 w-full rounded border bg-white px-2.5 py-1.5 text-xs text-slate-800 ${
+                  camposInvalidosManual.has('importe') ? 'border-red-500 ring-1 ring-red-500 bg-red-50/40' : 'border-slate-300'
+                }`}
+              />
+            </label>
+
+            <label className="text-xs text-slate-700 font-medium">
+              {panelCargaActiva === 'qr' ? 'ID de transacción (pasarela QR) *' : 'N° de operación / referencia *'}
+              <input
+                type="text"
+                placeholder={panelCargaActiva === 'qr' ? 'Ej: MP-QR-99887766' : 'Ej: OP-2026-00451'}
+                aria-label={panelCargaActiva === 'qr' ? 'ID de transacción QR' : 'Número de operación bancaria'}
+                aria-invalid={camposInvalidosManual.has('idTransaccion') || camposInvalidosManual.has('numeroOperacion')}
+                value={referenciaManual}
+                onChange={(e) => {
+                  setReferenciaManual(e.target.value);
+                  limpiarCampoInvalido('idTransaccion');
+                  limpiarCampoInvalido('numeroOperacion');
+                }}
+                className={`mt-1 w-full rounded border bg-white px-2.5 py-1.5 text-xs text-slate-800 ${
+                  camposInvalidosManual.has('idTransaccion') || camposInvalidosManual.has('numeroOperacion')
+                    ? 'border-red-500 ring-1 ring-red-500 bg-red-50/40'
+                    : 'border-slate-300'
+                }`}
+              />
+            </label>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="relative text-xs text-slate-700 font-medium">
+              <label className="block">
+                Comercio / ordenante (para matching)
+                <input
+                  type="text"
+                  autoComplete="off"
+                  placeholder="Hacé clic o escribí para buscar comercio..."
+                  aria-label="Comercio u ordenante"
+                  aria-expanded={mostrarSugerenciasComercio}
+                  aria-autocomplete="list"
+                  value={ordenanteManual}
+                  onFocus={() => {
+                    setMostrarSugerenciasComercio(true);
+                    setIndiceComercioActivo(0);
+                  }}
+                  onClick={() => {
+                    setMostrarSugerenciasComercio(true);
+                  }}
+                  onBlur={() => {
+                    window.setTimeout(() => setMostrarSugerenciasComercio(false), 150);
+                  }}
+                  onChange={(e) => {
+                    setOrdenanteManual(e.target.value);
+                    setMostrarSugerenciasComercio(true);
+                    setIndiceComercioActivo(0);
+                  }}
+                  onKeyDown={(e) => {
+                    if (!mostrarSugerenciasComercio || comerciosFiltradosAutocomplete.length === 0) return;
+
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setIndiceComercioActivo((prev) => (prev + 1) % comerciosFiltradosAutocomplete.length);
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setIndiceComercioActivo((prev) => (prev - 1 + comerciosFiltradosAutocomplete.length) % comerciosFiltradosAutocomplete.length);
+                    } else if (e.key === 'Enter') {
+                      const elegido = comerciosFiltradosAutocomplete[indiceComercioActivo] || comerciosFiltradosAutocomplete[0];
+                      if (elegido) {
+                        e.preventDefault();
+                        seleccionarComercioAutocomplete(elegido);
+                      }
+                    } else if (e.key === 'Tab') {
+                      // Si escribió algo y quedó una coincidencia (o eligió con flechas), autocompleta con el nombre exacto al apretar Tab
+                      if (comerciosFiltradosAutocomplete.length === 1) {
+                        seleccionarComercioAutocomplete(comerciosFiltradosAutocomplete[0]);
+                      } else if (ordenanteManual.trim().length > 0 && comerciosFiltradosAutocomplete[indiceComercioActivo]) {
+                        seleccionarComercioAutocomplete(comerciosFiltradosAutocomplete[indiceComercioActivo]);
+                      } else {
+                        setMostrarSugerenciasComercio(false);
+                      }
+                    } else if (e.key === 'Escape') {
+                      setMostrarSugerenciasComercio(false);
+                    }
+                  }}
+                  className="mt-1 w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800"
+                />
+              </label>
+
+              {mostrarSugerenciasComercio && comerciosFiltradosAutocomplete.length > 0 && (
+                <ul
+                  role="listbox"
+                  aria-label="Sugerencias de comercios"
+                  className="absolute left-0 right-0 z-30 mt-1 max-h-48 overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg divide-y divide-slate-100"
+                >
+                  {comerciosFiltradosAutocomplete.map((opcion, idx) => {
+                    const activo = idx === indiceComercioActivo;
+                    return (
+                      <li
+                        key={opcion.id}
+                        role="option"
+                        aria-selected={activo}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          seleccionarComercioAutocomplete(opcion);
+                        }}
+                        onMouseEnter={() => setIndiceComercioActivo(idx)}
+                        className={`flex cursor-pointer items-center justify-between gap-2 px-2.5 py-1.5 text-xs transition-colors ${
+                          activo ? 'bg-indigo-50 text-indigo-900 font-semibold' : 'text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="truncate">{opcion.razon_social}</span>
+                        {opcion.cuit && (
+                          <span className="shrink-0 text-[10px] font-normal text-slate-400">CUIT {opcion.cuit}</span>
+                        )}
+                      </li>
+                    );
+                  })}
+                  {opcionesComercioDisponibles.length > 8 && !ordenanteManual.trim() && (
+                    <li className="px-2.5 py-1 text-[10px] text-slate-400 bg-slate-50/70 italic">
+                      Mostrando primeros 8 de {opcionesComercioDisponibles.length} comercios. Escribí para filtrar o apretá Tab para autocompletar…
+                    </li>
+                  )}
+                </ul>
+              )}
+            </div>
+
+            <label className="text-xs text-slate-700 font-medium">
+              CUIT ordenante (11 dígitos, opcional)
+              <input
+                type="text"
+                maxLength={11}
+                placeholder="Ej: 30111222334"
+                aria-label="CUIT del ordenante"
+                aria-invalid={camposInvalidosManual.has('ordenanteCuit')}
+                value={cuitManual}
+                onChange={(e) => {
+                  setCuitManual(e.target.value.replace(/\D/g, ''));
+                  limpiarCampoInvalido('ordenanteCuit');
+                }}
+                className={`mt-1 w-full rounded border bg-white px-2.5 py-1.5 text-xs text-slate-800 ${
+                  camposInvalidosManual.has('ordenanteCuit') ? 'border-red-500 ring-1 ring-red-500 bg-red-50/40' : 'border-slate-300'
+                }`}
+              />
+            </label>
+
+            {panelCargaActiva === 'transferencia' ? (
+              <label className="text-xs text-slate-700 font-medium">
+                Comprobante de respaldo (PDF/JPG/PNG) *
+                <input
+                  type="file"
+                  aria-label="Comprobante de respaldo"
+                  aria-invalid={camposInvalidosManual.has('comprobante')}
+                  accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                  onChange={(e) => {
+                    setComprobanteManual(e.target.files?.[0] || null);
+                    limpiarCampoInvalido('comprobante');
+                  }}
+                  className={`mt-1 block w-full rounded border bg-white px-2 py-1 text-xs text-slate-700 ${
+                    camposInvalidosManual.has('comprobante') ? 'border-red-500 ring-1 ring-red-500 bg-red-50/40' : 'border-slate-300'
+                  }`}
+                />
+              </label>
+            ) : (
+              <label className="text-xs text-slate-700 font-medium">
+                Concepto / observación (opcional)
+                <input
+                  type="text"
+                  placeholder="Ej: Acreditación QR Mercado Pago"
+                  aria-label="Concepto del cobro QR"
+                  value={conceptoManual}
+                  onChange={(e) => setConceptoManual(e.target.value)}
+                  className="mt-1 w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800"
+                />
+              </label>
+            )}
+          </div>
+
+          {errorManual && (
+            <div role="alert" className="flex items-start gap-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-red-600 mt-0.5" />
+              <span>{errorManual}</span>
+            </div>
+          )}
+
+          {exitoManual && (
+            <div role="status" className="flex items-start gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 mt-0.5" />
+              <span>{exitoManual}</span>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="submit"
+              disabled={guardandoManual}
+              className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-xs font-bold text-white shadow-sm disabled:opacity-50 ${
+                panelCargaActiva === 'qr' ? 'bg-purple-700 hover:bg-purple-800' : 'bg-indigo-700 hover:bg-indigo-800'
+              }`}
+            >
+              {panelCargaActiva === 'qr' ? <QrCode className="h-3.5 w-3.5" /> : <Landmark className="h-3.5 w-3.5" />}
+              <span>
+                {guardandoManual
+                  ? 'Guardando movimiento…'
+                  : panelCargaActiva === 'qr'
+                    ? 'Registrar cobro QR manual'
+                    : 'Registrar transferencia manual'}
+              </span>
+            </button>
+          </div>
+        </form>
+      )}
 
       {error && <p role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">{error}</p>}
       {mensaje && <p role="status" className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">{mensaje}</p>}
@@ -231,8 +1018,34 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({ 
                 <span className="flex min-w-0 items-center gap-2">
                   <input type="checkbox" checked={movimientosSeleccionados.has(item.id)} onChange={() => toggleSeleccion(item.id, movimientosSeleccionados, setMovimientosSeleccionados)} className="rounded text-marca-naranja focus:ring-marca-naranja" />
                   <span className="min-w-0">
-                    <span className="block truncate font-semibold text-slate-800">{item.ordenante || 'Ordenante no informado'}</span>
-                    <span className="text-slate-500">{new Date(item.fecha_hora).toLocaleString('es-AR')} · {item.cuenta}</span>
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <span className="truncate font-semibold text-slate-800">{item.ordenante || 'Ordenante no informado'}</span>
+                      {item.origen && item.origen !== 'Extracto Bancario' && (
+                        <span
+                          className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                            item.origen === 'QR - Carga Manual'
+                              ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                              : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                          }`}
+                        >
+                          {item.origen}
+                        </span>
+                      )}
+                    </span>
+                    <span className="block text-slate-500">
+                      {new Date(item.fecha_hora).toLocaleString('es-AR')} · {item.cuenta}
+                      {item.referencia_externa ? ` · Ref: ${item.referencia_externa}` : ''}
+                    </span>
+                    {item.comprobante_nombre && (
+                      <button
+                        type="button"
+                        onClick={(e) => void verComprobanteMovimiento(item, e)}
+                        className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-medium text-indigo-700 hover:underline"
+                      >
+                        <FileText className="h-3 w-3" />
+                        <span>Ver comprobante ({item.comprobante_nombre})</span>
+                      </button>
+                    )}
                   </span>
                 </span>
                 <strong className="whitespace-nowrap text-slate-900">{formatoARS(item.importe_centavos)}</strong>

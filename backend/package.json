@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "db:server": "tsx src/scripts/startDevPostgres.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "tsx --test src/__tests__/remitoApi.test.ts src/__tests__/authApi.test.ts src/__tests__/usuarioApi.test.ts src/__tests__/secuenciaVisitas.test.ts src/__tests__/remitoManual.test.ts src/__tests__/fechaHojaRuta.test.ts src/__tests__/asignarTransportista.test.ts src/__tests__/reemplazarHojaDeRuta.test.ts src/__tests__/anexarEntrega.test.ts src/__tests__/transportistaApi.test.ts src/__tests__/cobroMovil.test.ts src/__tests__/quitarVisitaHojaRuta.test.ts src/__tests__/conciliacionDiscrepancia.test.ts src/__tests__/recuperacionContrasena.test.ts src/__tests__/rechazoRemito.test.ts src/__tests__/rendicionEfectivo.test.ts src/__tests__/altaSucursal.test.ts src/__tests__/modificarSucursal.test.ts src/__tests__/permisosOperadorSucursal.test.ts src/__tests__/revocarPermisoOperadorSucursal.test.ts",
+    "test": "tsx --test src/__tests__/remitoApi.test.ts src/__tests__/authApi.test.ts src/__tests__/usuarioApi.test.ts src/__tests__/secuenciaVisitas.test.ts src/__tests__/remitoManual.test.ts src/__tests__/fechaHojaRuta.test.ts src/__tests__/asignarTransportista.test.ts src/__tests__/reemplazarHojaDeRuta.test.ts src/__tests__/anexarEntrega.test.ts src/__tests__/transportistaApi.test.ts src/__tests__/cobroMovil.test.ts src/__tests__/quitarVisitaHojaRuta.test.ts src/__tests__/conciliacionDiscrepancia.test.ts src/__tests__/recuperacionContrasena.test.ts src/__tests__/rechazoRemito.test.ts src/__tests__/rendicionEfectivo.test.ts src/__tests__/altaSucursal.test.ts src/__tests__/modificarSucursal.test.ts src/__tests__/permisosOperadorSucursal.test.ts src/__tests__/revocarPermisoOperadorSucursal.test.ts src/__tests__/cuentaRecepcionModificacion.test.ts src/__tests__/cuentaRecepcionAsociacion.test.ts src/__tests__/cuentaRecepcionAlta.test.ts src/__tests__/importarExtractoBancario.test.ts src/__tests__/cargaManualMovimientos.test.ts",
     "db:init": "tsx src/scripts/initDb.ts",
     "db:migrate": "tsx src/scripts/migrateAll.ts",
     "db:migrate-admin": "tsx src/scripts/migrateAdminRole.ts",
@@ -33,6 +34,7 @@
     "@types/multer": "^2.3.0",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.23.1",
+    "embedded-postgres": "^16.15.0-beta.19",
     "pg-mem": "^3.0.14",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"

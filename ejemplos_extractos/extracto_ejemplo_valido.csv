@@ -1,0 +1,7 @@
+# CBU: 2850590940090418135201
+# MONEDA: ARS
+fecha;concepto;importe;referencia;ordenante;cuit
+2026-11-05;Transferencia acreditada lote mañana;150000.00;DEMO-EXT-001;Mayorista El Sol S.R.L.;30111222334
+2026-11-05;Cobro transferencia comercios;62000.00;DEMO-EXT-002;Autoservicio Luna;30222333445
+2026-11-05;Pago remito transferencia;94000.00;DEMO-EXT-003;Distribuidora Los Andes;30333444556
+2026-11-05;Transferencia duplicada de prueba;150000.00;DEMO-EXT-001;Mayorista El Sol S.R.L.;30111222334

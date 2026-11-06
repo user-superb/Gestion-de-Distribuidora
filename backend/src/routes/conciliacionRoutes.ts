@@ -14,6 +14,7 @@ conciliacionRouter.use(requireAuth, (req: Request, res: Response, next: NextFunc
 });
 
 const comprobante = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }).single('comprobante');
+const extractoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }).single('archivo');
 const requireAdministrativo = (req: Request, res: Response, next: NextFunction) => {
   if (!['Administrativo', 'Administrador del sistema', 'Gerente', 'CEO'].includes((req as any).userSession?.role)) {
     return res.status(403).json({ error: 'FORBIDDEN', message: 'Solo un usuario administrativo puede imputar movimientos.' });
@@ -34,11 +35,132 @@ function parsearLista(value: unknown): unknown {
 
 function responderError(error: unknown, res: Response) {
   if (error instanceof ConciliacionError) {
-    return res.status(error.status).json({ error: 'CONCILIACION_INVALIDA', message: error.message, ...error.details });
+    const code = typeof error.details?.errorCode === 'string' ? error.details.errorCode : 'CONCILIACION_INVALIDA';
+    return res.status(error.status).json({ error: code, message: error.message, ...error.details });
   }
   console.error('Error en conciliación bancaria:', error);
   return res.status(500).json({ error: 'INTERNAL_ERROR', message: 'No se pudo procesar la operación.' });
 }
+
+conciliacionRouter.get('/cuentas-recepcion', async (req, res) => {
+  try {
+    const role = (req as any).userSession?.role || 'Administrativo';
+    return res.json(await conciliacionService.getCuentasRecepcionParaExtracto(getUsuarioId(req), role));
+  } catch (error) {
+    return responderError(error, res);
+  }
+});
+
+conciliacionRouter.get('/comercios', async (_req, res) => {
+  try {
+    return res.json(await conciliacionService.getComerciosParaConciliacion());
+  } catch (error) {
+    return responderError(error, res);
+  }
+});
+
+conciliacionRouter.post(
+  '/extractos/importar',
+  requireAdministrativo,
+  (req, res, next) =>
+    extractoUpload(req, res, (error: any) => {
+      if (error) {
+        return res.status(400).json({
+          error: 'FORMATO_ARCHIVO_INVALIDO',
+          message: 'El archivo de extracto no debe superar 5 MB y debe ser un archivo CSV o XLS válido.',
+        });
+      }
+      next();
+    }),
+  async (req, res) => {
+    try {
+      const cuentaId = req.body?.cuentaId ?? req.body?.cuenta_id;
+      const result = await conciliacionService.importarExtractoBancario(
+        cuentaId,
+        req.file || null,
+        getUsuarioId(req)
+      );
+      return res.status(200).json({ success: true, ...result });
+    } catch (error) {
+      return responderError(error, res);
+    }
+  }
+);
+
+conciliacionRouter.post(
+  '/movimientos/manual/transferencia',
+  requireAdministrativo,
+  (req, res, next) =>
+    comprobante(req, res, (error: any) => {
+      if (error) {
+        return res.status(400).json({
+          error: 'COMPROBANTE_INVALIDO',
+          message: 'El comprobante de respaldo debe ser un archivo PDF, JPG o PNG y no superar 5 MB.',
+          camposInvalidos: ['comprobante'],
+        });
+      }
+      next();
+    }),
+  async (req, res) => {
+    try {
+      const result = await conciliacionService.registrarTransferenciaManual(
+        {
+          cuentaId: req.body?.cuentaId ?? req.body?.cuenta_id,
+          fechaContable: req.body?.fechaContable ?? req.body?.fecha_contable ?? req.body?.fecha,
+          importe: req.body?.importe ?? req.body?.monto,
+          numeroOperacion: req.body?.numeroOperacion ?? req.body?.numero_operacion ?? req.body?.referencia,
+          ordenante: req.body?.ordenante,
+          ordenanteCuit: req.body?.ordenanteCuit ?? req.body?.ordenante_cuit ?? req.body?.cuit,
+          concepto: req.body?.concepto,
+        },
+        req.file || null,
+        getUsuarioId(req)
+      );
+      return res.status(201).json({ success: true, ...result });
+    } catch (error) {
+      return responderError(error, res);
+    }
+  }
+);
+
+conciliacionRouter.post(
+  '/movimientos/manual/qr',
+  requireAdministrativo,
+  async (req, res) => {
+    try {
+      const result = await conciliacionService.registrarIngresoQrManual(
+        {
+          cuentaId: req.body?.cuentaId ?? req.body?.cuenta_id,
+          fechaContable: req.body?.fechaContable ?? req.body?.fecha_contable ?? req.body?.fecha,
+          importe: req.body?.importe ?? req.body?.monto,
+          idTransaccion: req.body?.idTransaccion ?? req.body?.id_transaccion ?? req.body?.referencia,
+          ordenante: req.body?.ordenante,
+          ordenanteCuit: req.body?.ordenanteCuit ?? req.body?.ordenante_cuit ?? req.body?.cuit,
+          concepto: req.body?.concepto,
+        },
+        getUsuarioId(req)
+      );
+      return res.status(201).json({ success: true, ...result });
+    } catch (error) {
+      return responderError(error, res);
+    }
+  }
+);
+
+conciliacionRouter.get('/movimientos/:id/comprobante', async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT c.nombre_archivo, c.tipo_mime, c.contenido
+       FROM movimiento_bancario_comprobante c
+       WHERE c.movimiento_id = $1`,
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ message: 'No se encontró el comprobante de respaldo.' });
+    return res.type(result.rows[0].tipo_mime).attachment(result.rows[0].nombre_archivo).send(result.rows[0].contenido);
+  } catch (error) {
+    return responderError(error, res);
+  }
+});
 
 conciliacionRouter.get('/movimientos', async (req, res) => {
   const fecha = typeof req.query.fecha === 'string' ? req.query.fecha : undefined;

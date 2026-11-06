@@ -101,9 +101,12 @@ describe('HU #53: Asignar Permisos de Operador de Sucursal (Épica 2.4: Modelo M
       CREATE TABLE cuenta_recepcion (
         id serial PRIMARY KEY,
         sucursal_id bigint NOT NULL,
+        nombre_fantasia text,
         alias text NOT NULL,
         cbu char(22),
         banco text,
+        cuit_titular char(11),
+        moneda text NOT NULL DEFAULT 'ARS',
         activa boolean NOT NULL DEFAULT true,
         creado_en timestamp DEFAULT now(),
         UNIQUE (sucursal_id, alias)
@@ -115,10 +118,21 @@ describe('HU #53: Asignar Permisos de Operador de Sucursal (Épica 2.4: Modelo M
         fecha_hora timestamp DEFAULT now(),
         ordenante text NOT NULL,
         ordenante_cuit char(11),
+        concepto text,
         referencia_externa text,
         importe_centavos bigint NOT NULL,
+        origen text NOT NULL DEFAULT 'Extracto Bancario',
         estado text NOT NULL DEFAULT 'sin_imputar',
         creado_en timestamp DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS movimiento_bancario_comprobante (
+        movimiento_id bigint PRIMARY KEY,
+        nombre_archivo text NOT NULL,
+        tipo_mime text NOT NULL,
+        contenido bytea NOT NULL,
+        tamano_bytes bigint NOT NULL,
+        subido_en timestamp DEFAULT now()
       );
 
       CREATE TABLE imputacion (
@@ -126,6 +140,18 @@ describe('HU #53: Asignar Permisos de Operador de Sucursal (Épica 2.4: Modelo M
         movimiento_bancario_id bigint,
         remito_id bigint,
         importe_centavos bigint NOT NULL DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS liquidacion (
+        id serial PRIMARY KEY,
+        sucursal_id bigint NOT NULL,
+        estado text NOT NULL DEFAULT 'abierta'
+      );
+
+      CREATE TABLE IF NOT EXISTS discrepancia_conciliacion (
+        id serial PRIMARY KEY,
+        movimiento_id bigint,
+        estado text NOT NULL DEFAULT 'pendiente'
       );
 
       CREATE TABLE usuario (

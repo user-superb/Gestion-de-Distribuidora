@@ -13,8 +13,8 @@ export const MOCK_MARCAS: Marca[] = [
 ];
 
 export const MOCK_TRANSPORTISTAS: Transportista[] = [
-  { id: '2', nombre: 'Carlos Repartidor', usuario: 'chofer', rol: 'Transportista', activo: true, esTransportista: true, dispositivoConectado: true },
-  { id: '6', nombre: 'Mario Flete', usuario: 'chofer2', rol: 'Transportista', activo: true, esTransportista: true, dispositivoConectado: true },
+  { id: '2', nombre: 'Carlos Repartidor', usuario: 'chofer', rol: 'Transportista', activo: true, esTransportista: true, dispositivoConectado: false },
+  { id: '6', nombre: 'Mario Flete', usuario: 'chofer2', rol: 'Transportista', activo: true, esTransportista: true, dispositivoConectado: false },
 ];
 
 const INITIAL_REMITOS: Remito[] = [

@@ -43,7 +43,8 @@ CREATE TABLE usuario (
     rol             text        NOT NULL DEFAULT 'Administrativo' CHECK (rol IN ('Administrador del sistema', 'Administrativo', 'Transportista', 'Supervisor', 'Gerente', 'CEO')),
     limite_autorizacion_centavos bigint NOT NULL DEFAULT 0 CHECK (limite_autorizacion_centavos >= 0),
     es_transportista boolean    NOT NULL DEFAULT false,
-    dispositivo_conectado boolean NOT NULL DEFAULT true,
+    dispositivo_conectado boolean NOT NULL DEFAULT false,
+    ultimo_latido_movil timestamptz,
     activo          boolean     NOT NULL DEFAULT true,
     creado_en       timestamptz NOT NULL DEFAULT now(),
     actualizado_en  timestamptz NOT NULL DEFAULT now()
@@ -308,8 +309,7 @@ CREATE TABLE visita (
 
 CREATE UNIQUE INDEX visita_orden_unico_idx
     ON visita (hoja_de_ruta_id, orden) WHERE hoja_de_ruta_id IS NOT NULL AND orden IS NOT NULL;
-CREATE UNIQUE INDEX visita_comercio_unico_idx
-    ON visita (hoja_de_ruta_id, comercio_id) WHERE hoja_de_ruta_id IS NOT NULL;
+DROP INDEX IF EXISTS visita_comercio_unico_idx;
 
 -- El remito se asigna a una visita al armar la hoja de ruta.
 ALTER TABLE remito
@@ -325,13 +325,19 @@ CREATE INDEX remito_visita_idx ON remito (visita_id);
 CREATE TABLE cuenta_recepcion (
     id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     sucursal_id     bigint      NOT NULL REFERENCES sucursal(id),
+    nombre_fantasia text,
     alias           text        NOT NULL,
     cbu             char(22),
     banco           text,
+    cuit_titular    char(11),
+    moneda          text        NOT NULL DEFAULT 'ARS',
     activa          boolean     NOT NULL DEFAULT true,
     creado_en       timestamptz NOT NULL DEFAULT now(),
+    actualizado_en  timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT cuenta_alias_unico UNIQUE (sucursal_id, alias),
-    CONSTRAINT cuenta_cbu_formato CHECK (cbu IS NULL OR cbu ~ '^[0-9]{22}$')
+    CONSTRAINT cuenta_cbu_formato CHECK (cbu IS NULL OR cbu ~ '^[0-9]{22}$'),
+    CONSTRAINT cuenta_cuit_titular_formato CHECK (cuit_titular IS NULL OR cuit_titular ~ '^[0-9]{11}$'),
+    CONSTRAINT cuenta_moneda_valida CHECK (moneda IN ('ARS', 'USD'))
 );
 -- PENDIENTE: la cardinalidad sucursal–cuenta no quedó cerrada en la
 -- entrevista. El modelo permite N cuentas por sucursal, que es el caso
@@ -347,8 +353,10 @@ CREATE TABLE movimiento_bancario (
     fecha_hora          timestamptz NOT NULL,
     ordenante           text,
     ordenante_cuit      char(11),
+    concepto            text,
     referencia_externa  text,
     importe_centavos    bigint      NOT NULL,
+    origen              text        NOT NULL DEFAULT 'Extracto Bancario',
     estado              text        NOT NULL DEFAULT 'sin_imputar',
     creado_en           timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT movimiento_importe_positivo CHECK (importe_centavos > 0),
@@ -356,6 +364,15 @@ CREATE TABLE movimiento_bancario (
         CHECK (estado IN ('sin_imputar','parcial','imputado','descartado')),
     CONSTRAINT movimiento_referencia_unica
         UNIQUE (cuenta_id, referencia_externa)
+);
+
+CREATE TABLE movimiento_bancario_comprobante (
+    movimiento_id   bigint PRIMARY KEY REFERENCES movimiento_bancario(id) ON DELETE CASCADE,
+    nombre_archivo  text NOT NULL,
+    tipo_mime       text NOT NULL CHECK (tipo_mime IN ('application/pdf','image/jpeg','image/png')),
+    contenido       bytea NOT NULL,
+    tamano_bytes    bigint NOT NULL CHECK (tamano_bytes > 0 AND tamano_bytes <= 5242880),
+    subido_en       timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE INDEX movimiento_pendientes_idx

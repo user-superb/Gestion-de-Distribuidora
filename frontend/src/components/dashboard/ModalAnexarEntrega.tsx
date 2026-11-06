@@ -41,7 +41,7 @@ export const ModalAnexarEntrega: React.FC<ModalAnexarEntregaProps> = ({
   onSuccess,
 }) => {
   const [selectedHojaId, setSelectedHojaId] = useState<string>('');
-  const [dispositivoConectado, setDispositivoConectado] = useState<boolean>(true);
+  const [dispositivoConectado, setDispositivoConectado] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -71,15 +71,44 @@ export const ModalAnexarEntrega: React.FC<ModalAnexarEntregaProps> = ({
     }
   }, [isOpen, preselectedHojaId, hojasDeRuta, remito]);
 
-  // Actualizar estado de conectividad al cambiar la hoja de ruta seleccionada
+  // Actualizar estado de conectividad al cambiar la hoja de ruta seleccionada y consultar en vivo al backend
   useEffect(() => {
+    if (!isOpen) return;
+
+    const sincronizarConexion = async () => {
+      if (!hojaSeleccionada?.transportistaId) {
+        setDispositivoConectado(false);
+        return;
+      }
+      try {
+        const listaFresca = await remitoService.getTransportistasAsync();
+        const chofer = listaFresca.find((t) => String(t.id) === String(hojaSeleccionada.transportistaId));
+        if (chofer) {
+          setDispositivoConectado(chofer.dispositivoConectado ?? false);
+          return;
+        }
+      } catch {
+        // Fallback al listado en memoria
+      }
+      const choferLocal = transportistas.find((t) => String(t.id) === String(hojaSeleccionada.transportistaId));
+      setDispositivoConectado(choferLocal?.dispositivoConectado ?? false);
+    };
+
+    void sincronizarConexion();
+    const timer = setInterval(() => {
+      void sincronizarConexion();
+    }, 2500);
+
+    return () => clearInterval(timer);
+  }, [isOpen, selectedHojaId, hojaSeleccionada?.id, hojaSeleccionada?.transportistaId]);
+
+  const handleAlternarConexionManual = async () => {
+    const nuevoEstado = !dispositivoConectado;
+    setDispositivoConectado(nuevoEstado);
     if (hojaSeleccionada?.transportistaId) {
-      const chofer = transportistas.find((t) => t.id === hojaSeleccionada.transportistaId);
-      setDispositivoConectado(chofer?.dispositivoConectado ?? true);
-    } else {
-      setDispositivoConectado(true);
+      await remitoService.actualizarConexionTransportistaAsync(hojaSeleccionada.transportistaId, nuevoEstado);
     }
-  }, [selectedHojaId, hojaSeleccionada, transportistas]);
+  };
 
   if (!isOpen || !remito) return null;
 
@@ -197,7 +226,7 @@ export const ModalAnexarEntrega: React.FC<ModalAnexarEntregaProps> = ({
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => setDispositivoConectado(!dispositivoConectado)}
+                onClick={() => void handleAlternarConexionManual()}
                 className={`p-1.5 rounded border transition-colors cursor-pointer flex items-center gap-1 text-xs font-medium ${
                   dispositivoConectado
                     ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'

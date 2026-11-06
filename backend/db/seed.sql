@@ -184,11 +184,15 @@ UPDATE remito SET estado = 'entregado', entregado_en = now() - interval '12 days
 WHERE numero IN ('R-0001-45120', 'R-0002-89310', 'R-0001-45122', 'R-0002-89311', 'R-HU38-EXACTA', 'R-HU38-PARCIAL');
 
 -- 7. Movimientos bancarios de ejemplo para probar E5-04
-INSERT INTO cuenta_recepcion (sucursal_id, alias, banco)
-SELECT id, 'Cuenta operativa demo', 'Banco Demo'
+INSERT INTO cuenta_recepcion (sucursal_id, nombre_fantasia, alias, cbu, banco, cuit_titular, moneda, activa)
+SELECT id, 'Cuenta Operativa Principal', 'Cuenta operativa demo', '2850590940090418135201', 'Banco Demo', '30712345678', 'ARS', true
 FROM sucursal
 WHERE nombre = 'Sucursal Central - La Plata'
-ON CONFLICT (sucursal_id, alias) DO NOTHING;
+ON CONFLICT (sucursal_id, alias) DO UPDATE SET
+  cbu = COALESCE(cuenta_recepcion.cbu, EXCLUDED.cbu),
+  cuit_titular = COALESCE(cuenta_recepcion.cuit_titular, EXCLUDED.cuit_titular),
+  moneda = COALESCE(cuenta_recepcion.moneda, EXCLUDED.moneda),
+  nombre_fantasia = COALESCE(cuenta_recepcion.nombre_fantasia, EXCLUDED.nombre_fantasia);
 
 INSERT INTO movimiento_bancario (cuenta_id, fecha_hora, ordenante, referencia_externa, importe_centavos)
 SELECT cr.id, now(), c.razon_social, demo.referencia, demo.importe_centavos
