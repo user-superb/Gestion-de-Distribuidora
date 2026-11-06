@@ -295,7 +295,12 @@ configuracionRouter.post('/configuracion/sucursales', async (req, res) => {
         [codigo, nombre, optionalText(req.body?.domicilio)]
       );
     } catch (insertErr: any) {
-      if (String(insertErr?.message).includes('codigo') && String(insertErr?.message).includes('does not exist')) {
+      if (
+        insertErr?.code === '42703' ||
+        (String(insertErr?.message).includes('codigo') &&
+          (String(insertErr?.message).includes('does not exist') ||
+            String(insertErr?.message).includes('no existe')))
+      ) {
         result = await db.query(
           'INSERT INTO sucursal (nombre, domicilio, activa) VALUES ($1, $2, true) RETURNING id, nombre, domicilio, activa',
           [nombre, optionalText(req.body?.domicilio)]
@@ -376,7 +381,12 @@ configuracionRouter.put('/configuracion/sucursales/:id', async (req, res) => {
         [rawCodigo || null, nombre, optionalText(req.body?.domicilio), id]
       );
     } catch (updateErr: any) {
-      if (String(updateErr?.message).includes('codigo') && String(updateErr?.message).includes('does not exist')) {
+      if (
+        updateErr?.code === '42703' ||
+        (String(updateErr?.message).includes('codigo') &&
+          (String(updateErr?.message).includes('does not exist') ||
+            String(updateErr?.message).includes('no existe')))
+      ) {
         result = await db.query(
           'UPDATE sucursal SET nombre = $1, domicilio = $2 WHERE id = $3 RETURNING id, nombre, domicilio, activa',
           [nombre, optionalText(req.body?.domicilio), id]

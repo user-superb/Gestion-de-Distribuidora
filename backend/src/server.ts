@@ -77,6 +77,13 @@ if (process.env.NODE_ENV !== 'test') {
     if (isConnected) {
       console.log(`🐘 Conexión exitosa con PostgreSQL.`);
       try {
+        await db.query('ALTER TABLE sucursal ADD COLUMN IF NOT EXISTS codigo text;');
+        await db.query(`
+          UPDATE sucursal
+          SET codigo = 'SUC-' || lpad(id::text, 3, '0')
+          WHERE codigo IS NULL;
+        `);
+        await db.query('CREATE UNIQUE INDEX IF NOT EXISTS sucursal_codigo_unico ON sucursal (lower(codigo));');
         await db.query('ALTER TABLE hoja_de_ruta ALTER COLUMN transportista_id DROP NOT NULL;');
         await db.query('ALTER TABLE hoja_de_ruta DROP CONSTRAINT IF EXISTS hoja_unica_por_transportista_y_fecha;');
         await db.query('ALTER TABLE usuario ADD COLUMN IF NOT EXISTS dispositivo_conectado boolean NOT NULL DEFAULT false;');
