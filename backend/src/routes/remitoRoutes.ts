@@ -1,5 +1,6 @@
 // backend/src/routes/remitoRoutes.ts
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
+import { requireAuth } from './authRoutes.js';
 import { remitoService } from '../services/remitoService.js';
 
 export const remitoRouter = Router();
@@ -171,11 +172,19 @@ remitoRouter.patch('/hoja-de-ruta/:id/estado', async (req, res) => {
   }
 });
 
-remitoRouter.patch('/hoja-de-ruta/:id/transportista', async (req, res) => {
+const requireOperadorRuta = [requireAuth, (req: Request, res: Response, next: NextFunction) => {
+  if (!['Administrativo', 'Administrador del sistema'].includes((req as any).userSession?.role)) return res.status(403).json({ error: 'No tenés permiso para reasignar hojas de ruta.' });
+  const id = Number(String((req as any).userSession?.id || '').replace(/^usr_/, ''));
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(401).json({ error: 'No se pudo identificar al usuario de la sesión.' });
+  next();
+}];
+const operadorId = (req: Request) => Number(String((req as any).userSession.id).replace(/^usr_/, ''));
+
+remitoRouter.patch('/hoja-de-ruta/:id/transportista', ...requireOperadorRuta, async (req, res) => {
   try {
     const { id } = req.params;
     const { transportistaId } = req.body;
-    const result = await remitoService.asignarTransportistaHojaDeRuta(id, transportistaId ?? null);
+    const result = await remitoService.asignarTransportistaHojaDeRuta(String(id), transportistaId ?? null, operadorId(req));
     if (!result.success) {
       return res.status(result.status || 422).json(result);
     }
@@ -185,11 +194,11 @@ remitoRouter.patch('/hoja-de-ruta/:id/transportista', async (req, res) => {
   }
 });
 
-remitoRouter.patch('/hoja-de-ruta/:id/reemplazar-transportista', async (req, res) => {
+remitoRouter.patch('/hoja-de-ruta/:id/reemplazar-transportista', ...requireOperadorRuta, async (req, res) => {
   try {
     const { id } = req.params;
     const { transportistaId } = req.body;
-    const result = await remitoService.reemplazarHojaDeRutaTransportista(id, transportistaId);
+    const result = await remitoService.reemplazarHojaDeRutaTransportista(String(id), transportistaId, operadorId(req));
     if (!result.success) {
       return res.status(result.status || 422).json(result);
     }
@@ -199,11 +208,11 @@ remitoRouter.patch('/hoja-de-ruta/:id/reemplazar-transportista', async (req, res
   }
 });
 
-remitoRouter.post('/hoja-de-ruta/:id/reemplazar-transportista', async (req, res) => {
+remitoRouter.post('/hoja-de-ruta/:id/reemplazar-transportista', ...requireOperadorRuta, async (req, res) => {
   try {
     const { id } = req.params;
     const { transportistaId } = req.body;
-    const result = await remitoService.reemplazarHojaDeRutaTransportista(id, transportistaId);
+    const result = await remitoService.reemplazarHojaDeRutaTransportista(String(id), transportistaId, operadorId(req));
     if (!result.success) {
       return res.status(result.status || 422).json(result);
     }

@@ -1689,6 +1689,12 @@ export const conciliacionService = {
         );
       }
       await client.query('UPDATE discrepancia_conciliacion SET estado = $1 WHERE id = $2', [estado, discrepanciaId]);
+      if (estado === 'aprobada') {
+        await client.query(
+          `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion) VALUES ('discrepancia_conciliacion', $1, 'aprobada', $2, $3::jsonb, $4)`,
+          [discrepanciaId, usuarioId, JSON.stringify({ estado, movimientoIds, remitoIds, importeMovimiento: result.importeMovimiento.toString(), importeSeleccionado: result.importeSeleccionado.toString(), diferenciaCentavos: result.diferencia.toString() }), nota.trim()]
+        );
+      }
       await client.query(
         `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
          VALUES ('discrepancia_conciliacion', $1, $2, $3, $4::jsonb, $5)`,
@@ -1743,7 +1749,7 @@ export const conciliacionService = {
       await client.query(
         `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
          VALUES ('discrepancia_conciliacion', $1, $2, $3, $4::jsonb, $5)`,
-        [id, estado, usuarioId, JSON.stringify({ estado, movimientoIds, remitoIds }), observacion.trim()]
+        [id, estado, usuarioId, JSON.stringify({ estado, movimientoIds, remitoIds, importeMovimiento: String(dc.importe_movimiento), importeSeleccionado: String(dc.importe_seleccionado), diferenciaCentavos: String(dc.diferencia_centavos) }), observacion.trim()]
       );
       if (!aprobar) await client.query(
         `INSERT INTO discrepancia_notificacion (discrepancia_id, usuario_id, mensaje)

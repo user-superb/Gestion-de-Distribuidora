@@ -1,3 +1,4 @@
+import { authService } from './authService';
 import { Remito, Visita, Comercio, Marca, HojaDeRuta, Transportista, CargaEntregaManualDto, AnexarEntregaResultado } from '../types/domain';
 
 export const MOCK_COMERCIOS: Comercio[] = [
@@ -1189,7 +1190,7 @@ export const remitoService = {
         `${API_BASE}/hoja-de-ruta/${encodeURIComponent(hojaDeRutaId)}/transportista`,
         {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authService.getCurrentSession()?.token || ''}` },
           body: JSON.stringify({ transportistaId }),
           signal: AbortSignal.timeout(3000),
         }
@@ -1198,17 +1199,17 @@ export const remitoService = {
       if (res.ok && data.success) {
         return data;
       }
-      if (data.error) {
+      if (!res.ok || data.error) {
         return {
           success: false,
-          error: data.error,
+          error: data.message || data.error || 'No se pudo actualizar la hoja de ruta.',
           status: res.status,
         };
       }
     } catch {
-      // Fallback a lógica en memoria
+      return { success: false, error: 'No se pudo conectar con el servidor.' };
     }
-    return remitoService.asignarTransportistaHojaDeRuta(hojaDeRutaId, transportistaId);
+    return { success: false, error: 'No se pudo actualizar la hoja de ruta.' };
   },
 
   async reemplazarHojaDeRutaTransportistaAsync(
@@ -1226,7 +1227,7 @@ export const remitoService = {
         `${API_BASE}/hoja-de-ruta/${encodeURIComponent(nuevaHojaDeRutaId)}/reemplazar-transportista`,
         {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authService.getCurrentSession()?.token || ''}` },
           body: JSON.stringify({ transportistaId }),
           signal: AbortSignal.timeout(3000),
         }
@@ -1235,17 +1236,17 @@ export const remitoService = {
       if (res.ok && data.success) {
         return data;
       }
-      if (data.error) {
+      if (!res.ok || data.error) {
         return {
           success: false,
-          error: data.error,
+          error: data.message || data.error || 'No se pudo actualizar la hoja de ruta.',
           status: res.status,
         };
       }
     } catch {
-      // Fallback a lógica en memoria
+      return { success: false, error: 'No se pudo conectar con el servidor.' };
     }
-    return remitoService.reemplazarHojaDeRutaTransportista(nuevaHojaDeRutaId, transportistaId);
+    return { success: false, error: 'No se pudo actualizar la hoja de ruta.' };
   },
   async anexarEntregaARutaAsync(
     remitoId: string,

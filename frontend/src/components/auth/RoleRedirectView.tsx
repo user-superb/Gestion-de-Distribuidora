@@ -23,6 +23,7 @@ import { ConciliacionCentro } from '../dashboard/ConciliacionCentro';
 import { Configuracion } from '../dashboard/Configuracion';
 import { RendicionEfectivo } from '../dashboard/RendicionEfectivo';
 import { ProfileMenu } from './ProfileMenu';
+import { Auditoria } from '../dashboard/Auditoria';
 import { RepartoYaLogo } from '../common/RepartoYaLogo';
 
 interface RoleRedirectViewProps {
@@ -36,7 +37,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
   redirectUrl,
   onLogout,
 }) => {
-  type Seccion = 'hojas' | 'conciliacion' | 'configuracion' | 'efectivo';
+  type Seccion = 'hojas' | 'conciliacion' | 'configuracion' | 'efectivo' | 'auditoria';
   const [hojasChofer, setHojasChofer] = useState<HojaDeRuta[]>([]);
   const [comerciosMap, setComerciosMap] = useState<Record<string, Comercio>>({});
   const [subseccionHojas, setSubseccionHojas] = useState<'armado' | 'armadas'>('armado');
@@ -60,6 +61,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
   const [seccion, setSeccion] = useState<Seccion>(() => {
     const path = window.location.pathname;
     if (isSupervisor) return 'efectivo';
+    if ((session.role === 'Administrativo' || isSysAdmin) && path.endsWith('/auditoria')) return 'auditoria';
     if (puedeEfectivo && path.endsWith('/efectivo')) return 'efectivo';
     if (isSysAdmin && path.startsWith('/dashboard/configuracion')) return 'configuracion';
     if (path.endsWith('/conciliacion')) return 'conciliacion';
@@ -72,6 +74,8 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
       setSeccion(
         isSupervisor || (puedeEfectivo && path.endsWith('/efectivo'))
           ? 'efectivo'
+          : (session.role === 'Administrativo' || isSysAdmin) && path.endsWith('/auditoria')
+          ? 'auditoria'
           : isSysAdmin && path.startsWith('/dashboard/configuracion')
           ? 'configuracion'
           : path.endsWith('/conciliacion')
@@ -81,7 +85,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
     };
     window.addEventListener('popstate', syncSection);
     return () => window.removeEventListener('popstate', syncSection);
-  }, [isSysAdmin, isSupervisor, puedeEfectivo]);
+  }, [isSysAdmin, isSupervisor, puedeEfectivo, session.role]);
 
   useEffect(() => {
     if (session.role === 'Transportista') {
@@ -167,7 +171,8 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
 
   const navigate = (next: Seccion) => {
     const path =
-      next === 'conciliacion' ? '/dashboard/conciliacion'
+      next === 'auditoria' ? '/dashboard/auditoria'
+        : next === 'conciliacion' ? '/dashboard/conciliacion'
         : next === 'configuracion' ? '/dashboard/configuracion'
         : next === 'efectivo' ? '/dashboard/efectivo'
         : '/dashboard';
@@ -306,7 +311,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
                 <Building2 className="h-4 w-4 text-marca-naranja" />
                 <span>{session.branch}</span>
               </div>
-              <ProfileMenu session={session} onLogout={onLogout} />
+              <ProfileMenu session={session} onLogout={onLogout} onAuditoria={isAdmin ? () => navigate('auditoria') : undefined} />
             </div>
           </div>
         </header>
@@ -314,7 +319,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
         <main className="mx-auto max-w-screen-2xl px-4 py-6 sm:px-6 lg:py-8">
           <div className="mb-5">
             <h1 className="text-2xl font-extrabold text-marca-azul">
-              {seccion === 'efectivo'
+              {seccion === 'auditoria' ? 'Auditoría' : seccion === 'efectivo'
                 ? 'Rendición de efectivo'
                 : seccion === 'configuracion'
                 ? 'Configuración'
@@ -325,7 +330,7 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
                 : 'Conciliación de transferencias'}
             </h1>
             <p className="mt-1 text-sm text-slate-600">
-              {seccion === 'efectivo'
+              {seccion === 'auditoria' ? 'Consultá y filtrá la actividad registrada en el sistema.' : seccion === 'efectivo'
                 ? 'Recibí las declaraciones de los transportistas, contá el dinero y cerrá cada rendición.'
                 : seccion === 'configuracion'
                 ? 'Administrá usuarios, marcas, comercios, sucursales y permisos.'
@@ -336,7 +341,9 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
                 : 'Imputá los movimientos de la cuenta a los remitos pendientes.'}
             </p>
           </div>
-          {seccion === 'efectivo' && puedeEfectivo ? (
+          {seccion === 'auditoria' && isAdmin ? (
+            <Auditoria session={session} />
+          ) : seccion === 'efectivo' && puedeEfectivo ? (
             <RendicionEfectivo session={session} />
           ) : seccion === 'configuracion' && isSysAdmin ? (
             <Configuracion session={session} />

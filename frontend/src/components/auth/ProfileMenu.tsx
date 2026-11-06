@@ -7,9 +7,10 @@ import { authService } from '../../services/authService';
 interface ProfileMenuProps {
   session: UserSession;
   onLogout: () => void;
+  onAuditoria?: () => void;
 }
 
-export const ProfileMenu: React.FC<ProfileMenuProps> = ({ session, onLogout }) => {
+export const ProfileMenu: React.FC<ProfileMenuProps> = ({ session, onLogout, onAuditoria }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -105,6 +106,7 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ session, onLogout }) =
 
           <div className="border-t border-slate-100 my-1" />
 
+          {onAuditoria && <div className="px-1.5"><button type="button" onClick={() => { setIsOpen(false); onAuditoria(); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 rounded"><span>Auditoría</span></button></div>}
           <div className="px-1.5">
             <button
               type="button"

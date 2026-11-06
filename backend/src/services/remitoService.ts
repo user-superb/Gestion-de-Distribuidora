@@ -128,6 +128,13 @@ export interface CargaEntregaManualDto {
   sucursalId?: string;
 }
 
+async function registrarReasignacion(client: any, hojaId: string, operadorId: number, anterior: string, nuevo: string | null) {
+  await client.query(
+    `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_antes, valores_despues, observacion) VALUES ('hoja_de_ruta', $1, 'reasignacion', $2, $3::jsonb, $4::jsonb, $5)`,
+    [hojaId, operadorId, JSON.stringify({ transportista_id: anterior }), JSON.stringify({ transportista_id: nuevo }), nuevo ? 'Cambio de transportista' : 'Desasignación de transportista']
+  );
+}
+
 export const remitoService = {
   async getComercios(): Promise<Comercio[]> {
     const res = await db.query(
@@ -1113,15 +1120,22 @@ export const remitoService = {
 
   async asignarTransportistaHojaDeRuta(
     hojaDeRutaId: string,
-    transportistaId: string | null
+    transportistaId: string | null,
+    operadorId: number
   ): Promise<{ success: boolean; hojaDeRuta?: HojaDeRuta; error?: string; status?: number }> {
     if (!hojaDeRutaId) {
       return { success: false, error: 'Debe especificar el ID de la hoja de ruta.', status: 400 };
     }
 
+    const client = await db.getPool().connect();
+    let transactionOpen = false;
+    try {
+      await client.query('BEGIN');
+      transactionOpen = true;
+
     // 1. Verificar existencia de la hoja de ruta
-    const hojaRes = await db.query(
-      'SELECT id::text as id, sucursal_id::text as "sucursalId", transportista_id::text as "transportistaId", fecha_reparto as "fechaReparto", estado FROM hoja_de_ruta WHERE id::text = $1',
+    const hojaRes = await client.query(
+      'SELECT id::text as id, sucursal_id::text as "sucursalId", transportista_id::text as "transportistaId", fecha_reparto as "fechaReparto", estado FROM hoja_de_ruta WHERE id::text = $1 FOR UPDATE',
       [hojaDeRutaId]
     );
     if (hojaRes.rows.length === 0) {
@@ -1134,7 +1148,7 @@ export const remitoService = {
     let tieneEntregas = estadoRuta === 'en_curso' || estadoRuta === 'cerrada';
     if (!tieneEntregas) {
       try {
-        const entregasRes = await db.query(
+        const entregasRes = await client.query(
           `SELECT r.id
            FROM remito r
            JOIN visita v ON v.id = r.visita_id
@@ -1161,14 +1175,16 @@ export const remitoService = {
 
     // Desasignación de transportista si se pasa null o vacío
     if (!transportistaId) {
-      await db.query('UPDATE hoja_de_ruta SET transportista_id = NULL WHERE id::text = $1', [hojaDeRutaId]);
+      await client.query('UPDATE hoja_de_ruta SET transportista_id = NULL WHERE id::text = $1', [hojaDeRutaId]);
+      if (hojaRow.transportistaId) await registrarReasignacion(client, hojaDeRutaId, operadorId, hojaRow.transportistaId, null);
+      await client.query('COMMIT'); transactionOpen = false;
       const updated = await this.construirHojaDeRutaDetalle({ ...hojaRow, transportistaId: null });
       return { success: true, hojaDeRuta: updated };
     }
 
     // 2. Verificar que el transportista exista y esté habilitado en la flota (Regla de negocio)
     const cleanTransId = String(transportistaId).replace(/^usr_/, '').trim();
-    const transRes = await db.query(
+    const transRes = await client.query(
       `SELECT id::text as id, nombre, activo, es_transportista as "esTransportista", rol 
        FROM usuario 
        WHERE id::text = $1`,
@@ -1194,7 +1210,7 @@ export const remitoService = {
 
     // 3. Verificar si el transportista ya posee una hoja de ruta para esa misma fecha (Criterio Escenario 2: Solapamiento)
     const fechaReparto = normalizarFechaISO(hojaRow.fechaReparto);
-    const solapadas = await db.query(
+    const solapadas = await client.query(
       `SELECT id::text as id, fecha_reparto as "fechaReparto", estado 
        FROM hoja_de_ruta 
        WHERE transportista_id::text = $1 
@@ -1214,7 +1230,7 @@ export const remitoService = {
 
     // 4. Asignar la hoja de ruta al transportista
     try {
-      await db.query(
+      await client.query(
         'UPDATE hoja_de_ruta SET transportista_id = $1 WHERE id::text = $2',
         [cleanTransId, String(hojaDeRutaId)]
       );
@@ -1229,6 +1245,9 @@ export const remitoService = {
       throw err;
     }
 
+    if (hojaRow.transportistaId && String(hojaRow.transportistaId) !== cleanTransId) await registrarReasignacion(client, hojaDeRutaId, operadorId, hojaRow.transportistaId, cleanTransId);
+    await client.query('COMMIT'); transactionOpen = false;
+
     // 5. Retornar hoja de ruta actualizada vinculada al perfil del transportista (Criterio Escenario 1)
     const hojaActualizada = await this.construirHojaDeRutaDetalle({
       ...hojaRow,
@@ -1239,6 +1258,10 @@ export const remitoService = {
       success: true,
       hojaDeRuta: hojaActualizada,
     };
+    } finally {
+      if (transactionOpen) await client.query('ROLLBACK').catch(() => undefined);
+      client.release();
+    }
   },
 
   /**
@@ -1251,7 +1274,8 @@ export const remitoService = {
    */
   async reemplazarHojaDeRutaTransportista(
     nuevaHojaDeRutaId: string,
-    transportistaId: string
+    transportistaId: string,
+    operadorId: number
   ): Promise<{
     success: boolean;
     hojaDeRuta?: HojaDeRuta;
@@ -1391,6 +1415,10 @@ export const remitoService = {
         cleanTransId,
         String(nuevaHojaDeRutaId),
       ]);
+      await client.query(
+        `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_antes, valores_despues, observacion) VALUES ('hoja_de_ruta', $1, 'reasignacion', $2, $3::jsonb, $4::jsonb, $5)`,
+        [nuevaHojaDeRutaId, operadorId, JSON.stringify({ hoja_de_ruta_id: hojaPrevia.id, transportista_id: cleanTransId, transportista_destino_anterior_id: nuevaHoja.transportistaId }), JSON.stringify({ hoja_de_ruta_id: nuevaHojaDeRutaId, transportista_id: cleanTransId }), 'Reemplazo de hoja de ruta']
+      );
       await client.query('COMMIT');
       transactionOpen = false;
 

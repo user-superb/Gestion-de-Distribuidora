@@ -483,7 +483,7 @@ export const rendicionService = {
         [rendicion.id, rendidoCentavos, conteo ? JSON.stringify(conteo) : null, supervisorId]
       );
       await cerrarCircuito(client, rendicion);
-      await auditar(client, rendicion.id, 'validacion', supervisorId, { estado: rendicion.estado }, { estado: 'validada', rendidoCentavos });
+      await auditar(client, rendicion.id, 'validacion', supervisorId, { estado: rendicion.estado }, { estado: 'validada', hojaDeRutaId: rendicion.hojaDeRutaId, declaradoCentavos: rendicion.declaradoCentavos, rendidoCentavos });
       return buscarRendicion(client, rendicion.id);
     });
   },
@@ -542,7 +542,7 @@ export const rendicionService = {
       await auditar(
         client, rendicion.id, 'validacion', supervisorId,
         { estado: rendicion.estado, rendidoCentavos: rendicion.rendidoCentavos },
-        { estado: 'validada', rendidoCentavos, ...diferencia, descuadre: true },
+        { estado: 'validada', hojaDeRutaId: rendicion.hojaDeRutaId, declaradoCentavos: rendicion.declaradoCentavos, rendidoCentavos, ...diferencia, descuadre: true },
         motivo
       );
       return buscarRendicion(client, rendicion.id);

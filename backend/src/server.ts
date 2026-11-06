@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import { db } from './db.js';
 import { remitoRouter } from './routes/remitoRoutes.js';
 import { authRouter } from './routes/authRoutes.js';
+import { auditoriaRouter } from './routes/auditoriaRoutes.js';
 import { conciliacionRouter } from './routes/conciliacionRoutes.js';
 import { usuarioRouter } from './routes/usuarioRoutes.js';
 import { configuracionRouter } from './routes/configuracionRoutes.js';
@@ -61,6 +62,7 @@ app.get('/api/health', async (_req, res) => {
 });
 
 app.use('/api', authRouter);
+app.use('/api/auditoria', auditoriaRouter);
 app.use('/api/movil', movilRouter);
 app.use('/api/transportista', transportistaRouter);
 app.use('/api/conciliacion', conciliacionRouter);

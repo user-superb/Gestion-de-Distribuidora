@@ -10,6 +10,11 @@ describe('Backend PostgreSQL - HU #45: Reemplazar Hoja de Ruta asignada a un Tra
     const memDb = newDb();
 
     memDb.public.none(`
+      CREATE TABLE auditoria (
+        id serial PRIMARY KEY, entidad text NOT NULL, entidad_id bigint NOT NULL,
+        accion text NOT NULL, usuario_id bigint NOT NULL, valores_antes jsonb,
+        valores_despues jsonb, observacion text, ocurrido_en timestamp DEFAULT now()
+      );
       CREATE TABLE IF NOT EXISTS sucursal (
         id serial PRIMARY KEY,
         nombre text NOT NULL,
@@ -105,7 +110,7 @@ describe('Backend PostgreSQL - HU #45: Reemplazar Hoja de Ruta asignada a un Tra
 
   it('ESCENARIO 1: Reemplazo exitoso: El administrativo selecciona a un transportista habilitado con una hoja de ruta asignada para la fecha y asigna la nueva hoja de ruta. El sistema vincula la nueva ruta a su perfil y desvincula la anterior.', async () => {
     // Carlos (10) tiene asignada la hoja 100 el 2026-10-25. Reemplazamos por la hoja 200 (misma fecha).
-    const resultado = await remitoService.reemplazarHojaDeRutaTransportista('200', '10');
+    const resultado = await remitoService.reemplazarHojaDeRutaTransportista('200', '10', 40);
 
     assert.equal(resultado.success, true);
     assert.equal(resultado.hojaPreviaDesvinculadaId, '100');
@@ -121,12 +126,18 @@ describe('Backend PostgreSQL - HU #45: Reemplazar Hoja de Ruta asignada a un Tra
     // Verificamos en base de datos que la ruta anterior (100) quedó desvinculada (NULL)
     const checkAnterior = await db.query('SELECT transportista_id FROM hoja_de_ruta WHERE id = 100');
     assert.equal(checkAnterior.rows[0].transportista_id, null);
+    const audit = await db.query('SELECT usuario_id, accion, valores_antes, valores_despues FROM auditoria');
+    assert.equal(audit.rows.length, 1);
+    assert.equal(Number(audit.rows[0].usuario_id), 40);
+    assert.equal(audit.rows[0].accion, 'reasignacion');
+    assert.equal(audit.rows[0].valores_antes.hoja_de_ruta_id, '100');
+    assert.equal(audit.rows[0].valores_despues.hoja_de_ruta_id, '200');
   });
 
   it('ESCENARIO 2: Fallo por ruta activa: El administrativo selecciona a un transportista habilitado con una hoja de ruta en curso para esa misma fecha e intenta reemplazar la hoja de ruta. El sistema rechaza la asignación.', async () => {
     // Mario (20) tiene la hoja 400 en curso ('en_curso') para el 2026-10-25.
     // Intentamos reemplazarla por la hoja 500 (misma fecha).
-    const resultado = await remitoService.reemplazarHojaDeRutaTransportista('500', '20');
+    const resultado = await remitoService.reemplazarHojaDeRutaTransportista('500', '20', 40);
 
     assert.equal(resultado.success, false);
     assert.equal(resultado.status, 409);
@@ -150,7 +161,7 @@ describe('Backend PostgreSQL - HU #45: Reemplazar Hoja de Ruta asignada a un Tra
     `);
 
     // Intentamos reemplazar la hoja de Mario en 2026-10-26 (no tiene previa)
-    const resultado = await remitoService.reemplazarHojaDeRutaTransportista('600', '20');
+    const resultado = await remitoService.reemplazarHojaDeRutaTransportista('600', '20', 40);
 
     assert.equal(resultado.success, false);
     assert.equal(resultado.status, 422);
@@ -162,7 +173,7 @@ describe('Backend PostgreSQL - HU #45: Reemplazar Hoja de Ruta asignada a un Tra
   });
 
   it('REGLAS A CONSIDERAR: Rechaza si el transportista no se encuentra habilitado en la flota (inactivo)', async () => {
-    const resultado = await remitoService.reemplazarHojaDeRutaTransportista('200', '30'); // chofer_inactivo
+    const resultado = await remitoService.reemplazarHojaDeRutaTransportista('200', '30', 40); // chofer_inactivo
 
     assert.equal(resultado.success, false);
     assert.equal(resultado.status, 422);
@@ -170,7 +181,7 @@ describe('Backend PostgreSQL - HU #45: Reemplazar Hoja de Ruta asignada a un Tra
   });
 
   it('REGLAS A CONSIDERAR: Rechaza si el usuario seleccionado no es transportista', async () => {
-    const resultado = await remitoService.reemplazarHojaDeRutaTransportista('200', '40'); // admin1 (Administrativo)
+    const resultado = await remitoService.reemplazarHojaDeRutaTransportista('200', '40', 40); // admin1 (Administrativo)
 
     assert.equal(resultado.success, false);
     assert.equal(resultado.status, 422);
@@ -178,7 +189,7 @@ describe('Backend PostgreSQL - HU #45: Reemplazar Hoja de Ruta asignada a un Tra
   });
 
   it('VALIDACIÓN: Rechaza si la hoja de ruta destino no existe', async () => {
-    const resultado = await remitoService.reemplazarHojaDeRutaTransportista('99999', '10');
+    const resultado = await remitoService.reemplazarHojaDeRutaTransportista('99999', '10', 40);
 
     assert.equal(resultado.success, false);
     assert.equal(resultado.status, 404);
@@ -188,7 +199,7 @@ describe('Backend PostgreSQL - HU #45: Reemplazar Hoja de Ruta asignada a un Tra
     // Marcamos la hoja 200 como cerrada
     await db.query(`UPDATE hoja_de_ruta SET estado = 'cerrada' WHERE id = 200`);
 
-    const resultado = await remitoService.reemplazarHojaDeRutaTransportista('200', '10');
+    const resultado = await remitoService.reemplazarHojaDeRutaTransportista('200', '10', 40);
 
     assert.equal(resultado.success, false);
     assert.equal(resultado.status, 409);

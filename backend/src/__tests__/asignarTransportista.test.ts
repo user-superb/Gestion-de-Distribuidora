@@ -10,6 +10,11 @@ describe('Backend PostgreSQL - HU #14: Asignar Hoja de Ruta a Transportista', ()
     const memDb = newDb();
 
     memDb.public.none(`
+      CREATE TABLE auditoria (
+        id serial PRIMARY KEY, entidad text NOT NULL, entidad_id bigint NOT NULL,
+        accion text NOT NULL, usuario_id bigint NOT NULL, valores_antes jsonb,
+        valores_despues jsonb, observacion text, ocurrido_en timestamp DEFAULT now()
+      );
       CREATE TABLE IF NOT EXISTS sucursal (
         id serial PRIMARY KEY,
         nombre text NOT NULL,
@@ -97,7 +102,7 @@ describe('Backend PostgreSQL - HU #14: Asignar Hoja de Ruta a Transportista', ()
 
   it('ESCENARIO 1: Asignación exitosa sin hoja de ruta asignada previamente: El administrativo selecciona a un transportista habilitado sin otra hoja de ruta asignada en esa fecha y asigna la hoja de ruta. El sistema vincula la ruta a su perfil.', async () => {
     // Hoja 100 tiene fecha 2026-10-25. Carlos (10) solo tiene asignada la hoja 300 el 2026-10-26.
-    const resultado = await remitoService.asignarTransportistaHojaDeRuta('100', '10');
+    const resultado = await remitoService.asignarTransportistaHojaDeRuta('100', '10', 40);
 
     assert.equal(resultado.success, true);
     assert.ok(resultado.hojaDeRuta);
@@ -111,11 +116,11 @@ describe('Backend PostgreSQL - HU #14: Asignar Hoja de Ruta a Transportista', ()
 
   it('ESCENARIO 2: Fallo por solapamiento de asignación: El administrativo intenta asignar la ruta a un transportista que ya posee una ruta en curso para esa misma fecha. El sistema rechaza la asignación.', async () => {
     // 1. Asignamos primero la hoja 100 (fecha 2026-10-25) al transportista Carlos (10)
-    const primeraAsignacion = await remitoService.asignarTransportistaHojaDeRuta('100', '10');
+    const primeraAsignacion = await remitoService.asignarTransportistaHojaDeRuta('100', '10', 40);
     assert.equal(primeraAsignacion.success, true);
 
     // 2. Intentamos asignar la hoja 200 (misma fecha 2026-10-25) también a Carlos (10)
-    const segundaAsignacion = await remitoService.asignarTransportistaHojaDeRuta('200', '10');
+    const segundaAsignacion = await remitoService.asignarTransportistaHojaDeRuta('200', '10', 40);
 
     // Debe ser rechazado
     assert.equal(segundaAsignacion.success, false);
@@ -133,7 +138,7 @@ describe('Backend PostgreSQL - HU #14: Asignar Hoja de Ruta a Transportista', ()
   it('DISPONIBILIDAD MÚLTIPLES DÍAS: Un transportista puede trabajar y ser asignado a múltiples hojas de ruta en días distintos sin solapamiento', async () => {
     // Carlos (10) ya tiene asignada la hoja 300 el 2026-10-26 (en el seed del beforeEach)
     // Asignamos Carlos a la hoja 100 el 2026-10-25
-    const asigDia1 = await remitoService.asignarTransportistaHojaDeRuta('100', '10');
+    const asigDia1 = await remitoService.asignarTransportistaHojaDeRuta('100', '10', 40);
     assert.equal(asigDia1.success, true);
     assert.equal(asigDia1.hojaDeRuta?.transportistaId, '10');
 
@@ -142,7 +147,7 @@ describe('Backend PostgreSQL - HU #14: Asignar Hoja de Ruta a Transportista', ()
       INSERT INTO hoja_de_ruta (id, sucursal_id, transportista_id, fecha_reparto, estado)
       VALUES (400, 1, NULL, '2026-10-27', 'pendiente_de_despacho');
     `);
-    const asigDia3 = await remitoService.asignarTransportistaHojaDeRuta('400', '10');
+    const asigDia3 = await remitoService.asignarTransportistaHojaDeRuta('400', '10', 40);
     assert.equal(asigDia3.success, true);
     assert.equal(asigDia3.hojaDeRuta?.transportistaId, '10');
 
@@ -157,7 +162,7 @@ describe('Backend PostgreSQL - HU #14: Asignar Hoja de Ruta a Transportista', ()
   });
 
   it('REGLAS A CONSIDERAR: Rechaza la asignación si el transportista no se encuentra habilitado en la flota (inactivo)', async () => {
-    const resultado = await remitoService.asignarTransportistaHojaDeRuta('100', '30'); // chofer_inactivo (activo = false)
+    const resultado = await remitoService.asignarTransportistaHojaDeRuta('100', '30', 40); // chofer_inactivo (activo = false)
 
     assert.equal(resultado.success, false);
     assert.equal(resultado.status, 422);
@@ -165,7 +170,7 @@ describe('Backend PostgreSQL - HU #14: Asignar Hoja de Ruta a Transportista', ()
   });
 
   it('REGLAS A CONSIDERAR: Rechaza la asignación si el usuario no es transportista', async () => {
-    const resultado = await remitoService.asignarTransportistaHojaDeRuta('100', '40'); // admin1 (Administrativo, no chofer)
+    const resultado = await remitoService.asignarTransportistaHojaDeRuta('100', '40', 40); // admin1 (Administrativo, no chofer)
 
     assert.equal(resultado.success, false);
     assert.equal(resultado.status, 422);
@@ -173,7 +178,7 @@ describe('Backend PostgreSQL - HU #14: Asignar Hoja de Ruta a Transportista', ()
   });
 
   it('REGLAS A CONSIDERAR: Rechaza si la hoja de ruta especificada no existe', async () => {
-    const resultado = await remitoService.asignarTransportistaHojaDeRuta('99999', '10');
+    const resultado = await remitoService.asignarTransportistaHojaDeRuta('99999', '10', 40);
 
     assert.equal(resultado.success, false);
     assert.equal(resultado.status, 404);
@@ -192,12 +197,18 @@ describe('Backend PostgreSQL - HU #14: Asignar Hoja de Ruta a Transportista', ()
 
   it('DESASIGNACIÓN: Permite desvincular un transportista pasando null', async () => {
     // Asignamos
-    await remitoService.asignarTransportistaHojaDeRuta('100', '10');
+    await remitoService.asignarTransportistaHojaDeRuta('100', '10', 40);
     // Desasignamos
-    const desasignar = await remitoService.asignarTransportistaHojaDeRuta('100', null);
+    const desasignar = await remitoService.asignarTransportistaHojaDeRuta('100', null, 40);
     assert.equal(desasignar.success, true);
     assert.equal(desasignar.hojaDeRuta?.transportistaId, null);
     assert.equal(desasignar.hojaDeRuta?.transportistaNombre, null);
+    const audit = await db.query('SELECT usuario_id, accion, valores_antes, valores_despues FROM auditoria');
+    assert.equal(audit.rows.length, 1);
+    assert.equal(Number(audit.rows[0].usuario_id), 40);
+    assert.equal(audit.rows[0].accion, 'reasignacion');
+    assert.equal(audit.rows[0].valores_antes.transportista_id, '10');
+    assert.equal(audit.rows[0].valores_despues.transportista_id, null);
   });
 
   it('BLOQUEO: No permite desasignar ni modificar el transportista si la hoja ya fue despachada o cuenta con entregas', async () => {
@@ -205,13 +216,13 @@ describe('Backend PostgreSQL - HU #14: Asignar Hoja de Ruta a Transportista', ()
     await db.query(`UPDATE hoja_de_ruta SET estado = 'en_curso' WHERE id = 300`);
 
     // Intentar desasignar
-    const intentoDesasignar = await remitoService.asignarTransportistaHojaDeRuta('300', null);
+    const intentoDesasignar = await remitoService.asignarTransportistaHojaDeRuta('300', null, 40);
     assert.equal(intentoDesasignar.success, false);
     assert.equal(intentoDesasignar.status, 409);
     assert.match(intentoDesasignar.error || '', /ya fue despachada o cuenta con entregas/i);
 
     // Intentar reasignar a Mario (20)
-    const intentoReasignar = await remitoService.asignarTransportistaHojaDeRuta('300', '20');
+    const intentoReasignar = await remitoService.asignarTransportistaHojaDeRuta('300', '20', 40);
     assert.equal(intentoReasignar.success, false);
     assert.equal(intentoReasignar.status, 409);
     assert.match(intentoReasignar.error || '', /ya fue despachada o cuenta con entregas/i);
