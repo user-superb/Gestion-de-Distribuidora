@@ -42,3 +42,7 @@ backend/data/
 
 # Assistant / AI rules
 GEMINI.md
+
+# Scripts locales / automatizaciones temporales
+asignar_desarrolladores.py
+
