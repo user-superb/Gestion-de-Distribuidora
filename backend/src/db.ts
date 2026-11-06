@@ -32,6 +32,7 @@ function setupMemoryDb() {
   mem.public.none(`
     CREATE TABLE IF NOT EXISTS sucursal (
       id serial PRIMARY KEY,
+      codigo text UNIQUE,
       nombre text NOT NULL UNIQUE,
       domicilio text,
       activa boolean NOT NULL DEFAULT true,
@@ -332,11 +333,11 @@ function setupMemoryDb() {
       ('reporte.ver', 'Consultar reportes e indicadores'),
       ('usuario.administrar', 'Administrar usuarios y permisos');
 
-    INSERT INTO sucursal (nombre, domicilio) VALUES
-      ('Sucursal Central - La Plata', 'Calle 12 N° 500, La Plata'),
-      ('Depósito Sur - Berisso', 'Av. Río de la Plata 1240, Berisso'),
-      ('Hub Central - Distribución', 'Ruta 2 Km 45, La Plata'),
-      ('Sede Administrativa Central', 'Calle 7 N° 850, La Plata')
+    INSERT INTO sucursal (codigo, nombre, domicilio) VALUES
+      ('SUC-001', 'Sucursal Central - La Plata', 'Calle 12 N° 500, La Plata'),
+      ('SUC-002', 'Depósito Sur - Berisso', 'Av. Río de la Plata 1240, Berisso'),
+      ('SUC-003', 'Hub Central - Distribución', 'Ruta 2 Km 45, La Plata'),
+      ('SUC-004', 'Sede Administrativa Central', 'Calle 7 N° 850, La Plata')
     ON CONFLICT (nombre) DO NOTHING;
 
     INSERT INTO usuario (usuario, nombre, email, password_hash, rol, es_transportista, activo) VALUES
@@ -345,7 +346,8 @@ function setupMemoryDb() {
       ('supervisor', 'Valeria Logística', 'supervisor@tutucas.com.ar', '${hash}', 'Supervisor', false, true),
       ('gerencia', 'Roberto Gerente', 'gerencia@tutucas.com.ar', '${hash}', 'Gerente', false, true),
       ('admin_sistema', 'Administrador del Sistema', 'admin.sistema@tutucas.com.ar', '${hash}', 'Administrador del sistema', false, true),
-      ('chofer2', 'Mario Flete', 'chofer2@tutucas.com.ar', '${hash}', 'Transportista', true, true)
+      ('chofer2', 'Mario Flete', 'chofer2@tutucas.com.ar', '${hash}', 'Transportista', true, true),
+      ('ceo_demo', 'Victoria Directora CEO', 'ceo.demo@tutucas.com.ar', '${hash}', 'CEO', false, true)
     ON CONFLICT (usuario) DO NOTHING;
 
     INSERT INTO usuario_sucursal (usuario_id, sucursal_id) VALUES
@@ -354,15 +356,34 @@ function setupMemoryDb() {
       (3, 3),
       (4, 4),
       (5, 1),
-      (6, 1)
+      (6, 1),
+      (7, 1)
     ON CONFLICT (usuario_id, sucursal_id) DO NOTHING;
 
-    INSERT INTO cuenta_recepcion (sucursal_id, alias, banco)
-    SELECT id, 'Cuenta operativa demo', 'Banco Demo' FROM sucursal WHERE nombre = 'Sucursal Central - La Plata'
-    ON CONFLICT (sucursal_id, alias) DO NOTHING;
+    INSERT INTO usuario_sucursal_permiso (usuario_id, sucursal_id, permiso_codigo) VALUES
+      (1, 1, 'usuario.administrar'),
+      (1, 1, 'comercio.ver'),
+      (3, 3, 'usuario.administrar')
+    ON CONFLICT DO NOTHING;
+
+    INSERT INTO cuenta_recepcion (id, sucursal_id, alias, banco) VALUES
+      (1, 1, 'tutucas.central', 'Banco Provincia'),
+      (2, 2, 'tutucas.sur', 'Banco Santander')
+    ON CONFLICT DO NOTHING;
+
+    INSERT INTO movimiento_bancario (id, cuenta_id, fecha_hora, ordenante, importe_centavos, estado) VALUES
+      (1, 1, now(), 'Mayorista El Sol S.R.L. (Sucursal Central)', 15700000, 'sin_imputar'),
+      (2, 1, now(), 'Autoservicio Luna (Sucursal Central)', 6200000, 'sin_imputar'),
+      (3, 2, now(), 'Distribuidora Los Andes (Depósito Sur)', 9400000, 'sin_imputar')
+    ON CONFLICT DO NOTHING;
 
     INSERT INTO hoja_de_ruta (sucursal_id, transportista_id, estado) VALUES
-      (1, 2, 'borrador')
+      (1, 2, 'borrador'),
+      (1, 2, 'en_curso'),
+      (1, 2, 'en_curso'),
+      (1, 2, 'en_curso'),
+      (1, 2, 'en_curso'),
+      (1, 2, 'en_curso')
     ON CONFLICT DO NOTHING;
 
     INSERT INTO marca (nombre) VALUES

@@ -15,7 +15,7 @@ export interface UserSessionData {
   id: string;
   name: string;
   email: string;
-  role: 'Administrador del sistema' | 'Administrativo' | 'Transportista' | 'Supervisor' | 'Gerente';
+  role: 'Administrador del sistema' | 'Administrativo' | 'Transportista' | 'Supervisor' | 'Gerente' | 'CEO';
   branch: string;
   token: string;
   authenticatedAt: string;
@@ -172,6 +172,7 @@ export const authService = {
         Transportista: '/mobile-dispatch',
         Supervisor: '/operations/routes',
         Gerente: '/management/metrics',
+        CEO: '/management/metrics',
       };
 
       return {

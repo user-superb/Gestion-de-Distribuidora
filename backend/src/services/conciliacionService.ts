@@ -1,6 +1,17 @@
 import { PoolClient } from 'pg';
 import { db } from '../db.js';
 
+export function esRolGlobal(rol?: string | null): boolean {
+  if (!rol) return false;
+  const normalizado = rol.trim().toLowerCase();
+  return (
+    normalizado === 'ceo' ||
+    normalizado === 'gerente' ||
+    normalizado === 'director' ||
+    normalizado === 'administrador del sistema'
+  );
+}
+
 export class ConciliacionError extends Error {
   constructor(
     message: string,
@@ -216,32 +227,70 @@ async function enTransaccion<T>(action: (client: PoolClient) => Promise<T>): Pro
 }
 
 export const conciliacionService = {
-  async getMovimientosPendientes(fecha?: string) {
+  async getMovimientosPendientes(fecha?: string, userSession?: { id?: string; role?: string }) {
     const params: unknown[] = [];
     let fechaFiltro = '';
     if (fecha) {
       params.push(fecha);
-      fechaFiltro = "AND (mb.fecha_hora AT TIME ZONE 'America/Argentina/Buenos_Aires')::date = $1::date";
+      fechaFiltro = "AND mb.fecha_hora::date = $" + params.length + "::date";
     }
+
+    let sucursalFiltro = '';
+    const rol = userSession?.role;
+    const esGlobal = esRolGlobal(rol);
+
+    // ESCENARIO 2 (HU #53): Fallo por rol global:
+    // Se intenta restringir geográficamente la vista a un usuario con perfil jerárquico global inamovible (Ej. CEO).
+    // El sistema ignora la restricción local.
+    // ESCENARIO 1 (HU #53): Sectorización de usuario exitosa:
+    // Se restringe a un administrativo solo para determinada sucursal. Automáticamente deja de ver los extractos bancarios de las demás sucursales.
+    if (!esGlobal && userSession?.id) {
+      const usuarioId = Number(String(userSession.id).replace(/^usr_/, ''));
+      if (Number.isSafeInteger(usuarioId) && usuarioId > 0) {
+        params.push(usuarioId);
+        sucursalFiltro = "AND cr.sucursal_id IN (SELECT sucursal_id FROM usuario_sucursal WHERE usuario_id = $" + params.length + ")";
+      }
+    }
+
     const result = await db.query(
       `SELECT mb.id::text AS id, mb.fecha_hora, mb.ordenante,
               (mb.importe_centavos - COALESCE(i.imputado_centavos, 0))::text AS importe_centavos,
-              mb.cuenta_id::text AS cuenta_id, cr.alias AS cuenta
+              mb.cuenta_id::text AS cuenta_id, cr.alias AS cuenta,
+              cr.sucursal_id::text AS sucursal_id, s.nombre AS sucursal
        FROM movimiento_bancario mb
        JOIN cuenta_recepcion cr ON cr.id = mb.cuenta_id
+       LEFT JOIN sucursal s ON s.id = cr.sucursal_id
        LEFT JOIN (
          SELECT movimiento_bancario_id, SUM(importe_centavos) AS imputado_centavos
          FROM imputacion WHERE movimiento_bancario_id IS NOT NULL GROUP BY movimiento_bancario_id
        ) i ON i.movimiento_bancario_id = mb.id
        WHERE mb.estado IN ('sin_imputar', 'parcial')
          ${fechaFiltro}
+         ${sucursalFiltro}
        ORDER BY mb.fecha_hora DESC, mb.id DESC`,
       params
     );
     return result.rows;
   },
 
-  async getSugerencias() {
+  async getSugerencias(userSession?: { id?: string; role?: string }) {
+    const rol = userSession?.role;
+    const esGlobal = esRolGlobal(rol);
+    const paramsMov: unknown[] = [];
+    const paramsRem: unknown[] = [];
+    let movSucursalFiltro = '';
+    let remSucursalFiltro = '';
+
+    if (!esGlobal && userSession?.id) {
+      const usuarioId = Number(String(userSession.id).replace(/^usr_/, ''));
+      if (Number.isSafeInteger(usuarioId) && usuarioId > 0) {
+        paramsMov.push(usuarioId);
+        movSucursalFiltro = "AND cr.sucursal_id IN (SELECT sucursal_id FROM usuario_sucursal WHERE usuario_id = $1)";
+        paramsRem.push(usuarioId);
+        remSucursalFiltro = "AND r.sucursal_id IN (SELECT sucursal_id FROM usuario_sucursal WHERE usuario_id = $1)";
+      }
+    }
+
     const [movimientosRes, remitosRes] = await Promise.all([
       db.query(
         `SELECT mb.id::text AS movimiento_id, mb.fecha_hora, mb.ordenante, mb.ordenante_cuit,
@@ -255,11 +304,13 @@ export const conciliacionService = {
          ) i ON i.movimiento_bancario_id = mb.id
          WHERE mb.estado IN ('sin_imputar', 'parcial')
            AND mb.importe_centavos > COALESCE(i.imputado_centavos, 0)
+           ${movSucursalFiltro}
            AND NOT EXISTS (
              SELECT 1 FROM discrepancia_conciliacion dc
              WHERE dc.estado IN ('pendiente','escalada') AND mb.id = ANY(dc.movimiento_ids)
            )
-         ORDER BY mb.fecha_hora DESC, mb.id DESC`
+         ORDER BY mb.fecha_hora DESC, mb.id DESC`,
+        paramsMov
       ),
       db.query(
         `SELECT r.id::text AS remito_id, r.numero, r.sucursal_id::text AS sucursal_id,
@@ -270,7 +321,9 @@ export const conciliacionService = {
          JOIN remito_saldo rs ON rs.remito_id = r.id
          LEFT JOIN visita v ON v.id = r.visita_id
          WHERE r.estado = 'entregado' AND rs.saldo_centavos > 0
-         ORDER BY r.entregado_en DESC NULLS LAST, r.id DESC`
+           ${remSucursalFiltro}
+         ORDER BY r.entregado_en DESC NULLS LAST, r.id DESC`,
+        paramsRem
       ),
     ]);
 
@@ -305,10 +358,27 @@ export const conciliacionService = {
     });
   },
 
-  async getMovimientosHuerfanos(filters: { sucursalId?: string; cuentaId?: string; desde?: string; hasta?: string } = {}) {
-    const sugerencias = await this.getSugerencias();
+  async getMovimientosHuerfanos(
+    filters: { sucursalId?: string; cuentaId?: string; desde?: string; hasta?: string } = {},
+    userSession?: { id?: string; role?: string }
+  ) {
+    const sugerencias = await this.getSugerencias(userSession);
     const movimientosConSugerencias = new Set(sugerencias.map((item) => item.movimiento_id));
     const cutoff = new Date(Date.now() - HORAS_PARA_HUERFANO * 3_600_000);
+    const params: unknown[] = [cutoff];
+
+    let sucursalFiltro = '';
+    const rol = userSession?.role;
+    const esGlobal = esRolGlobal(rol);
+
+    if (!esGlobal && userSession?.id) {
+      const usuarioId = Number(String(userSession.id).replace(/^usr_/, ''));
+      if (Number.isSafeInteger(usuarioId) && usuarioId > 0) {
+        params.push(usuarioId);
+        sucursalFiltro = "AND cr.sucursal_id IN (SELECT sucursal_id FROM usuario_sucursal WHERE usuario_id = $" + params.length + ")";
+      }
+    }
+
     const result = await db.query(
       `SELECT mb.id::text AS id, mb.fecha_hora, mb.ordenante,
               (mb.importe_centavos - COALESCE(i.imputado_centavos, 0))::text AS importe_centavos,
@@ -324,12 +394,13 @@ export const conciliacionService = {
        WHERE mb.estado IN ('sin_imputar', 'parcial')
          AND mb.importe_centavos > COALESCE(i.imputado_centavos, 0)
          AND mb.fecha_hora <= $1
+         ${sucursalFiltro}
          AND NOT EXISTS (
            SELECT 1 FROM discrepancia_conciliacion dc
            WHERE dc.estado IN ('pendiente','escalada') AND mb.id = ANY(dc.movimiento_ids)
          )
        ORDER BY mb.fecha_hora DESC, mb.id DESC`,
-      [cutoff]
+      params
     );
     const movimientos = result.rows.filter((item) => {
       if (movimientosConSugerencias.has(item.id)) return false;
@@ -341,7 +412,20 @@ export const conciliacionService = {
     return { horasUmbral: HORAS_PARA_HUERFANO, movimientos };
   },
 
-  async getRemitosPendientes() {
+  async getRemitosPendientes(userSession?: { id?: string; role?: string }) {
+    const rol = userSession?.role;
+    const esGlobal = esRolGlobal(rol);
+    const params: unknown[] = [];
+    let sucursalFiltro = '';
+
+    if (!esGlobal && userSession?.id) {
+      const usuarioId = Number(String(userSession.id).replace(/^usr_/, ''));
+      if (Number.isSafeInteger(usuarioId) && usuarioId > 0) {
+        params.push(usuarioId);
+        sucursalFiltro = "AND r.sucursal_id IN (SELECT sucursal_id FROM usuario_sucursal WHERE usuario_id = $1)";
+      }
+    }
+
     const result = await db.query(
       `SELECT r.id::text AS id, r.numero, r.estado,
               COALESCE(r.entregado_en, v.registrada_en)::text AS fecha_entrega,
@@ -357,12 +441,27 @@ export const conciliacionService = {
        JOIN remito_saldo rs ON rs.remito_id = r.id
        WHERE rs.saldo_centavos > 0
          AND r.estado = 'entregado'
-       ORDER BY r.entregado_en DESC NULLS LAST, c.razon_social, r.numero`
+         ${sucursalFiltro}
+       ORDER BY r.entregado_en DESC NULLS LAST, c.razon_social, r.numero`,
+      params
     );
     return result.rows;
   },
 
-  async getDiscrepanciasPendientes() {
+  async getDiscrepanciasPendientes(userSession?: { id?: string; role?: string }) {
+    const rol = userSession?.role;
+    const esGlobal = esRolGlobal(rol);
+    const params: unknown[] = [];
+    let sucursalFiltro = '';
+
+    if (!esGlobal && userSession?.id) {
+      const usuarioId = Number(String(userSession.id).replace(/^usr_/, ''));
+      if (Number.isSafeInteger(usuarioId) && usuarioId > 0) {
+        params.push(usuarioId);
+        sucursalFiltro = "AND cr.sucursal_id IN (SELECT sucursal_id FROM usuario_sucursal WHERE usuario_id = $1)";
+      }
+    }
+
     const result = await db.query(
       `SELECT dc.id::text AS id, dc.movimiento_id::text AS movimiento_id,
               dc.movimiento_ids::text AS movimiento_ids,
@@ -373,8 +472,11 @@ export const conciliacionService = {
               (SELECT nombre_archivo FROM discrepancia_comprobante WHERE discrepancia_id = dc.id) AS comprobante_nombre
        FROM discrepancia_conciliacion dc
        JOIN movimiento_bancario mb ON mb.id = dc.movimiento_id
+       JOIN cuenta_recepcion cr ON cr.id = mb.cuenta_id
        WHERE dc.estado IN ('pendiente','escalada')
-       ORDER BY dc.creada_en DESC`
+         ${sucursalFiltro}
+       ORDER BY dc.creada_en DESC`,
+      params
     );
     return result.rows;
   },

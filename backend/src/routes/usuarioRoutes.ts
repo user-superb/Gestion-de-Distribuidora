@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import bcryptjs from 'bcryptjs';
 import { db } from '../db.js';
+import { esUnicoAdministradorSeguridad } from './configuracionRoutes.js';
 import { requireAuth } from './authRoutes.js';
 
 export const usuarioRouter = Router();
 
-const roles = ['Administrador del sistema', 'Administrativo', 'Transportista', 'Supervisor', 'Gerente'];
+const roles = ['Administrador del sistema', 'Administrativo', 'Transportista', 'Supervisor', 'Gerente', 'CEO'];
 const requireSystemAdmin = (req: any, res: any, next: any) => {
   if (req.userSession?.role !== 'Administrador del sistema') {
     return res.status(403).json({ error: 'FORBIDDEN', message: 'Solo el administrador del sistema puede administrar usuarios.' });
@@ -128,6 +129,20 @@ usuarioRouter.put('/usuarios/:id', async (req: any, res) => {
       `UPDATE usuario SET usuario = $1, nombre = $2, email = $3, rol = $4,
        es_transportista = $5, limite_autorizacion_centavos = $6, actualizado_en = now()${passwordSql} WHERE id = $7`, params
     );
+    const currentBranchesRes = await client.query('SELECT sucursal_id FROM usuario_sucursal WHERE usuario_id = $1', [id]);
+    const currentBranchIds = currentBranchesRes.rows.map((r: any) => Number(r.sucursal_id));
+    const removedBranchIds = currentBranchIds.filter((bId: number) => !branches.includes(bId));
+    for (const bId of removedBranchIds) {
+      const esUnico = await esUnicoAdministradorSeguridad(client, Number(id), bId);
+      if (esUnico) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'CARENCIA_ADMINISTRADOR',
+          message: 'No se puede quitar el permiso al único administrador de seguridad asignado a esta sucursal para evitar dejar una sucursal sin gestión.'
+        });
+      }
+    }
+
     await client.query('DELETE FROM usuario_sucursal WHERE usuario_id = $1', [id]);
     for (const branchId of branches) {
       await client.query('INSERT INTO usuario_sucursal (usuario_id, sucursal_id) VALUES ($1, $2)', [id, branchId]);
@@ -166,6 +181,21 @@ usuarioRouter.patch('/usuarios/:id/estado', async (req: any, res) => {
         return res.status(409).json({ message: 'Debe quedar al menos un administrador del sistema activo.' });
       }
     }
+    if (!activo) {
+      const userBranchesRes = await client.query('SELECT sucursal_id FROM usuario_sucursal WHERE usuario_id = $1', [id]);
+      for (const row of userBranchesRes.rows) {
+        const bId = Number(row.sucursal_id);
+        const esUnico = await esUnicoAdministradorSeguridad(client, Number(id), bId);
+        if (esUnico) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({
+            error: 'CARENCIA_ADMINISTRADOR',
+            message: 'No se puede desactivar al usuario: es el único administrador de seguridad asignado a la sucursal para evitar dejarla sin gestión.'
+          });
+        }
+      }
+    }
+
     await client.query('UPDATE usuario SET activo = $1, actualizado_en = now() WHERE id = $2', [activo, id]);
     if (!activo) await client.query("UPDATE sesion_usuario SET revocado = true, revocado_en = now(), motivo_cierre = 'manual' WHERE usuario_id = $1 AND revocado = false", [id]);
     await client.query('COMMIT');
@@ -173,6 +203,34 @@ usuarioRouter.patch('/usuarios/:id/estado', async (req: any, res) => {
   } catch {
     await client.query('ROLLBACK');
     res.status(500).json({ message: 'No se pudo cambiar el estado del usuario.' });
+  } finally {
+    client.release();
+  }
+});
+usuarioRouter.delete('/usuarios/:id/sucursales/:sucursalId', async (req: any, res) => {
+  const usuarioId = Number(req.params.id);
+  const sucursalId = Number(req.params.sucursalId);
+  if (!Number.isSafeInteger(usuarioId) || usuarioId <= 0 || !Number.isSafeInteger(sucursalId) || sucursalId <= 0) {
+    return res.status(400).json({ message: 'Indicá usuario y sucursal válidos.' });
+  }
+  const client = await db.getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const esUnico = await esUnicoAdministradorSeguridad(client, usuarioId, sucursalId);
+    if (esUnico) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'CARENCIA_ADMINISTRADOR',
+        message: 'No se puede quitar el permiso al único administrador de seguridad asignado a esta sucursal para evitar dejar una sucursal sin gestión.'
+      });
+    }
+    await client.query('DELETE FROM usuario_sucursal_permiso WHERE usuario_id = $1 AND sucursal_id = $2', [usuarioId, sucursalId]);
+    await client.query('DELETE FROM usuario_sucursal WHERE usuario_id = $1 AND sucursal_id = $2', [usuarioId, sucursalId]);
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Sucursal revocada exitosamente.' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ message: 'No se pudo revocar la sucursal del usuario.' });
   } finally {
     client.release();
   }
