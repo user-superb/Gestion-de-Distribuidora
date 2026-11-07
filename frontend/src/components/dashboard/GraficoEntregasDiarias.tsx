@@ -1,17 +1,16 @@
 // frontend/src/components/dashboard/GraficoEntregasDiarias.tsx
-// Gráfico y panel de métricas de entregas diarias para evaluar la eficiencia de la flota logística.
-import React from 'react';
+// Gráfico y panel de métricas de entregas diarias en formato dona y desglose de estados.
+import React, { useState } from 'react';
 import { MetricasEntregasDiarias } from '../../types/entregas';
 import { formatearPorcentaje } from '../../services/tableroService';
 import {
-  Truck,
   CheckCircle2,
   Clock,
   XCircle,
   Calendar,
   RefreshCw,
-  TrendingUp,
   Inbox,
+  PieChart,
 } from 'lucide-react';
 
 interface GraficoEntregasDiariasProps {
@@ -22,6 +21,19 @@ interface GraficoEntregasDiariasProps {
   onRecargar: () => void;
 }
 
+type EstadoEntrega = 'exitosas' | 'pendientes' | 'rechazadas';
+
+interface SegmentoEntrega {
+  tipo: EstadoEntrega;
+  etiqueta: string;
+  cantidad: number;
+  porcentaje: number;
+  color: string;
+  icono: React.ComponentType<{ className?: string }>;
+  iconColor: string;
+  impacto: string;
+}
+
 export const GraficoEntregasDiarias: React.FC<GraficoEntregasDiariasProps> = ({
   data,
   fechaSeleccionada,
@@ -29,6 +41,8 @@ export const GraficoEntregasDiarias: React.FC<GraficoEntregasDiariasProps> = ({
   cargando,
   onRecargar,
 }) => {
+  const [estadoSeleccionado, setEstadoSeleccionado] = useState<EstadoEntrega | null>(null);
+
   const pad = (n: number) => String(n).padStart(2, '0');
   const hoyStr = (() => {
     const d = new Date();
@@ -42,6 +56,68 @@ export const GraficoEntregasDiarias: React.FC<GraficoEntregasDiariasProps> = ({
 
   const esOperacionInactiva = !data || data.operacionInactiva || data.totalDespachados === 0;
 
+  const totalDespachados = data?.totalDespachados || 0;
+
+  // Desglose de los 3 estados de entrega
+  const itemsDesglose: SegmentoEntrega[] = data
+    ? [
+        {
+          tipo: 'exitosas',
+          etiqueta: 'Entregas exitosas',
+          cantidad: data.exitosas,
+          porcentaje: data.porcentajeExitosas,
+          color: '#10B981', // Verde esmeralda
+          icono: CheckCircle2,
+          iconColor: 'text-emerald-600',
+          impacto: 'Entregas completadas y remitos conformados',
+        },
+        {
+          tipo: 'pendientes',
+          etiqueta: 'Remitos pendientes',
+          cantidad: data.pendientes,
+          porcentaje: data.porcentajePendientes,
+          color: '#3B82F6', // Azul
+          icono: Clock,
+          iconColor: 'text-blue-600',
+          impacto: 'En tránsito o pendientes de visita por el chofer',
+        },
+        {
+          tipo: 'rechazadas',
+          etiqueta: 'Remitos rechazados',
+          cantidad: data.rechazadas,
+          porcentaje: data.porcentajeRechazadas,
+          color: '#F43F5E', // Rosa / rojo
+          icono: XCircle,
+          iconColor: 'text-rose-600',
+          impacto: 'Mercadería no entregada, devuelta o rechazada',
+        },
+      ]
+    : [];
+
+  // Cálculo de los arcos de la Dona SVG mediante stroke-dasharray
+  // Radio r = 40, perímetro = 2 * PI * 40 ~= 251.327
+  const RADIO = 40;
+  const CIRCUNFERENCIA = 2 * Math.PI * RADIO;
+  let offsetAcumulado = 0;
+
+  const segmentosDona = itemsDesglose.map((item) => {
+    const proporcion = totalDespachados > 0 ? item.cantidad / totalDespachados : 0;
+    const dashLength = proporcion * CIRCUNFERENCIA;
+    const dashOffset = -offsetAcumulado;
+    offsetAcumulado += dashLength;
+
+    return {
+      ...item,
+      dashLength,
+      dashOffset,
+      proporcion,
+    };
+  });
+
+  const detalleActivo = estadoSeleccionado
+    ? itemsDesglose.find((d) => d.tipo === estadoSeleccionado)
+    : null;
+
   return (
     <div className="space-y-6" data-testid="modulo-entregas-diarias">
       {/* Barra de Filtro de Fecha Diario */}
@@ -50,7 +126,7 @@ export const GraficoEntregasDiarias: React.FC<GraficoEntregasDiariasProps> = ({
           <Calendar className="w-5 h-5 text-marca-azul" />
           <div>
             <h3 className="text-sm font-bold text-slate-900">Fecha de Análisis Operativo</h3>
-            <p className="text-xs text-slate-500">Evaluación diaria de despacho y efectividad de flota</p>
+            <p className="text-xs text-slate-500">Evaluación diaria de despacho y estado de entregas</p>
           </div>
         </div>
 
@@ -119,232 +195,169 @@ export const GraficoEntregasDiarias: React.FC<GraficoEntregasDiariasProps> = ({
               Probá seleccionando otra fecha en el selector superior para analizar la actividad de la flota.
             </p>
           </div>
-
-          {/* Métricas planas en cero */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-            <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs text-center opacity-60">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-                Total Despachados
-              </span>
-              <div className="text-2xl font-black text-slate-700 mt-1">0</div>
-              <span className="text-[11px] text-slate-400">Sin remitos</span>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs text-center opacity-60">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-                Entregas Exitosas
-              </span>
-              <div className="text-2xl font-black text-slate-700 mt-1">0</div>
-              <span className="text-[11px] text-slate-400">0,0% del total</span>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs text-center opacity-60">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-                Remitos Pendientes
-              </span>
-              <div className="text-2xl font-black text-slate-700 mt-1">0</div>
-              <span className="text-[11px] text-slate-400">0,0% del total</span>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs text-center opacity-60">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-                Remitos Rechazados
-              </span>
-              <div className="text-2xl font-black text-slate-700 mt-1">0</div>
-              <span className="text-[11px] text-slate-400">0,0% del total</span>
-            </div>
-          </div>
         </div>
       ) : (
         /* ESCENARIO 1: Carga de métricas exitosa */
         <div className="space-y-6" data-testid="metricas-exitosas">
-          {/* Tarjetas KPI de Entregas */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Total Despachados */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-5 relative overflow-hidden">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Total Despachados
-                </span>
-                <div className="p-2 rounded-lg bg-slate-100 text-slate-700">
-                  <Truck className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="text-3xl font-black text-slate-900 mt-2 font-mono">
-                {data.totalDespachados}
-              </div>
-              <div className="text-xs text-slate-500 mt-1">
-                Remitos asignados a rutas del día
-              </div>
-            </div>
-
-            {/* Entregas Exitosas */}
-            <div className="bg-white rounded-xl border border-emerald-200 shadow-xs p-5 relative overflow-hidden bg-emerald-50/20">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
-                  Entregas Exitosas
-                </span>
-                <div className="p-2 rounded-lg bg-emerald-100 text-emerald-700">
-                  <CheckCircle2 className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="text-3xl font-black text-emerald-700 mt-2 font-mono">
-                {data.exitosas}
-              </div>
-              <div className="text-xs font-semibold text-emerald-600 mt-1 flex items-center gap-1">
-                <TrendingUp className="w-3.5 h-3.5" />
-                <span>{formatearPorcentaje(data.porcentajeExitosas)} efectividad</span>
-              </div>
-            </div>
-
-            {/* Remitos Pendientes */}
-            <div className="bg-white rounded-xl border border-blue-200 shadow-xs p-5 relative overflow-hidden bg-blue-50/20">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-blue-800">
-                  Pendientes en Ruta
-                </span>
-                <div className="p-2 rounded-lg bg-blue-100 text-blue-700">
-                  <Clock className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="text-3xl font-black text-blue-700 mt-2 font-mono">
-                {data.pendientes}
-              </div>
-              <div className="text-xs text-blue-600 mt-1">
-                {formatearPorcentaje(data.porcentajePendientes)} sin completar aún
-              </div>
-            </div>
-
-            {/* Remitos Rechazados */}
-            <div className="bg-white rounded-xl border border-rose-200 shadow-xs p-5 relative overflow-hidden bg-rose-50/20">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-rose-800">
-                  Rechazados / Devueltos
-                </span>
-                <div className="p-2 rounded-lg bg-rose-100 text-rose-700">
-                  <XCircle className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="text-3xl font-black text-rose-700 mt-2 font-mono">
-                {data.rechazadas}
-              </div>
-              <div className="text-xs text-rose-600 mt-1">
-                {formatearPorcentaje(data.porcentajeRechazadas)} entregas fallidas
-              </div>
-            </div>
-          </div>
-
-          {/* Gráfico Comparativo y Barra Proporcional */}
+          {/* Gráfico de Dona y Desglose Proporcional (Idéntico a Recaudación) */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
               <div>
                 <h4 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                  <Truck className="w-5 h-5 text-marca-azul" />
-                  <span>Contraste de Eficiencia de Flota</span>
+                  <PieChart className="w-5 h-5 text-marca-azul" />
+                  <span>Distribución de Entregas del Día</span>
                 </h4>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Balance entre remitos completados con éxito frente a pendientes y rechazos.
+                  Composición consolidada de entregas exitosas, pendientes y rechazadas.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+              {/* Gráfico de Dona SVG */}
+              <div className="lg:col-span-5 flex flex-col items-center justify-center relative">
+                <div className="relative w-64 h-64">
+                  <svg
+                    viewBox="0 0 100 100"
+                    className="w-full h-full transform -rotate-90"
+                    role="img"
+                    aria-label="Gráfico circular de entregas diarias"
+                  >
+                    {/* Círculo base de fondo */}
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r={RADIO}
+                      className="stroke-slate-100"
+                      strokeWidth="14"
+                      fill="none"
+                    />
+
+                    {/* Segmentos de la dona */}
+                    {segmentosDona.map((seg) => {
+                      if (seg.cantidad === 0) return null;
+                      const isHovered = estadoSeleccionado === seg.tipo;
+
+                      return (
+                        <circle
+                          key={seg.tipo}
+                          cx="50"
+                          cy="50"
+                          r={RADIO}
+                          fill="none"
+                          stroke={seg.color}
+                          strokeWidth={isHovered ? 17 : 14}
+                          strokeDasharray={`${seg.dashLength} ${CIRCUNFERENCIA}`}
+                          strokeDashoffset={seg.dashOffset}
+                          className="transition-all duration-300 cursor-pointer"
+                          style={{ strokeLinecap: 'butt' }}
+                          onMouseEnter={() => setEstadoSeleccionado(seg.tipo)}
+                          onMouseLeave={() => setEstadoSeleccionado(null)}
+                        />
+                      );
+                    })}
+                  </svg>
+
+                  {/* Centro de la Dona con Total o Detalle Seleccionado */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none px-6">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                      {detalleActivo ? detalleActivo.etiqueta : 'Total Despachados'}
+                    </span>
+                    <span className="text-2xl font-extrabold text-slate-900 tracking-tight font-mono">
+                      {detalleActivo ? detalleActivo.cantidad : totalDespachados}
+                    </span>
+                    <span className="text-xs text-slate-500 font-medium mt-0.5">
+                      {detalleActivo
+                        ? `${formatearPorcentaje(detalleActivo.porcentaje)} del total`
+                        : `${totalDespachados} ${totalDespachados === 1 ? 'remito' : 'remitos'} del día`}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-2">
+                  Pasá el cursor sobre cada sector para ver su detalle
                 </p>
               </div>
 
-              <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
-                <span className="text-xs text-slate-600 font-medium">Tasa de efectividad:</span>
-                <span className="text-sm font-extrabold text-emerald-700 font-mono">
-                  {formatearPorcentaje(data.tasaEfectividad)}
-                </span>
-              </div>
-            </div>
+              {/* Tarjetas y Desglose por Estado */}
+              <div className="lg:col-span-7 space-y-4">
+                {/* Barra de Distribución Proporcional Apilada */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center text-xs font-semibold text-slate-600">
+                    <span>Composición de despachos del día</span>
+                    <span className="font-mono text-slate-800">{totalDespachados} remitos totales</span>
+                  </div>
+                  <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden flex shadow-inner">
+                    {segmentosDona.map((seg) => {
+                      if (seg.cantidad === 0) return null;
+                      return (
+                        <div
+                          key={seg.tipo}
+                          style={{
+                            width: `${seg.porcentaje}%`,
+                            backgroundColor: seg.color,
+                          }}
+                          className="h-full transition-all duration-300 relative group cursor-pointer"
+                          title={`${seg.etiqueta}: ${seg.cantidad} (${formatearPorcentaje(seg.porcentaje)})`}
+                          onMouseEnter={() => setEstadoSeleccionado(seg.tipo)}
+                          onMouseLeave={() => setEstadoSeleccionado(null)}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
 
-            {/* Barra de Distribución 100% Apilada */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-center text-xs font-semibold text-slate-600">
-                <span>Composición de despachos del día</span>
-                <span className="font-mono text-slate-800">{data.totalDespachados} remitos totales</span>
-              </div>
-              <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden flex shadow-inner">
-                {data.exitosas > 0 && (
-                  <div
-                    style={{ width: `${data.porcentajeExitosas}%` }}
-                    className="h-full bg-emerald-500 transition-all duration-300"
-                    title={`Exitosas: ${data.exitosas} (${formatearPorcentaje(data.porcentajeExitosas)})`}
-                  />
-                )}
-                {data.pendientes > 0 && (
-                  <div
-                    style={{ width: `${data.porcentajePendientes}%` }}
-                    className="h-full bg-blue-500 transition-all duration-300"
-                    title={`Pendientes: ${data.pendientes} (${formatearPorcentaje(data.porcentajePendientes)})`}
-                  />
-                )}
-                {data.rechazadas > 0 && (
-                  <div
-                    style={{ width: `${data.porcentajeRechazadas}%` }}
-                    className="h-full bg-rose-500 transition-all duration-300"
-                    title={`Rechazadas: ${data.rechazadas} (${formatearPorcentaje(data.porcentajeRechazadas)})`}
-                  />
-                )}
-              </div>
-            </div>
+                {/* Listado de Estados Diferenciados */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                  {itemsDesglose.map((item) => {
+                    const isSelected = estadoSeleccionado === item.tipo;
+                    const Icon = item.icono;
 
-            {/* Barras de Contraste Detallado */}
-            <div className="space-y-4 pt-2">
-              {/* Exitosas */}
-              <div className="space-y-1">
-                <div className="flex justify-between items-center text-xs">
-                  <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                    Entregas Realizadas Exitosamente
-                  </span>
-                  <span className="font-mono font-bold text-emerald-700">
-                    {data.exitosas} remitos ({formatearPorcentaje(data.porcentajeExitosas)})
-                  </span>
-                </div>
-                <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    style={{ width: `${data.porcentajeExitosas}%` }}
-                    className="h-full bg-emerald-500 rounded-full transition-all duration-500"
-                  />
-                </div>
-              </div>
+                    return (
+                      <div
+                        key={item.tipo}
+                        onMouseEnter={() => setEstadoSeleccionado(item.tipo)}
+                        onMouseLeave={() => setEstadoSeleccionado(null)}
+                        className={`p-3.5 rounded-lg border transition-all cursor-pointer ${
+                          isSelected
+                            ? 'border-marca-azul bg-blue-50/50 shadow-xs'
+                            : 'border-slate-200 bg-slate-50/50 hover:bg-white hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className="w-3 h-3 rounded-full shrink-0"
+                              style={{ backgroundColor: item.color }}
+                            />
+                            <span className="text-xs font-bold text-slate-800 truncate">
+                              {item.etiqueta}
+                            </span>
+                          </div>
+                          <Icon className={`w-4 h-4 ${item.iconColor}`} />
+                        </div>
 
-              {/* Pendientes */}
-              <div className="space-y-1">
-                <div className="flex justify-between items-center text-xs">
-                  <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                    Remitos Pendientes de Entrega
-                  </span>
-                  <span className="font-mono font-bold text-blue-700">
-                    {data.pendientes} remitos ({formatearPorcentaje(data.porcentajePendientes)})
-                  </span>
-                </div>
-                <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    style={{ width: `${data.porcentajePendientes}%` }}
-                    className="h-full bg-blue-500 rounded-full transition-all duration-500"
-                  />
-                </div>
-              </div>
-
-              {/* Rechazadas */}
-              <div className="space-y-1">
-                <div className="flex justify-between items-center text-xs">
-                  <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-                    Remitos Rechazados o No Entregados
-                  </span>
-                  <span className="font-mono font-bold text-rose-700">
-                    {data.rechazadas} remitos ({formatearPorcentaje(data.porcentajeRechazadas)})
-                  </span>
-                </div>
-                <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    style={{ width: `${data.porcentajeRechazadas}%` }}
-                    className="h-full bg-rose-500 rounded-full transition-all duration-500"
-                  />
+                        <div className="space-y-0.5">
+                          <div className="text-xl font-extrabold text-slate-900 tracking-tight font-mono">
+                            {item.cantidad}
+                          </div>
+                          <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
+                            <span className="font-semibold text-slate-700">
+                              {formatearPorcentaje(item.porcentaje)}
+                            </span>
+                            <span className="text-[11px] text-slate-400">
+                              {item.cantidad === 1 ? 'remito' : 'remitos'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
 
             {/* Tabla resumen consolidada */}
-            <div className="overflow-x-auto pt-2">
+            <div className="overflow-x-auto pt-4 border-t border-slate-100">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
@@ -355,59 +368,35 @@ export const GraficoEntregasDiarias: React.FC<GraficoEntregasDiariasProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  <tr className="hover:bg-slate-50/60">
-                    <td className="py-2.5 px-3 font-bold text-slate-900 flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Exitosas</span>
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
-                      {data.exitosas}
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-700">
-                      {formatearPorcentaje(data.porcentajeExitosas)}
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-600">
-                      Entregas completadas y remitos conformados
-                    </td>
-                  </tr>
-                  <tr className="hover:bg-slate-50/60">
-                    <td className="py-2.5 px-3 font-bold text-slate-900 flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Pendientes</span>
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
-                      {data.pendientes}
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-mono font-bold text-blue-700">
-                      {formatearPorcentaje(data.porcentajePendientes)}
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-600">
-                      En tránsito o pendientes de visita por el chofer
-                    </td>
-                  </tr>
-                  <tr className="hover:bg-slate-50/60">
-                    <td className="py-2.5 px-3 font-bold text-slate-900 flex items-center gap-1.5">
-                      <XCircle className="w-3.5 h-3.5 text-rose-600" />
-                      <span>Rechazadas</span>
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
-                      {data.rechazadas}
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-mono font-bold text-rose-700">
-                      {formatearPorcentaje(data.porcentajeRechazadas)}
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-600">
-                      Mercadería no entregada, devuelta o rechazada
-                    </td>
-                  </tr>
+                  {itemsDesglose.map((item) => {
+                    const Icon = item.icono;
+                    return (
+                      <tr key={item.tipo} className="hover:bg-slate-50/60">
+                        <td className="py-2.5 px-3 font-bold text-slate-900 flex items-center gap-1.5">
+                          <Icon className={`w-3.5 h-3.5 ${item.iconColor}`} />
+                          <span>{item.etiqueta}</span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
+                          {item.cantidad}
+                        </td>
+                        <td
+                          className="py-2.5 px-3 text-right font-mono font-bold"
+                          style={{ color: item.color }}
+                        >
+                          {formatearPorcentaje(item.porcentaje)}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-600">{item.impacto}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
                 <tfoot>
                   <tr className="bg-slate-50 font-bold border-t border-slate-200 text-slate-900">
                     <td className="py-2.5 px-3">Total Despachados</td>
-                    <td className="py-2.5 px-3 text-right font-mono">{data.totalDespachados}</td>
+                    <td className="py-2.5 px-3 text-right font-mono">{totalDespachados}</td>
                     <td className="py-2.5 px-3 text-right font-mono">100,0%</td>
-                    <td className="py-2.5 px-3 text-slate-700 font-semibold">
-                      Efectividad: {formatearPorcentaje(data.tasaEfectividad)}
+                    <td className="py-2.5 px-3 text-slate-500 font-medium">
+                      Total de remitos de la jornada
                     </td>
                   </tr>
                 </tfoot>

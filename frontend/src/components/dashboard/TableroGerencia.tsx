@@ -9,9 +9,6 @@ import { GraficoRecaudacion } from './GraficoRecaudacion';
 import { GraficoEntregasDiarias } from './GraficoEntregasDiarias';
 import {
   BarChart3,
-  Banknote,
-  Landmark,
-  QrCode,
   DollarSign,
   RefreshCw,
   Filter,
@@ -168,14 +165,10 @@ export const TableroGerencia: React.FC<TableroGerenciaProps> = ({ session }) => 
     cargarDatosEntregas();
   }, [cargarDatosEntregas]);
 
-  // Totales y cálculos para tarjetas KPI
+  // Totales y cálculos para resumen
   const totalPesos = data?.totalRecaudadoPesos || 0;
   const cantidadPagos = data?.cantidadTotalPagos || 0;
   const ticketPromedio = cantidadPagos > 0 ? totalPesos / cantidadPagos : 0;
-
-  const efectivoItem = data?.desglose.find((d) => d.medioPago === 'efectivo');
-  const transferenciaItem = data?.desglose.find((d) => d.medioPago === 'transferencia');
-  const qrItem = data?.desglose.find((d) => d.medioPago === 'qr');
 
   return (
     <div className="space-y-6 max-w-screen-2xl mx-auto">
@@ -369,85 +362,8 @@ export const TableroGerencia: React.FC<TableroGerenciaProps> = ({ session }) => 
             </div>
           )}
 
-      {/* Tarjetas KPI de Resumen */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI Total */}
-        <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-xs space-y-2">
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-bold uppercase tracking-wider">Total Recaudado</span>
-            <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-slate-700">
-              <DollarSign className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-2xl font-black text-slate-900 tracking-tight">
-            {formatearMoneda(totalPesos)}
-          </div>
-          <div className="flex items-center justify-between text-xs text-slate-500 pt-1 border-t border-slate-100">
-            <span>{cantidadPagos} cobros totales</span>
-            <span>Prom: {formatearMoneda(ticketPromedio)}</span>
-          </div>
-        </div>
-
-        {/* KPI Efectivo */}
-        <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-xs space-y-2">
-          <div className="flex items-center justify-between text-emerald-700">
-            <span className="text-xs font-bold uppercase tracking-wider">Efectivo</span>
-            <div className="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600">
-              <Banknote className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-2xl font-black text-emerald-950 tracking-tight">
-            {formatearMoneda(efectivoItem?.totalPesos || 0)}
-          </div>
-          <div className="flex items-center justify-between text-xs text-slate-500 pt-1 border-t border-slate-100">
-            <span className="font-semibold text-emerald-700">
-              {formatearPorcentaje(efectivoItem?.porcentaje || 0)} del total
-            </span>
-            <span>{efectivoItem?.cantidadPagos || 0} cobros</span>
-          </div>
-        </div>
-
-        {/* KPI Transferencia */}
-        <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-xs space-y-2">
-          <div className="flex items-center justify-between text-blue-700">
-            <span className="text-xs font-bold uppercase tracking-wider">Transferencia Bancaria</span>
-            <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
-              <Landmark className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-2xl font-black text-blue-950 tracking-tight">
-            {formatearMoneda(transferenciaItem?.totalPesos || 0)}
-          </div>
-          <div className="flex items-center justify-between text-xs text-slate-500 pt-1 border-t border-slate-100">
-            <span className="font-semibold text-blue-700">
-              {formatearPorcentaje(transferenciaItem?.porcentaje || 0)} del total
-            </span>
-            <span>{transferenciaItem?.cantidadPagos || 0} cobros</span>
-          </div>
-        </div>
-
-        {/* KPI QR */}
-        <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-xs space-y-2">
-          <div className="flex items-center justify-between text-orange-700">
-            <span className="text-xs font-bold uppercase tracking-wider">Cobros QR</span>
-            <div className="w-7 h-7 rounded-lg bg-orange-50 flex items-center justify-center text-orange-600">
-              <QrCode className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-2xl font-black text-orange-950 tracking-tight">
-            {formatearMoneda(qrItem?.totalPesos || 0)}
-          </div>
-          <div className="flex items-center justify-between text-xs text-slate-500 pt-1 border-t border-slate-100">
-            <span className="font-semibold text-orange-700">
-              {formatearPorcentaje(qrItem?.porcentaje || 0)} del total
-            </span>
-            <span>{qrItem?.cantidadPagos || 0} cobros</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Gráfico de Recaudación (ESCENARIO 1) */}
-      {data && <GraficoRecaudacion data={data} />}
+          {/* Gráfico de Recaudación (ESCENARIO 1) */}
+          {data && <GraficoRecaudacion data={data} />}
 
       {/* Tabla Comparativa Ejecutiva */}
       {data && (
