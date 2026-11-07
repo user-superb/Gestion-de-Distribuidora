@@ -4,6 +4,7 @@ import path from 'node:path';
 import net from 'node:net';
 import pg from 'pg';
 import dotenv from 'dotenv';
+// @ts-ignore
 import EmbeddedPostgres from 'embedded-postgres';
 
 const rootEnv = path.resolve(process.cwd(), '.env');
@@ -118,7 +119,7 @@ async function main() {
       persistent: true,
       initdbFlags: ['--encoding=UTF8', '--locale=C'],
       onLog: () => {},
-      onError: (msg) => {
+      onError: (msg: any) => {
         const text = String(msg || '');
         if (text.includes('FATAL') || text.includes('ERROR')) {
           console.error('[PG]', text.trim());

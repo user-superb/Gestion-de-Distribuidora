@@ -130,6 +130,7 @@ class AuthService {
     // 1. Limpieza inmediata de datos sensibles locales
     try {
       sessionStorage.removeItem(STORAGE_KEY_SESSION);
+      sessionStorage.removeItem('tutucas_reportes_subvista');
     } catch {
       // Ignorar fallback
     }

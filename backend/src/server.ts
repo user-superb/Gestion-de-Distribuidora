@@ -14,6 +14,7 @@ import { configuracionRouter } from './routes/configuracionRoutes.js';
 import { movilRouter } from './routes/movilRoutes.js';
 import { transportistaRouter } from './routes/transportistaRoutes.js';
 import { efectivoRouter } from './routes/efectivoRoutes.js';
+import { tableroRouter } from './routes/tableroRoutes.js';
 import { asegurarEsquemaRendicion } from './services/rendicionService.js';
 
 const rootEnv = path.resolve(process.cwd(), '.env');
@@ -45,6 +46,7 @@ app.get('/', async (_req, res) => {
       movil: '/api/movil/hoja-de-ruta',
       transportista: '/api/transportista/hoja-activa',
       efectivo: '/api/efectivo/rendiciones',
+      tablero: '/api/tablero/recaudacion',
     },
     timestamp: new Date().toISOString(),
   });
@@ -67,6 +69,7 @@ app.use('/api/movil', movilRouter);
 app.use('/api/transportista', transportistaRouter);
 app.use('/api/conciliacion', conciliacionRouter);
 app.use('/api/efectivo', efectivoRouter);
+app.use('/api/tablero', tableroRouter);
 app.use('/api', remitoRouter);
 app.use('/api', usuarioRouter);
 app.use('/api', configuracionRouter);
