@@ -72,12 +72,12 @@ WHERE NOT EXISTS (
   SELECT 1 FROM comercio c WHERE c.razon_social = v.razon_social
 );
 
--- 5. Hoja de ruta demo publicada para el día operativo argentino.
+-- 5. Hoja de ruta demo en calle en progreso para el día operativo argentino.
 WITH demo_dia AS (
   SELECT timezone('America/Argentina/Buenos_Aires', now())::date AS fecha
 )
 INSERT INTO hoja_de_ruta (sucursal_id, transportista_id, fecha_reparto, patente, estado, publicada_en)
-SELECT s.id, u.id, d.fecha, 'AB123CD', 'publicada', now()
+SELECT s.id, u.id, d.fecha, 'AB123CD', 'en_curso', now()
 FROM sucursal s
 JOIN usuario u ON u.usuario = 'chofer'
 CROSS JOIN demo_dia d
@@ -87,13 +87,13 @@ WHERE s.nombre = 'Sucursal Central - La Plata'
     WHERE h.transportista_id = u.id AND h.fecha_reparto = d.fecha
   );
 
--- Si ya existía la hoja borrador creada por una seed anterior, publicarla.
+-- Si ya existía la hoja borrador o publicada creada por una seed anterior, dejarla en curso.
 WITH demo_dia AS (
   SELECT timezone('America/Argentina/Buenos_Aires', now())::date AS fecha
 )
 UPDATE hoja_de_ruta h
 SET patente = COALESCE(h.patente, 'AB123CD'),
-    estado = CASE WHEN h.estado = 'borrador' THEN 'publicada' ELSE h.estado END,
+    estado = CASE WHEN h.estado IN ('borrador', 'publicada') THEN 'en_curso' ELSE h.estado END,
     publicada_en = COALESCE(h.publicada_en, now())
 FROM usuario u, demo_dia d
 WHERE u.usuario = 'chofer'

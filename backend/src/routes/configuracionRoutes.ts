@@ -336,17 +336,17 @@ configuracionRouter.put('/configuracion/sucursales/:id', async (req, res) => {
   const nombre = text(req.body?.nombre);
   if (!idIsValid(id) || !nombre) return res.status(400).json({ message: 'Ingresá el nombre de la sucursal.' });
 
+  // Regla HU #52: No se debe permitir modificar el código de una sucursal existente, solo nombre y dirección (domicilio).
   if (rawCodigo) {
     try {
-      const dupCodigo = await db.query(
-        'SELECT id FROM sucursal WHERE lower(codigo) = lower($1) AND id <> $2',
-        [rawCodigo, id]
-      );
-      if (dupCodigo.rows.length > 0) {
+      const currentRes = await db.query('SELECT id, codigo FROM sucursal WHERE id = $1', [id]);
+      if (!currentRes.rowCount) return res.status(404).json({ message: 'No se encontró la sucursal.' });
+      const currentCodigo = text(currentRes.rows[0]?.codigo);
+      if (currentCodigo && currentCodigo.toLowerCase() !== rawCodigo.toLowerCase()) {
         return res.status(409).json({
           success: false,
-          error: 'CODIGO_DUPLICADO',
-          message: `Ya existe una sucursal con el código "${rawCodigo}". El código de la sucursal debe ser unívoco.`,
+          error: 'CODIGO_NO_MODIFICABLE',
+          message: 'No se permite modificar el código de la sucursal. Solo se puede modificar el nombre y la dirección.',
         });
       }
     } catch {
@@ -377,8 +377,8 @@ configuracionRouter.put('/configuracion/sucursales/:id', async (req, res) => {
     let result;
     try {
       result = await db.query(
-        'UPDATE sucursal SET codigo = COALESCE($1, codigo), nombre = $2, domicilio = $3 WHERE id = $4 RETURNING id, codigo, nombre, domicilio, activa',
-        [rawCodigo || null, nombre, optionalText(req.body?.domicilio), id]
+        'UPDATE sucursal SET nombre = $1, domicilio = $2 WHERE id = $3 RETURNING id, codigo, nombre, domicilio, activa',
+        [nombre, optionalText(req.body?.domicilio), id]
       );
     } catch (updateErr: any) {
       if (
@@ -409,24 +409,44 @@ configuracionRouter.patch('/configuracion/sucursales/:id/estado', async (req, re
   // ESCENARIO 2 (HU #52): Fallo por desactivación de sucursal operativa:
   // Se intenta marcar la sucursal como "Inactiva" mientras posee hojas de ruta en calle en progreso. El sistema bloquea la baja lógica.
   if (nuevoEstadoActiva === false) {
+    let total = 0;
     try {
       const hojasEnProgreso = await db.query(
-        `SELECT COUNT(*)::int as total
-         FROM hoja_de_ruta
-         WHERE sucursal_id = $1
-           AND estado = 'en_curso'`,
+        `SELECT COUNT(DISTINCT h.id)::int as total
+         FROM hoja_de_ruta h
+         LEFT JOIN visita v ON v.hoja_de_ruta_id = h.id
+         LEFT JOIN remito r ON r.visita_id = v.id
+         WHERE h.sucursal_id = $1
+           AND h.estado NOT IN ('cerrada', 'anulada', 'liquidada')
+           AND (
+             h.estado IN ('en_curso', 'publicada')
+             OR v.estado IN ('en_curso', 'completada')
+             OR r.estado IN ('en_ruta', 'entregado', 'no_entregado', 'devuelto')
+           )`,
         [id]
       );
-      const total = Number(hojasEnProgreso.rows[0]?.total || 0);
-      if (total > 0) {
-        return res.status(409).json({
-          success: false,
-          error: 'SUCURSAL_OPERATIVA_CON_RUTAS_EN_CURSO',
-          message: `No se puede desactivar la sucursal: posee ${total} hoja(s) de ruta en calle en progreso. El sistema bloquea la baja lógica.`,
-        });
-      }
+      total = Number(hojasEnProgreso.rows[0]?.total || 0);
     } catch {
-      // Ignorar si la tabla hoja_de_ruta no existe en test aislado
+      try {
+        const hojasEnProgreso = await db.query(
+          `SELECT COUNT(*)::int as total
+           FROM hoja_de_ruta
+           WHERE sucursal_id = $1
+             AND estado IN ('en_curso', 'publicada')`,
+          [id]
+        );
+        total = Number(hojasEnProgreso.rows[0]?.total || 0);
+      } catch {
+        // Ignorar si la tabla hoja_de_ruta no existe en test aislado
+      }
+    }
+
+    if (total > 0) {
+      return res.status(409).json({
+        success: false,
+        error: 'SUCURSAL_OPERATIVA_CON_RUTAS_EN_CURSO',
+        message: `No se puede desactivar la sucursal: posee ${total} hoja(s) de ruta en calle en progreso. El sistema bloquea la baja lógica.`,
+      });
     }
   }
 

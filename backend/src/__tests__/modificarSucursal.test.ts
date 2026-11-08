@@ -277,19 +277,19 @@ describe('HU #52: Modificar Datos de Sucursal (Épica 2.4: Modelo Multi-sucursal
     assert.equal(reactivarRes.body.sucursal.activa, true);
   });
 
-  it('VALIDACIÓN: No se puede modificar el código a uno ya utilizado por otra sucursal', async () => {
+  it('VALIDACIÓN: No se permite modificar el código de una sucursal existente (solo nombre y dirección)', async () => {
     const token = await adminToken();
 
     const cenRes = await db.query('SELECT id FROM sucursal WHERE codigo = $1', ['SUC-CEN']);
     const cenId = cenRes.rows[0].id;
 
-    // Intentamos cambiar el código de SUC-CEN al código existente SUC-SUR
+    // Intentamos cambiar el código de SUC-CEN a otro código (nuevo o existente)
     const response = await dispatch(
       configuracionRouter,
       'put',
       `/configuracion/sucursales/${cenId}`,
       {
-        codigo: 'SUC-SUR',
+        codigo: 'SUC-NUEVO',
         nombre: 'Sucursal Central',
         domicilio: 'Calle 12 N° 500',
       },
@@ -297,7 +297,11 @@ describe('HU #52: Modificar Datos de Sucursal (Épica 2.4: Modelo Multi-sucursal
     );
 
     assert.equal(response.statusCode, 409);
-    assert.equal(response.body.error, 'CODIGO_DUPLICADO');
+    assert.equal(response.body.error, 'CODIGO_NO_MODIFICABLE');
+
+    // Verificamos que el código original permanece intacto
+    const checkDb = await db.query('SELECT codigo FROM sucursal WHERE id = $1', [cenId]);
+    assert.equal(checkDb.rows[0].codigo, 'SUC-CEN');
   });
 
   it('SEGURIDAD: Solo el Administrador del sistema puede modificar datos o estados de una sucursal', async () => {

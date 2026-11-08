@@ -395,19 +395,19 @@ function setupMemoryDb() {
       (3, 3, 'usuario.administrar')
     ON CONFLICT DO NOTHING;
 
-    INSERT INTO cuenta_recepcion (id, sucursal_id, alias, banco) VALUES
-      (1, 1, 'tutucas.central', 'Banco Provincia'),
-      (2, 2, 'tutucas.sur', 'Banco Santander')
+    INSERT INTO cuenta_recepcion (sucursal_id, alias, banco) VALUES
+      (1, 'tutucas.central', 'Banco Provincia'),
+      (2, 'tutucas.sur', 'Banco Santander')
     ON CONFLICT DO NOTHING;
 
     INSERT INTO cuenta_recepcion (sucursal_id, nombre_fantasia, alias, cbu, banco, cuit_titular, moneda, activa)
     SELECT id, 'Cuenta Operativa Principal', 'Cuenta operativa demo', '2850590940090418135201', 'Banco Demo', '30712345678', 'ARS', true FROM sucursal WHERE nombre = 'Sucursal Central - La Plata'
     ON CONFLICT (sucursal_id, alias) DO NOTHING;
 
-    INSERT INTO movimiento_bancario (id, cuenta_id, fecha_hora, ordenante, importe_centavos, estado) VALUES
-      (1, 1, now(), 'Mayorista El Sol S.R.L. (Sucursal Central)', 15700000, 'sin_imputar'),
-      (2, 1, now(), 'Autoservicio Luna (Sucursal Central)', 6200000, 'sin_imputar'),
-      (3, 2, now(), 'Distribuidora Los Andes (Depósito Sur)', 9400000, 'sin_imputar')
+    INSERT INTO movimiento_bancario (cuenta_id, fecha_hora, ordenante, importe_centavos, estado) VALUES
+      (1, now(), 'Mayorista El Sol S.R.L. (Sucursal Central)', 15700000, 'sin_imputar'),
+      (1, now(), 'Autoservicio Luna (Sucursal Central)', 6200000, 'sin_imputar'),
+      (2, now(), 'Distribuidora Los Andes (Depósito Sur)', 9400000, 'sin_imputar')
     ON CONFLICT DO NOTHING;
 
     INSERT INTO hoja_de_ruta (sucursal_id, transportista_id, estado) VALUES
@@ -453,17 +453,6 @@ export const db = {
       return await activePool.query(text, params);
     } catch (err: any) {
       if (!isMemoryFallback && (err.code === 'ECONNREFUSED' || err.message?.includes('connect'))) {
-        // Reintentar hasta ~16s por si el motor PostgreSQL local está terminando de levantar en paralelo
-        for (let i = 0; i < 20; i++) {
-          await new Promise((r) => setTimeout(r, 800));
-          try {
-            return await activePool.query(text, params);
-          } catch (retryErr: any) {
-            if (retryErr.code !== 'ECONNREFUSED' && !retryErr.message?.includes('connect')) {
-              throw retryErr;
-            }
-          }
-        }
         console.log('ℹ️  PostgreSQL externo offline. Activando motor PostgreSQL in-memory (pg-mem) para desarrollo...');
         setupMemoryDb();
         return await activePool.query(text, params);
@@ -481,15 +470,12 @@ export const db = {
   },
 
   async checkConnection(): Promise<boolean> {
-    for (let i = 0; i < 20; i++) {
-      try {
-        const res = await activePool.query('SELECT 1 as connected');
-        if (res.rows[0]) return true;
-      } catch {
-        await new Promise((r) => setTimeout(r, 800));
-      }
+    try {
+      const res = await activePool.query('SELECT 1 as connected');
+      if (res.rows[0]) return true;
+    } catch {
+      // Activar fallback en memoria inmediatamente si PostgreSQL no está disponible
     }
-    // Intentar fallback en memoria solo si tras esperar no levantó PostgreSQL
     setupMemoryDb();
     return true;
   },

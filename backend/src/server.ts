@@ -127,7 +127,7 @@ if (process.env.NODE_ENV !== 'test') {
               FROM visita v
               JOIN remito r ON r.visita_id = v.id
               WHERE v.hoja_de_ruta_id IS NOT NULL
-                AND (r.estado = 'entregado' OR r.estado = 'no_entregado' OR v.estado = 'completada' OR v.estado = 'en_curso')
+                AND (r.estado = 'entregado' OR r.estado = 'no_entregado' OR r.estado = 'devuelto' OR r.estado = 'en_ruta' OR v.estado = 'completada' OR v.estado = 'en_curso')
             );
         `);
       } catch (e: any) {

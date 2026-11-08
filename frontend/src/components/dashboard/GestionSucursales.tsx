@@ -27,8 +27,11 @@ export const GestionSucursales: React.FC<{ session: UserSession }> = ({ session 
     if (!draft) return;
     setBusy(true); setError('');
     try {
+      const payload = draft.id
+        ? { nombre: draft.nombre, domicilio: draft.domicilio }
+        : draft;
       const response = await fetch(`${API}/api/configuracion/sucursales${draft.id ? `/${draft.id}` : ''}`, {
-        method: draft.id ? 'PUT' : 'POST', headers, body: JSON.stringify(draft),
+        method: draft.id ? 'PUT' : 'POST', headers, body: JSON.stringify(payload),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'No se pudo guardar la sucursal.');
@@ -62,8 +65,18 @@ export const GestionSucursales: React.FC<{ session: UserSession }> = ({ session 
     {error && <div role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div>}
     {draft && <form onSubmit={save} className="grid gap-3 rounded border border-slate-200 bg-white p-4 sm:grid-cols-3">
       <label className="text-sm text-slate-700">
-        Código <span className="text-xs text-slate-400 font-normal">(Clave unívoca)</span>
-        <input required value={draft.codigo} onChange={(e) => setDraft({ ...draft, codigo: e.target.value.toUpperCase() })} placeholder="Ej: SUC-001" className="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-mono uppercase" />
+        Código <span className="text-xs text-slate-400 font-normal">{draft.id ? '(No modificable)' : '(Clave unívoca)'}</span>
+        <input
+          required={!draft.id}
+          disabled={Boolean(draft.id)}
+          readOnly={Boolean(draft.id)}
+          value={draft.codigo}
+          onChange={(e) => {
+            if (!draft.id) setDraft({ ...draft, codigo: e.target.value.toUpperCase() });
+          }}
+          placeholder="Ej: SUC-001"
+          className={`mt-1 w-full rounded border border-slate-300 px-3 py-2 font-mono uppercase ${draft.id ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`}
+        />
       </label>
       <label className="text-sm text-slate-700">
         Nombre

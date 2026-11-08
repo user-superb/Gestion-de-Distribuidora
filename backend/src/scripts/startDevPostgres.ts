@@ -4,8 +4,6 @@ import path from 'node:path';
 import net from 'node:net';
 import pg from 'pg';
 import dotenv from 'dotenv';
-// @ts-ignore
-import EmbeddedPostgres from 'embedded-postgres';
 
 const rootEnv = path.resolve(process.cwd(), '.env');
 const backendEnv = path.resolve(process.cwd(), 'backend', '.env');
@@ -97,11 +95,21 @@ async function applySchemaAndMigrations() {
 
 async function main() {
   const alreadyUp = await isPortListening(PORT);
-  let embeddedPg: EmbeddedPostgres | null = null;
+  let embeddedPg: any = null;
 
   if (alreadyUp) {
     console.log(`🐘 Servidor PostgreSQL detectado activo en localhost:${PORT}.`);
   } else {
+    let EmbeddedPostgres: any;
+    try {
+      // @ts-ignore
+      const mod = await import('embedded-postgres');
+      EmbeddedPostgres = mod.default || mod;
+    } catch {
+      console.log('ℹ️  embedded-postgres no instalado localmente; el backend usará el motor PostgreSQL en memoria (pg-mem).');
+      return;
+    }
+
     console.log(`🐘 Iniciando servidor PostgreSQL 16 local en puerto ${PORT} (datos en ${dataDir})...`);
     fs.mkdirSync(path.dirname(dataDir), { recursive: true });
 
