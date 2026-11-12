@@ -42,4 +42,15 @@ WHERE u.id = h.transportista_id
   AND u.usuario = 'chofer'
   AND h.fecha_reparto = timezone('America/Argentina/Buenos_Aires', now())::date;
 
+-- Reiniciar conciliaciones y movimientos demo para volver a probar la pestaña Conciliación desde cero:
+DELETE FROM discrepancia_notificacion;
+DELETE FROM discrepancia_ajuste;
+DELETE FROM discrepancia_comprobante;
+DELETE FROM discrepancia_conciliacion;
+DELETE FROM imputacion;
+DELETE FROM movimiento_bancario_comprobante;
+DELETE FROM movimiento_bancario
+WHERE referencia_externa LIKE 'DEMO-%'
+   OR origen IN ('Carga Manual', 'QR - Carga Manual');
+
 COMMIT;

@@ -7,6 +7,8 @@
     "dev:frontend": "npm run dev --prefix frontend",
     "dev:mobile": "npm start --prefix mobile",
     "mobile:install": "npm install --prefix mobile",
+    "db:seed": "npm run db:seed --prefix backend",
+    "db:reset": "npm run db:demo-movil-reset --prefix backend",
     "test": "npm test --prefix backend && npm test --prefix frontend"
   },
   "devDependencies": {
