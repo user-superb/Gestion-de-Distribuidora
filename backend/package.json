@@ -15,8 +15,8 @@
     "db:migrate-permissions": "tsx src/scripts/migratePermissions.ts",
     "db:migrate-cobro-movil": "tsx src/scripts/runSqlFile.ts db/migrations/005_cobro_movil.sql",
     "db:query": "tsx src/scripts/queryDb.ts",
-    "db:seed": "tsx src/scripts/runSqlFile.ts db/seed.sql",
-    "db:demo-movil-reset": "tsx src/scripts/runSqlFile.ts db/demo_movil_reset.sql && tsx src/scripts/runSqlFile.ts db/seed.sql"
+    "db:seed": "tsx src/scripts/startDevPostgres.ts --init-only",
+    "db:demo-movil-reset": "tsx src/scripts/startDevPostgres.ts --init-only --reset"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

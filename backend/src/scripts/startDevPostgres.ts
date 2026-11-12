@@ -80,6 +80,14 @@ async function applySchemaAndMigrations() {
       }
     }
 
+    if (process.argv.includes('--reset')) {
+      const resetPath = path.resolve(backendDir, 'db', 'demo_movil_reset.sql');
+      if (fs.existsSync(resetPath)) {
+        console.log('🧹 Ejecutando limpieza de datos de demo (demo_movil_reset.sql)...');
+        await client.query(fs.readFileSync(resetPath, 'utf-8'));
+      }
+    }
+
     const seedPath = path.resolve(backendDir, 'db', 'seed.sql');
     if (fs.existsSync(seedPath)) {
       const seedSql = fs.readFileSync(seedPath, 'utf-8');

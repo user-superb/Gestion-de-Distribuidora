@@ -217,6 +217,12 @@ WHERE s.nombre = 'Sucursal Central - La Plata'
       WHERE mb.cuenta_id = cr.id AND mb.referencia_externa = demo.referencia
   );
 
+-- Si ya existían de días previos y siguen sin imputar, actualizar su fecha al día de hoy para que sean visibles en la bandeja del día actual
+UPDATE movimiento_bancario
+SET fecha_hora = now()
+WHERE referencia_externa LIKE 'DEMO-E5-04-%'
+  AND estado = 'sin_imputar';
+
 -- 8. Casos de ejemplo para sugerencias exactas/parciales y movimientos huérfanos
 INSERT INTO movimiento_bancario (cuenta_id, fecha_hora, ordenante, referencia_externa, importe_centavos)
 SELECT cr.id, demo.fecha_hora, demo.ordenante, demo.referencia, demo.importe_centavos
