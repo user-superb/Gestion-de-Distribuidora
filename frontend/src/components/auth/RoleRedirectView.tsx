@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { UserSession } from '../../types/auth';
 import {
   Truck,
@@ -12,8 +12,6 @@ import {
   Banknote,
   ChartNoAxesCombined,
   Settings,
-  ChevronDown,
-  ClipboardCheck,
 } from 'lucide-react';
 import { AgrupadorRemitos } from '../dashboard/AgrupadorRemitos';
 import { remitoService } from '../../services/remitoService';
@@ -42,18 +40,6 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
   const [hojasChofer, setHojasChofer] = useState<HojaDeRuta[]>([]);
   const [comerciosMap, setComerciosMap] = useState<Record<string, Comercio>>({});
   const [subseccionHojas, setSubseccionHojas] = useState<'armado' | 'armadas'>('armado');
-  const [menuHojasAbierto, setMenuHojasAbierto] = useState<boolean>(false);
-  const menuHojasRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuHojasRef.current && !menuHojasRef.current.contains(e.target as Node)) {
-        setMenuHojasAbierto(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
   const isSysAdmin = session.role === 'Administrador del sistema';
   // Épica 2.3 (HU #47 a #50): el supervisor de efectivo trabaja solo en la sección Efectivo.
   const isSupervisor = session.role === 'Supervisor';
@@ -217,99 +203,26 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
               <RepartoYaLogo variant="admin" size="sm" />
             </div>
 
-            <nav aria-label="Navegación principal" className="order-3 flex w-full gap-1 sm:order-2 sm:w-auto overflow-visible">
-              {navItems.map(({ id, label, icon: Icon, path }) => {
-                if (id === 'hojas') {
-                  return (
-                    <div key={id} className="relative" ref={menuHojasRef}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (seccion !== 'hojas') {
-                            navigate('hojas');
-                          }
-                          setMenuHojasAbierto(!menuHojasAbierto);
-                        }}
-                        aria-current={seccion === 'hojas' ? 'page' : undefined}
-                        className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors cursor-pointer ${
-                          seccion === 'hojas'
-                            ? 'border-marca-naranja text-white font-bold'
-                            : 'border-transparent text-slate-200 hover:border-marca-naranja/50 hover:text-white'
-                        }`}
-                      >
-                        <Icon className="h-4 w-4" />
-                        <span>{label}</span>
-                        <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${menuHojasAbierto ? 'rotate-180' : ''}`} />
-                      </button>
-
-                      {menuHojasAbierto && (
-                        <div className="absolute left-0 top-full mt-1.5 w-72 rounded-xl bg-white p-2 text-slate-800 shadow-2xl border border-slate-200 z-[100] animate-in fade-in duration-150">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigate('hojas');
-                              setSubseccionHojas('armado');
-                              setMenuHojasAbierto(false);
-                            }}
-                            className={`w-full flex items-start gap-2.5 p-2 rounded-md text-left transition-colors cursor-pointer ${
-                              seccion === 'hojas' && subseccionHojas === 'armado'
-                                ? 'bg-blue-50 text-blue-950 font-semibold'
-                                : 'hover:bg-slate-50 text-slate-700'
-                            }`}
-                          >
-                            <Package className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
-                            <div>
-                              <div className="text-xs font-bold text-slate-900">Remitos pendientes (Armar ruta)</div>
-                              <div className="text-[11px] text-slate-500 font-normal">
-                                Flujo guiado de 4 pasos para consolidar remitos y armar la ruta
-                              </div>
-                            </div>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigate('hojas');
-                              setSubseccionHojas('armadas');
-                              setMenuHojasAbierto(false);
-                            }}
-                            className={`w-full flex items-start gap-2.5 p-2 rounded-md text-left transition-colors cursor-pointer mt-1 ${
-                              seccion === 'hojas' && subseccionHojas === 'armadas'
-                                ? 'bg-emerald-50 text-emerald-950 font-semibold'
-                                : 'hover:bg-slate-50 text-slate-700'
-                            }`}
-                          >
-                            <ClipboardCheck className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
-                            <div>
-                              <div className="text-xs font-bold text-slate-900">Hojas de ruta armadas</div>
-                              <div className="text-[11px] text-slate-500 font-normal">
-                                Rutas creadas, asignación de choferes y seguimiento
-                              </div>
-                            </div>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                }
-
-                return (
-                  <a
-                    key={id}
-                    href={path}
-                    aria-current={seccion === id ? 'page' : undefined}
-                    onClick={(event) => { event.preventDefault(); navigate(id); }}
-                    className={`flex shrink-0 items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-                      seccion === id
-                        ? 'border-marca-naranja text-white font-bold'
-                        : 'border-transparent text-slate-200 hover:border-marca-naranja/50 hover:text-white'
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" />
-                    {label}
-                  </a>
-                );
-              })}
+            <nav aria-label="Navegación principal" className="order-3 flex w-full gap-1 overflow-x-auto sm:order-2 sm:w-auto">
+              {navItems.map(({ id, label, icon: Icon, path }) => (
+                <a
+                  key={id}
+                  href={path}
+                  aria-current={seccion === id ? 'page' : undefined}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    navigate(id);
+                  }}
+                  className={`flex shrink-0 items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+                    seccion === id
+                      ? 'border-marca-naranja text-white font-bold'
+                      : 'border-transparent text-slate-200 hover:border-marca-naranja/50 hover:text-white'
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </a>
+              ))}
               {[
                 ...(puedeEfectivo || isGerente ? [] : [{ label: 'Efectivo', icon: Banknote, title: 'Solo para el supervisor de efectivo' }]),
               ].map(({ label, icon: Icon, title }) => (

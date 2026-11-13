@@ -116,6 +116,8 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
 
   // Panel inferior de Hojas de ruta armadas
   const [mostrarHojasArmadas, setMostrarHojasArmadas] = useState<boolean>(true);
+  const [filtroHojas, setFiltroHojas] = useState<'todas' | 'en_curso' | 'completadas' | 'antiguas'>('todas');
+  const [busquedaHoja, setBusquedaHoja] = useState<string>('');
   const [asignandoHojaId, setAsignandoHojaId] = useState<string | null>(null);
   const [errorAsignacionPorHoja, setErrorAsignacionPorHoja] = useState<Record<string, string>>({});
   const [exitoAsignacionPorHoja, setExitoAsignacionPorHoja] = useState<Record<string, string>>({});
@@ -197,6 +199,66 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
     const tieneVisitasEnEstado = visitas.some((v) => v.hojaDeRutaId === h.id);
     const tieneCantidadVisitas = (h.cantidadVisitas || 0) > 0;
     return tieneVisitasDirectas || tieneVisitasEnEstado || tieneCantidadVisitas;
+  });
+
+  // Clasificación y conteos para filtros de Hojas Armadas
+  const clasificarHoja = (hoja: HojaDeRuta) => {
+    const visitasHoja =
+      hoja.visitas && hoja.visitas.length > 0
+        ? hoja.visitas
+        : visitas.filter((v) => v.hojaDeRutaId === hoja.id);
+
+    const todasCompletadas =
+      visitasHoja.length > 0 &&
+      visitasHoja.every(
+        (v) =>
+          v.estado === 'completada' ||
+          v.estado === 'no_realizada' ||
+          (v.remitos.length > 0 &&
+            v.remitos.every(
+              (r) =>
+                r.estado === 'entregado' ||
+                r.estado === 'no_entregado' ||
+                r.estado === 'devuelto'
+            ))
+      );
+
+    const esCompletada = todasCompletadas || hoja.estado === 'cerrada';
+    const fechaHojaNorm = (hoja.fechaReparto || '').slice(0, 10);
+    const esAntigua = Boolean(fechaHojaNorm && fechaHojaNorm < hoyISO) && !esCompletada;
+    const esEnCurso = !esCompletada && !esAntigua;
+
+    return { esCompletada, esAntigua, esEnCurso };
+  };
+
+  const conteoEnCurso = hojasArmadas.filter((h) => clasificarHoja(h).esEnCurso).length;
+  const conteoCompletadas = hojasArmadas.filter((h) => clasificarHoja(h).esCompletada).length;
+  const conteoAntiguas = hojasArmadas.filter((h) => clasificarHoja(h).esAntigua).length;
+
+  const hojasArmadasFiltradas = hojasArmadas.filter((hoja) => {
+    const { esCompletada, esAntigua, esEnCurso } = clasificarHoja(hoja);
+
+    if (filtroHojas === 'en_curso' && !esEnCurso) return false;
+    if (filtroHojas === 'completadas' && !esCompletada) return false;
+    if (filtroHojas === 'antiguas' && !esAntigua) return false;
+
+    if (busquedaHoja.trim()) {
+      const q = busquedaHoja.trim().toLowerCase();
+      const codigoHoja = (hoja.numero || `HR-${String(hoja.id).padStart(4, '0')}`).toLowerCase();
+      const choferObj = transportistas.find(
+        (tr) =>
+          String(tr.id).replace(/^usr_/, '').trim() ===
+          String(hoja.transportistaId || '').replace(/^usr_/, '').trim()
+      );
+      const choferNombre = (choferObj?.nombre || hoja.transportistaNombre || '').toLowerCase();
+      const fecha = (hoja.fechaReparto || '').toLowerCase();
+      const matchCodigo = codigoHoja.includes(q);
+      const matchChofer = choferNombre.includes(q);
+      const matchFecha = fecha.includes(q);
+      if (!matchCodigo && !matchChofer && !matchFecha) return false;
+    }
+
+    return true;
   });
 
   // Requisitos mínimos de avance entre pasos
@@ -1856,8 +1918,121 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                 </p>
               </div>
             ) : (
-              <div className="space-y-4">
-                {hojasArmadas.map((hoja) => {
+              <>
+                {/* Barra de Filtros por Categoría y Buscador */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-lg border border-slate-200 shadow-2xs">
+                  <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-lg border border-slate-200 text-xs overflow-x-auto max-w-full">
+                    <button
+                      type="button"
+                      onClick={() => setFiltroHojas('todas')}
+                      className={`px-3 py-1.5 font-bold rounded-md transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                        filtroHojas === 'todas'
+                          ? 'bg-white text-marca-azul shadow-xs border border-slate-200/80'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <span>Todas</span>
+                      <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700 text-[10px] font-bold">
+                        {hojasArmadas.length}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFiltroHojas('en_curso')}
+                      className={`px-3 py-1.5 font-bold rounded-md transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                        filtroHojas === 'en_curso'
+                          ? 'bg-white text-blue-700 shadow-xs border border-slate-200/80'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Truck className="w-3.5 h-3.5 text-blue-600" />
+                      <span>En curso</span>
+                      <span className="px-1.5 py-0.2 rounded-full bg-blue-100 text-blue-800 text-[10px] font-bold">
+                        {conteoEnCurso}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFiltroHojas('completadas')}
+                      className={`px-3 py-1.5 font-bold rounded-md transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                        filtroHojas === 'completadas'
+                          ? 'bg-white text-emerald-700 shadow-xs border border-slate-200/80'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Completadas</span>
+                      <span className="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                        {conteoCompletadas}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFiltroHojas('antiguas')}
+                      title="Hojas de ruta de jornadas anteriores sin completar"
+                      className={`px-3 py-1.5 font-bold rounded-md transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                        filtroHojas === 'antiguas'
+                          ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Antiguas</span>
+                      <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700 text-[10px] font-bold">
+                        {conteoAntiguas}
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* Buscador rápido por código o chofer */}
+                  <div className="relative w-full md:w-64">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por HR o chofer..."
+                      value={busquedaHoja}
+                      onChange={(e) => setBusquedaHoja(e.target.value)}
+                      className="w-full text-xs bg-slate-50 border border-slate-200 rounded-md pl-8 pr-7 py-1.5 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    {busquedaHoja && (
+                      <button
+                        type="button"
+                        onClick={() => setBusquedaHoja('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                        title="Limpiar búsqueda"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {hojasArmadasFiltradas.length === 0 ? (
+                  <div className="border border-slate-200 rounded-lg p-6 text-center space-y-2.5 bg-white">
+                    <ClipboardCheck className="w-8 h-8 text-slate-400 mx-auto" />
+                    <div className="text-sm font-semibold text-slate-700">
+                      No se encontraron hojas de ruta {filtroHojas !== 'todas' ? `en "${filtroHojas === 'en_curso' ? 'En curso' : filtroHojas === 'completadas' ? 'Completadas' : 'Antiguas (sin completar)'}"` : ''} {busquedaHoja ? `para "${busquedaHoja}"` : ''}
+                    </div>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                      Probá seleccionando otra categoría o limpiando el texto de búsqueda.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFiltroHojas('todas');
+                        setBusquedaHoja('');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors cursor-pointer"
+                    >
+                      Ver todas las hojas ({hojasArmadas.length})
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {hojasArmadasFiltradas.map((hoja) => {
                   const codigoHoja = hoja.numero || `HR-${String(hoja.id).padStart(4, '0')}`;
                   const visitasHoja =
                     hoja.visitas && hoja.visitas.length > 0
@@ -1903,9 +2078,9 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                       key={hoja.id}
                       className="border border-blue-200 rounded-lg bg-white shadow-2xs overflow-hidden"
                     >
-                      {/* Cabecera de la hoja */}
-                      <div className="px-4 py-3 bg-blue-50/70 border-b border-blue-200 flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex items-center gap-2.5 flex-wrap">
+                      {/* Cabecera compacta de la hoja */}
+                      <div className="px-4 py-2.5 bg-blue-50/70 border-b border-blue-200 flex flex-wrap items-center justify-between gap-2.5">
+                        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
                           <span className="font-mono text-sm font-bold text-blue-950">
                             {codigoHoja}
                           </span>
@@ -1932,6 +2107,23 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                               Pendiente de despacho
                             </span>
                           )}
+
+                          <span className="hidden sm:inline-block h-3.5 w-px bg-blue-200" />
+
+                          <span className="inline-flex items-center gap-1 text-slate-600 text-xs" title="Fecha de reparto">
+                            <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="font-mono font-medium text-slate-800">{formatearFechaCorta(hoja.fechaReparto)}</span>
+                          </span>
+
+                          <span className="hidden sm:inline-block h-3.5 w-px bg-blue-200" />
+
+                          <span className="inline-flex items-center gap-1 text-slate-600 text-xs" title="Carga consolidada">
+                            <Package className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="text-slate-800">{visitasHoja.length} visita(s) • {totalRemitosHoja} remito(s)</span>
+                          </span>
+
+                          <span className="hidden sm:inline-block h-3.5 w-px bg-blue-200" />
+
                           <span className="text-xs text-slate-600">
                             Total:{' '}
                             <strong className="font-mono text-slate-900">
@@ -1940,7 +2132,7 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                           {pendientes.length > 0 && (
                             <button
                               type="button"
@@ -2040,185 +2232,165 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                         );
                       })()}
 
-                      {/* Detalles y Asignación de Chofer */}
-                      <div className="p-4 space-y-3.5 text-xs">
-                        {/* Alerta de Sincronización pendiente (HU #19) */}
-                        {(hoja.tieneSincronizacionPendiente || visitasHoja.some((v) => v.sincronizacionPendiente)) && (
-                          <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-md p-3 flex items-start gap-2.5">
-                            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                            <div className="space-y-0.5">
-                              <strong className="font-bold text-amber-950 text-xs block">
-                                Sincronización pendiente
-                              </strong>
-                              <p className="text-amber-800 text-[11px]">
-                                El transportista asignado no reporta conexión. Las paradas anexadas permanecen en espera de sincronización con la app móvil.
-                              </p>
-                            </div>
-                          </div>
-                        )}
+                      {/* Sub-barra compacta de Transportista y estado */}
+                      <div className="px-4 py-2 bg-slate-50/80 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+                        <div className="flex items-center gap-2 flex-wrap flex-1 min-w-[280px]">
+                          <span className="font-semibold text-slate-600 flex items-center gap-1 shrink-0 text-xs">
+                            <Truck className="w-3.5 h-3.5 text-slate-500" />
+                            Transportista:
+                          </span>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                          <div className="bg-slate-50 border border-slate-200 rounded-md p-2.5">
-                            <span className="text-[11px] font-semibold text-slate-500 block">
-                              Fecha de reparto
-                            </span>
-                            <span className="text-xs font-mono font-bold text-slate-900 mt-0.5 block">
-                              {formatearFechaCorta(hoja.fechaReparto)}
-                            </span>
-                          </div>
+                          <div className="flex items-center gap-1.5 flex-1 max-w-sm">
+                            <select
+                              value={hoja.transportistaId || ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (!val) {
+                                  void handleAsignarTransportistaEnHoja(hoja.id, '');
+                                  return;
+                                }
+                                const cleanTId = String(val).replace(/^usr_/, '').trim();
+                                const t = transportistas.find(
+                                  (tr) => String(tr.id).replace(/^usr_/, '').trim() === cleanTId
+                                );
+                                const fechaHojaNorm = (hoja.fechaReparto || '').slice(0, 10);
+                                const hojaPreviaOcupada = hojasRuta.find(
+                                  (otra) =>
+                                    otra.id !== hoja.id &&
+                                    String(otra.transportistaId || '').replace(/^usr_/, '').trim() === cleanTId &&
+                                    (otra.fechaReparto || '').slice(0, 10) === fechaHojaNorm &&
+                                    otra.estado !== 'anulada'
+                                );
 
-                          <div className="bg-slate-50 border border-slate-200 rounded-md p-2.5">
-                            <span className="text-[11px] font-semibold text-slate-500 block">
-                              Carga consolidada
-                            </span>
-                            <span className="text-xs font-bold text-slate-900 mt-0.5 block">
-                              {visitasHoja.length} visita(s) • {totalRemitosHoja} remito(s)
-                            </span>
-                          </div>
-
-                          {/* Gestión de transportista en hoja armada */}
-                          <div className="bg-blue-50/40 border border-blue-200 rounded-md p-2.5 space-y-1.5">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[11px] font-semibold text-slate-600">
-                                Transportista:
-                              </span>
-                              <div className="flex items-center gap-1.5">
-                                {hoja.transportistaId && (() => {
-                                  const choferObj = transportistas.find(
-                                    (tr) => String(tr.id).replace(/^usr_/, '').trim() === String(hoja.transportistaId).replace(/^usr_/, '').trim()
-                                  );
-                                  const estaConectado = choferObj ? Boolean(choferObj.dispositivoConectado) : (hoja.transportistaConectado ?? false);
-                                  return (
-                                    <span
-                                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border inline-flex items-center gap-1 ${
-                                        estaConectado
-                                          ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                          : 'bg-amber-50 text-amber-800 border-amber-300'
-                                      }`}
-                                      title={estaConectado ? 'El celular del chofer reporta señal activa' : 'El celular del chofer está sin señal / modo avión'}
-                                    >
-                                      <span className={`w-1.5 h-1.5 rounded-full ${estaConectado ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-                                      {estaConectado ? 'Conectado' : 'Desconectado'}
-                                    </span>
-                                  );
-                                })()}
-                                <span
-                                  className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
-                                    hoja.transportistaId
-                                      ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                                      : 'bg-amber-100 text-amber-900 border-amber-300'
-                                  }`}
-                                >
-                                  {hoja.transportistaId ? 'Asignado' : 'Sin chofer'}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-1.5">
-                              <select
-                                value={hoja.transportistaId || ''}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  if (!val) {
-                                    void handleAsignarTransportistaEnHoja(hoja.id, '');
+                                if (hojaPreviaOcupada && t) {
+                                  // HU #45: Reemplazar hoja de ruta
+                                  const esActiva =
+                                    hojaPreviaOcupada.estado === 'en_curso' ||
+                                    hojaPreviaOcupada.estado === 'cerrada';
+                                  if (esActiva) {
+                                    setErrorAsignacionPorHoja((prev) => ({
+                                      ...prev,
+                                      [hoja.id]:
+                                        'No se puede reemplazar la hoja de ruta: el transportista posee una hoja de ruta en curso para esa misma fecha.',
+                                    }));
                                     return;
                                   }
-                                  const cleanTId = String(val).replace(/^usr_/, '').trim();
-                                  const t = transportistas.find(
-                                    (tr) => String(tr.id).replace(/^usr_/, '').trim() === cleanTId
-                                  );
-                                  const fechaHojaNorm = (hoja.fechaReparto || '').slice(0, 10);
-                                  const hojaPreviaOcupada = hojasRuta.find(
-                                    (otra) =>
-                                      otra.id !== hoja.id &&
-                                      String(otra.transportistaId || '').replace(/^usr_/, '').trim() === cleanTId &&
-                                      (otra.fechaReparto || '').slice(0, 10) === fechaHojaNorm &&
-                                      otra.estado !== 'anulada'
-                                  );
+                                  setModalReemplazo({
+                                    hojaDestino: hoja,
+                                    transportista: t,
+                                    hojaPrevia: hojaPreviaOcupada,
+                                  });
+                                } else {
+                                  void handleAsignarTransportistaEnHoja(hoja.id, val);
+                                }
+                              }}
+                              disabled={asignandoHojaId === hoja.id || esDespachada}
+                              aria-label="Seleccionar transportista para la hoja de ruta"
+                              className="w-full text-xs bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 font-medium focus:ring-1 focus:ring-blue-500 truncate"
+                            >
+                              <option value="">-- Seleccionar transportista --</option>
+                              {transportistas.map((t) => {
+                                const cleanTId = String(t.id).replace(/^usr_/, '').trim();
+                                const fechaHojaNorm = (hoja.fechaReparto || '').slice(0, 10);
+                                const hojaPreviaOcupada = hojasRuta.find(
+                                  (otra) =>
+                                    otra.id !== hoja.id &&
+                                    String(otra.transportistaId || '').replace(/^usr_/, '').trim() === cleanTId &&
+                                    (otra.fechaReparto || '').slice(0, 10) === fechaHojaNorm &&
+                                    otra.estado !== 'anulada'
+                                );
+                                const ocupadoEnFecha = Boolean(hojaPreviaOcupada);
+                                const esActiva =
+                                  hojaPreviaOcupada &&
+                                  (hojaPreviaOcupada.estado === 'en_curso' ||
+                                    hojaPreviaOcupada.estado === 'cerrada');
 
-                                  if (hojaPreviaOcupada && t) {
-                                    // HU #45: Reemplazar hoja de ruta
-                                    const esActiva =
-                                      hojaPreviaOcupada.estado === 'en_curso' ||
-                                      hojaPreviaOcupada.estado === 'cerrada';
-                                    if (esActiva) {
-                                      setErrorAsignacionPorHoja((prev) => ({
-                                        ...prev,
-                                        [hoja.id]:
-                                          'No se puede reemplazar la hoja de ruta: el transportista posee una hoja de ruta en curso para esa misma fecha.',
-                                      }));
-                                      return;
-                                    }
-                                    setModalReemplazo({
-                                      hojaDestino: hoja,
-                                      transportista: t,
-                                      hojaPrevia: hojaPreviaOcupada,
-                                    });
-                                  } else {
-                                    void handleAsignarTransportistaEnHoja(hoja.id, val);
-                                  }
-                                }}
-                                disabled={asignandoHojaId === hoja.id || esDespachada}
-                                aria-label="Seleccionar transportista para la hoja de ruta"
-                                className="w-full text-xs bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 font-medium focus:ring-1 focus:ring-blue-500"
+                                return (
+                                  <option key={t.id} value={t.id} disabled={Boolean(esActiva)}>
+                                    {t.nombre}{' '}
+                                    {esActiva
+                                      ? `(Ruta activa en curso)`
+                                      : ocupadoEnFecha
+                                      ? `(Asignado en ${hojaPreviaOcupada?.numero || 'otra hoja'} - Reemplazar)`
+                                      : '(Disponible)'}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                            {hoja.transportistaId && !esDespachada && (
+                              <button
+                                type="button"
+                                onClick={() => void handleAsignarTransportistaEnHoja(hoja.id, '')}
+                                className="text-xs px-2 py-1 text-red-600 hover:text-red-800 border border-red-200 rounded hover:bg-red-50 cursor-pointer shrink-0"
+                                title="Desvincular chofer"
                               >
-                                <option value="">-- Seleccionar transportista --</option>
-                                {transportistas.map((t) => {
-                                  const cleanTId = String(t.id).replace(/^usr_/, '').trim();
-                                  const fechaHojaNorm = (hoja.fechaReparto || '').slice(0, 10);
-                                  const hojaPreviaOcupada = hojasRuta.find(
-                                    (otra) =>
-                                      otra.id !== hoja.id &&
-                                      String(otra.transportistaId || '').replace(/^usr_/, '').trim() === cleanTId &&
-                                      (otra.fechaReparto || '').slice(0, 10) === fechaHojaNorm &&
-                                      otra.estado !== 'anulada'
-                                  );
-                                  const ocupadoEnFecha = Boolean(hojaPreviaOcupada);
-                                  const esActiva =
-                                    hojaPreviaOcupada &&
-                                    (hojaPreviaOcupada.estado === 'en_curso' ||
-                                      hojaPreviaOcupada.estado === 'cerrada');
+                                Quitar
+                              </button>
+                            )}
+                          </div>
 
-                                  return (
-                                    <option key={t.id} value={t.id} disabled={Boolean(esActiva)}>
-                                      {t.nombre}{' '}
-                                      {esActiva
-                                        ? `(Ruta activa en curso)`
-                                        : ocupadoEnFecha
-                                        ? `(Asignado en ${hojaPreviaOcupada?.numero || 'otra hoja'} - Reemplazar)`
-                                        : '(Disponible)'}
-                                    </option>
-                                  );
-                                })}
-                              </select>
-                              {hoja.transportistaId && !esDespachada && (
-                                <button
-                                  type="button"
-                                  onClick={() => void handleAsignarTransportistaEnHoja(hoja.id, '')}
-                                  className="text-xs px-2 py-1 text-red-600 hover:text-red-800 border border-red-200 rounded hover:bg-red-50 cursor-pointer"
-                                  title="Desvincular chofer"
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {hoja.transportistaId && (() => {
+                              const choferObj = transportistas.find(
+                                (tr) => String(tr.id).replace(/^usr_/, '').trim() === String(hoja.transportistaId).replace(/^usr_/, '').trim()
+                              );
+                              const estaConectado = choferObj ? Boolean(choferObj.dispositivoConectado) : (hoja.transportistaConectado ?? false);
+                              return (
+                                <span
+                                  className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border inline-flex items-center gap-1 ${
+                                    estaConectado
+                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                      : 'bg-amber-50 text-amber-800 border-amber-300'
+                                  }`}
+                                  title={estaConectado ? 'El celular del chofer reporta señal activa' : 'El celular del chofer está sin señal / modo avión'}
                                 >
-                                  Quitar
-                                </button>
-                              )}
-                            </div>
-
-                            {errorAsignacionPorHoja[hoja.id] && (
-                              <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded p-1.5">
-                                {errorAsignacionPorHoja[hoja.id]}
-                              </div>
-                            )}
-                            {exitoAsignacionPorHoja[hoja.id] && (
-                              <div className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded p-1.5">
-                                {exitoAsignacionPorHoja[hoja.id]}
-                              </div>
-                            )}
+                                  <span className={`w-1.5 h-1.5 rounded-full ${estaConectado ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                                  {estaConectado ? 'Conectado' : 'Desconectado'}
+                                </span>
+                              );
+                            })()}
+                            <span
+                              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                                hoja.transportistaId
+                                  ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                                  : 'bg-amber-100 text-amber-900 border-amber-300'
+                              }`}
+                            >
+                              {hoja.transportistaId ? 'Asignado' : 'Sin chofer'}
+                            </span>
                           </div>
                         </div>
 
+                        {/* Alerta de Sincronización pendiente compacta (HU #19) */}
+                        {(hoja.tieneSincronizacionPendiente || visitasHoja.some((v) => v.sincronizacionPendiente)) && (
+                          <div
+                            className="inline-flex items-center gap-1.5 bg-amber-50 border border-amber-300 text-amber-900 px-2 py-0.5 rounded text-[11px] font-semibold"
+                            title="El transportista asignado no reporta conexión. Las paradas anexadas permanecen en espera de sincronización con la app móvil."
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            <span>Sincronización pendiente</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Cuerpo de la hoja armada: Cronograma de paradas */}
+                      <div className="p-2.5 sm:p-3 space-y-2 text-xs">
+                        {errorAsignacionPorHoja[hoja.id] && (
+                          <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded p-2 flex items-center gap-1.5">
+                            <AlertCircle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                            <span>{errorAsignacionPorHoja[hoja.id]}</span>
+                          </div>
+                        )}
+                        {exitoAsignacionPorHoja[hoja.id] && (
+                          <div className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded p-2 flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>{exitoAsignacionPorHoja[hoja.id]}</span>
+                          </div>
+                        )}
+
                         {/* Lista de paradas de la hoja armada */}
                         <div className="border border-slate-200 rounded-md overflow-hidden">
-                          <div className="px-3 py-1.5 bg-slate-100 text-[11px] font-bold text-slate-700 uppercase">
+                          <div className="px-3 py-1 bg-slate-100 text-[10px] font-bold text-slate-700 uppercase tracking-wide">
                             Cronograma de paradas ({visitasHoja.length})
                           </div>
                           <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
@@ -2279,36 +2451,41 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                               return (
                                 <div key={visita.id} className="transition-colors">
                                   <div
-                                    className={`p-2.5 flex items-center justify-between text-xs hover:bg-slate-50 ${
+                                    className={`px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs hover:bg-slate-50 ${
                                       esParaQuitar ? 'bg-amber-50/60' : ''
                                     }`}
                                   >
-                                    <div>
+                                    <div className="flex-1 min-w-0">
                                       <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="px-1.5 py-0.5 rounded bg-blue-700 text-white font-mono font-bold text-[10px]">
+                                        <span className="px-1.5 py-0.2 rounded bg-blue-700 text-white font-mono font-bold text-[10px] shrink-0">
                                           Parada {ordenNumero}
                                         </span>
-                                        <strong className="text-slate-900">{comercio?.razonSocial}</strong>
+                                        <strong className="text-slate-900 text-xs shrink-0">{comercio?.razonSocial}</strong>
+                                        {comercio?.domicilio && (
+                                          <span className="text-[11px] text-slate-500 truncate" title={comercio.domicilio}>
+                                            • {comercio.domicilio}
+                                          </span>
+                                        )}
+                                        <span className="text-[11px] text-slate-500 shrink-0">
+                                          • {visita.remitos.length} remito(s)
+                                        </span>
                                         {esCompletamenteRechazada ? (
-                                          <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 border border-red-200 font-semibold text-[10px] inline-flex items-center gap-1 shadow-2xs">
+                                          <span className="px-1.5 py-0.2 rounded bg-red-100 text-red-800 border border-red-200 font-semibold text-[10px] inline-flex items-center gap-1 shadow-2xs">
                                             <span>❌ Rechazado</span>
                                           </span>
                                         ) : esConExcepciones ? (
-                                          <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 font-semibold text-[10px] inline-flex items-center gap-1 shadow-2xs">
+                                          <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-200 font-semibold text-[10px] inline-flex items-center gap-1 shadow-2xs">
                                             <span>⚠️ Con excepciones</span>
                                           </span>
                                         ) : esCompletamenteEntregada ? (
-                                          <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold text-[10px] inline-flex items-center gap-1 shadow-2xs">
+                                          <span className="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold text-[10px] inline-flex items-center gap-1 shadow-2xs">
                                             <span>✓ Entregada</span>
                                           </span>
                                         ) : esCerrada ? (
-                                          <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-semibold text-[10px]">
+                                          <span className="px-1.5 py-0.2 rounded bg-slate-200 text-slate-700 font-semibold text-[10px]">
                                             Cerrada
                                           </span>
                                         ) : null}
-                                      </div>
-                                      <div className="text-[11px] text-slate-500 mt-0.5">
-                                        {comercio?.domicilio} • {visita.remitos.length} remito(s)
                                       </div>
                                       {(esCompletamenteRechazada || esConExcepciones) && (
                                         <div className="text-[11px] font-semibold text-red-700 mt-1 inline-flex items-center gap-1.5 bg-red-50 border border-red-200 px-2 py-0.5 rounded">
@@ -2322,15 +2499,15 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                                         </div>
                                       )}
                                     </div>
-                                    <div className="flex items-center gap-3">
-                                      <span className="font-mono font-bold text-slate-900">
+                                    <div className="flex items-center gap-2.5 shrink-0">
+                                      <span className="font-mono font-bold text-slate-900 text-xs">
                                         ${visita.importeTotal.toLocaleString('es-AR')}
                                       </span>
                                       <button
                                         type="button"
                                         disabled={esVisitaProcesada}
                                         onClick={() => handleSolicitarQuitarVisita(visita, hoja)}
-                                        className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded border transition-colors ${
+                                        className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded border transition-colors ${
                                           esVisitaProcesada
                                             ? 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400 border-slate-200'
                                             : esParaQuitar
@@ -2422,6 +2599,8 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                 })}
               </div>
             )}
+          </>
+        )}
           </div>
         )}
       </section>
