@@ -543,7 +543,7 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {items.map((mov) => {
             const origenEsManual = mov.origen.includes('Manual');
             const origenEsQr = mov.origen.includes('QR');
@@ -551,48 +551,37 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
             return (
               <article
                 key={mov.id}
-                className="border border-slate-200 rounded-lg p-3.5 sm:p-4 hover:border-slate-300 transition-all bg-white shadow-2xs space-y-3"
+                className="border border-slate-200 rounded-lg p-2.5 sm:p-3 hover:border-slate-300 transition-all bg-white shadow-2xs space-y-2"
               >
-                {/* Cabecera del Movimiento */}
-                <div className="flex flex-wrap items-start justify-between gap-2.5 pb-2.5 border-b border-slate-100">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                        <span>Imputado</span>
-                      </span>
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                          origenEsQr
-                            ? 'bg-purple-100 text-purple-800 border border-purple-200'
-                            : origenEsManual
-                            ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                            : 'bg-slate-100 text-slate-700 border border-slate-200'
-                        }`}
-                      >
-                        {mov.origen}
-                      </span>
-                      <span className="text-xs font-bold text-slate-800">
-                        {mov.ordenante || 'Ordenante no informado'}
-                      </span>
-                      {mov.ordenante_cuit && (
-                        <span className="text-[11px] text-slate-500">CUIT: {mov.ordenante_cuit}</span>
-                      )}
-                    </div>
-
-                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
-                      <span>Cuenta: <strong className="text-slate-700">{mov.cuenta}</strong> ({mov.sucursal})</span>
-                      {mov.referencia_externa && (
-                        <span>Ref / Op: <strong className="font-mono text-slate-700">{mov.referencia_externa}</strong></span>
-                      )}
-                      <span>Acreditado: {new Date(mov.fecha_hora).toLocaleDateString('es-AR')}</span>
-                      <span>Imputado: {new Date(mov.imputado_en).toLocaleString('es-AR')}</span>
-                    </div>
+                {/* Fila Principal: Badges, Ordenante y Monto Total */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+                      <span>Imputado</span>
+                    </span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                        origenEsQr
+                          ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                          : origenEsManual
+                          ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                          : 'bg-slate-100 text-slate-700 border border-slate-200'
+                      }`}
+                    >
+                      {mov.origen}
+                    </span>
+                    <strong className="text-xs text-slate-900 truncate">
+                      {mov.ordenante || 'Ordenante no informado'}
+                    </strong>
+                    {mov.ordenante_cuit && (
+                      <span className="text-[11px] text-slate-500 font-mono">({mov.ordenante_cuit})</span>
+                    )}
                   </div>
 
-                  <div className="flex flex-col items-end gap-1.5 shrink-0">
-                    <span className="text-xs text-slate-500">Monto total</span>
-                    <strong className="font-mono text-base text-slate-900">
+                  <div className="flex items-center gap-2.5 shrink-0">
+                    <span className="text-xs text-slate-500 hidden sm:inline">Total:</span>
+                    <strong className="font-mono text-sm sm:text-base text-slate-900">
                       {formatoARS(mov.importe_centavos)}
                     </strong>
                     {mov.comprobante_nombre && (
@@ -600,7 +589,7 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
                         type="button"
                         onClick={() => void descargarComprobante(mov)}
                         disabled={descargandoId === mov.id}
-                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 hover:text-blue-900 hover:underline cursor-pointer"
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 hover:text-blue-900 cursor-pointer bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200 transition-colors"
                         title={mov.comprobante_nombre}
                       >
                         <Download className="w-3 h-3" />
@@ -610,36 +599,39 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
                   </div>
                 </div>
 
-                {/* Desglose de Remitos Imputados */}
-                <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">
+                {/* Fila Secundaria: Metadata en una sola línea */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+                  <span>Cuenta: <strong className="text-slate-700">{mov.cuenta}</strong> ({mov.sucursal})</span>
+                  {mov.referencia_externa && (
+                    <span>Ref / Op: <strong className="font-mono text-slate-700">{mov.referencia_externa}</strong></span>
+                  )}
+                  <span>Acreditado: {new Date(mov.fecha_hora).toLocaleDateString('es-AR')}</span>
+                  <span>Imputado: {new Date(mov.imputado_en).toLocaleString('es-AR')}</span>
+                  {mov.imputaciones[0]?.imputadoPor && (
+                    <span>Por: <strong className="text-slate-700">{mov.imputaciones[0].imputadoPor}</strong></span>
+                  )}
+                </div>
+
+                {/* Fila Terciaria: Remitos saldados en pastillas compactas */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-slate-100 text-xs">
+                  <span className="text-[11px] font-semibold text-slate-500 mr-1">
                     Remitos saldados ({mov.imputaciones.length}):
                   </span>
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {mov.imputaciones.map((imp) => (
-                      <div
-                        key={imp.id}
-                        className="flex items-center justify-between gap-2 p-2 rounded-md bg-slate-50 border border-slate-200/80 text-xs"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-mono font-bold text-slate-900 bg-white px-1.5 py-0.5 rounded border border-slate-200 text-[11px]">
-                              {imp.remitoNumero}
-                            </span>
-                            <span className="font-semibold text-slate-700 truncate" title={imp.comercio}>
-                              {imp.comercio}
-                            </span>
-                          </div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">
-                            Por: {imp.imputadoPor}
-                          </div>
-                        </div>
-                        <strong className="font-mono text-xs text-emerald-700 shrink-0">
-                          {formatoARS(imp.importeCentavos)}
-                        </strong>
-                      </div>
-                    ))}
-                  </div>
+                  {mov.imputaciones.map((imp) => (
+                    <span
+                      key={imp.id}
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-50 border border-slate-200 text-[11px]"
+                      title={imp.comercio}
+                    >
+                      <span className="font-mono font-bold text-slate-900">{imp.remitoNumero}</span>
+                      {imp.comercio && imp.comercio !== mov.ordenante && (
+                        <span className="text-slate-600 truncate max-w-[140px]">{imp.comercio}</span>
+                      )}
+                      <span className="font-mono font-bold text-emerald-700">
+                        {formatoARS(imp.importeCentavos)}
+                      </span>
+                    </span>
+                  ))}
                 </div>
               </article>
             );
