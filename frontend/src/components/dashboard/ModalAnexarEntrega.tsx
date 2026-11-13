@@ -45,12 +45,21 @@ export const ModalAnexarEntrega: React.FC<ModalAnexarEntregaProps> = ({
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Solo rutas operativas ya armadas y con visitas del mismo comercio.
+  // Solo rutas operativas ya armadas, no completadas y con visitas del mismo comercio.
   const hojasCandidatas = hojasDeRuta.filter((h) => {
     if (!['pendiente_de_despacho', 'publicada', 'en_curso'].includes(h.estado)) return false;
     if (!remito) return false;
     const visitasDeHoja = h.visitas || [];
     if (visitasDeHoja.length === 0) return false;
+    const todasCompletadas = visitasDeHoja.every(
+      (v) =>
+        v.estado === 'completada' ||
+        v.estado === 'no_realizada' ||
+        (v.remitos &&
+          v.remitos.length > 0 &&
+          v.remitos.every((r) => ['entregado', 'no_entregado', 'devuelto'].includes(r.estado)))
+    );
+    if (todasCompletadas) return false;
     return visitasDeHoja.some((v) => v.comercioId === remito.comercioId);
   });
 

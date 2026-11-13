@@ -44,6 +44,29 @@ efectivoRouter.get('/rendiciones', async (req, res) => {
   }
 });
 
+/** GET /api/efectivo/hojas-pendientes · Hojas disponibles para que el supervisor inicie el arqueo */
+efectivoRouter.get('/hojas-pendientes', async (req, res) => {
+  const fecha = typeof req.query.fecha === 'string' && req.query.fecha ? req.query.fecha : undefined;
+  if (fecha && !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+    return res.status(400).json({ error: 'INVALID_DATE', message: 'La fecha debe tener formato AAAA-MM-DD.' });
+  }
+  try {
+    return res.json({ hojas: await rendicionService.listarHojasPendientes({ fecha }) });
+  } catch (error) {
+    return responderError(error, res);
+  }
+});
+
+/** POST /api/efectivo/iniciar · El supervisor inicia el arqueo directamente en la web */
+efectivoRouter.post('/iniciar', async (req, res) => {
+  try {
+    const resultado = await rendicionService.iniciarArqueo(getUsuarioId(req), req.body);
+    return res.status(201).json(resultado);
+  } catch (error) {
+    return responderError(error, res);
+  }
+});
+
 /** GET /api/efectivo/rendiciones/:id · HU #47 (410 si el transportista la retractó) */
 efectivoRouter.get('/rendiciones/:id', async (req, res) => {
   try {

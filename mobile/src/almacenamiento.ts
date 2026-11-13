@@ -1,7 +1,7 @@
 // Persistencia local: sesión, última hoja de ruta descargada y cola de cobros.
 // RNF: el celular guarda la hoja completa de la jornada para trabajar 24 h sin conexión.
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { anularDeclaracion, confirmarEntrega, confirmarTodaLaVisita, declararEfectivo, enviarCobro, rechazarRemito } from './api';
+import { confirmarEntrega, confirmarTodaLaVisita, enviarCobro, rechazarRemito } from './api';
 import { ErrorApi } from './errores';
 import { ColaOperaciones } from './sincronizacion/cola';
 import type { HojaDeRuta, Sesion } from './tipos';
@@ -48,7 +48,7 @@ export function obtenerSesionActual(): Sesion | null {
   return sesionActual;
 }
 
-/** Cola única de la app (entregas, cobros y rendición de efectivo). Envía con el token de la sesión vigente al momento de sincronizar. */
+/** Cola única de la app (entregas y cobros). Envía con el token de la sesión vigente al momento de sincronizar. */
 export const colaOperaciones = new ColaOperaciones(AsyncStorage, async (operacion) => {
   let sesion = sesionActual;
   if (!sesion) {
@@ -67,9 +67,5 @@ export const colaOperaciones = new ColaOperaciones(AsyncStorage, async (operacio
     });
   } else if (operacion.tipo === 'rechazo') {
     await rechazarRemito(sesion.token, operacion.remitoId, operacion.cuerpo);
-  } else if (operacion.tipo === 'rendicion') {
-    await declararEfectivo(sesion.token, operacion.cuerpo);
-  } else if (operacion.tipo === 'anulacion_rendicion') {
-    await anularDeclaracion(sesion.token, operacion.cuerpo);
   } else await enviarCobro(sesion.token, operacion.visitaId, operacion.cuerpo);
 });

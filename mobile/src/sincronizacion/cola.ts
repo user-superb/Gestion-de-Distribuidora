@@ -1,11 +1,10 @@
 // Cola de operaciones registradas en el celular, pendientes de llegar al servidor:
-// entregas de remitos (HU #22), entregas multimarca en lote (HU #23), cobros de visitas (HU #26 a #29)
-// y la declaración del efectivo al terminar la ruta (HU #46), con su anulación (HU #47 E2).
+// entregas de remitos (HU #22), entregas multimarca en lote (HU #23) y cobros de visitas (HU #26 a #29).
 // RNF: la app funciona sin conexión y sincroniza apenas recupera el acceso.
-// Se envían en el orden en que se registraron, así la entrega llega antes que el cobro y el cobro antes que la rendición.
+// Se envían en el orden en que se registraron, así la entrega llega antes que el cobro.
 // Reenviar es seguro: el cobro lleva claves de idempotencia y la entrega de un remito ya entregado no se pisa.
 import { ErrorApi } from '../errores';
-import type { AnulacionRendicionDto, CobroDto, EntregaDto, ItemEntregaLote, RechazoDto, RendicionDto } from '../tipos';
+import type { CobroDto, EntregaDto, ItemEntregaLote, RechazoDto } from '../tipos';
 
 export type EstadoEnCola = 'pendiente' | 'sincronizado' | 'rechazado';
 
@@ -13,9 +12,7 @@ export type Operacion =
   | { tipo: 'cobro'; visitaId: string; cuerpo: CobroDto }
   | { tipo: 'entrega'; visitaId: string; remitoId: string; cuerpo: EntregaDto }
   | { tipo: 'entrega_lote'; visitaId: string; entregas: ItemEntregaLote[]; cuerpoGeneral: EntregaDto }
-  | { tipo: 'rechazo'; visitaId: string; remitoId: string; cuerpo: RechazoDto }
-  | { tipo: 'rendicion'; hojaId: string; cuerpo: RendicionDto }
-  | { tipo: 'anulacion_rendicion'; hojaId: string; cuerpo: AnulacionRendicionDto };
+  | { tipo: 'rechazo'; visitaId: string; remitoId: string; cuerpo: RechazoDto };
 
 export type ItemCola = Operacion & { estado: EstadoEnCola; motivo?: string };
 
@@ -38,13 +35,10 @@ const CLAVE = 'cola-cobros';
 const MANTENER_SINCRONIZADOS_MS = 48 * 60 * 60 * 1000;
 
 /**
- * Identifica la operación: un cobro por visita, una entrega por remito, un rechazo por remito, un lote de visita,
- * la declaración de efectivo de la hoja y la anulación de una declaración puntual.
+ * Identifica la operación: un cobro por visita, una entrega por remito, un rechazo por remito y un lote de visita.
  */
 export function claveOperacion(operacion: Operacion): string {
   if (operacion.tipo === 'cobro') return `cobro:${operacion.visitaId}`;
-  if (operacion.tipo === 'rendicion') return `rendicion:${operacion.hojaId}`;
-  if (operacion.tipo === 'anulacion_rendicion') return `anulacion_rendicion:${operacion.cuerpo.claveIdempotencia}`;
   if (operacion.tipo === 'entrega_lote') return `entrega_lote:${operacion.visitaId}`;
   if (operacion.tipo === 'rechazo') return `rechazo:${operacion.remitoId}`;
   return `entrega:${operacion.remitoId}`;
@@ -52,8 +46,6 @@ export function claveOperacion(operacion: Operacion): string {
 
 function registradaEn(operacion: Operacion): number {
   if (operacion.tipo === 'cobro') return new Date(operacion.cuerpo.registradoEn).getTime();
-  if (operacion.tipo === 'rendicion') return new Date(operacion.cuerpo.declaradoEn).getTime();
-  if (operacion.tipo === 'anulacion_rendicion') return new Date(operacion.cuerpo.anuladaEn).getTime();
   if (operacion.tipo === 'entrega_lote') return new Date(operacion.cuerpoGeneral.timestamp).getTime();
   return new Date(operacion.cuerpo.timestamp).getTime();
 }
@@ -78,7 +70,6 @@ export class ColaOperaciones {
    * De paso descarta las ya sincronizadas de jornadas anteriores (más de 48 h).
    * En caso de lote, reemplaza intentos individuales previos de los remitos incluidos.
    * En caso de rechazo, anula intentos individuales de entrega previos para el mismo remito (y viceversa).
-   * Al anular una declaración de efectivo que el servidor había rechazado, solo se descarta: nunca llegó a la caja.
    */
   async encolar(operacion: Operacion, ahora = new Date()): Promise<void> {
     const clave = claveOperacion(operacion);
@@ -86,17 +77,6 @@ export class ColaOperaciones {
     const remitoIdsEnLote = operacion.tipo === 'entrega_lote'
       ? new Set(operacion.entregas.map((e) => e.remitoId))
       : null;
-
-    if (operacion.tipo === 'anulacion_rendicion') {
-      const actual = await this.listar();
-      const declaracion = actual.find(
-        (item) => item.tipo === 'rendicion' && item.cuerpo.claveIdempotencia === operacion.cuerpo.claveIdempotencia
-      );
-      if (declaracion?.estado === 'rechazado') {
-        await this.guardar(actual.filter((item) => item !== declaracion));
-        return;
-      }
-    }
 
     const cola = (await this.listar()).filter((item) => {
       if (claveOperacion(item) === clave && item.estado === 'rechazado') return false;

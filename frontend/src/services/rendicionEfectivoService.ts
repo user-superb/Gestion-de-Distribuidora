@@ -39,6 +39,20 @@ export interface DetalleRendicion extends Rendicion {
   efectivoCobradoCentavos: number;
 }
 
+export interface HojaPendienteArqueo {
+  hojaId: string;
+  codigoHoja: string;
+  fechaReparto: string | null;
+  patente: string | null;
+  estadoHoja: string;
+  sucursal: string;
+  transportista: { id: string; nombre: string };
+  efectivoCobradoCentavos: number;
+  cantidadCobrosEfectivo: number;
+  visitasPendientesCount: number;
+  visitasPendientes: { visitaId: string; orden: number | null; comercio: string; motivo: string }[];
+}
+
 /** HU #47 E2: la declaración fue retractada por el transportista. */
 export class RendicionRetractadaError extends Error {
   constructor(message: string, public anuladaEn: string | null) {
@@ -190,6 +204,24 @@ export const rendicionEfectivoService = {
 
   detalle(token: string, id: string): Promise<DetalleRendicion> {
     return pedir(token, `/rendiciones/${id}`);
+  },
+
+  /** Opción 1: Hojas disponibles para iniciar arqueo desde el escritorio */
+  async listarHojasPendientes(token: string, fecha?: string): Promise<HojaPendienteArqueo[]> {
+    const params = new URLSearchParams();
+    if (fecha) params.set('fecha', fecha);
+    const query = params.toString();
+    const data = await pedir<{ hojas: HojaPendienteArqueo[] }>(token, `/hojas-pendientes${query ? `?${query}` : ''}`);
+    return data.hojas;
+  },
+
+  /** Opción 1 & Opción B: Iniciar arqueo de una hoja (permite forzar con paradas pendientes) */
+  async iniciarArqueo(token: string, hojaDeRutaId: string, declaradoCentavos?: number, forzar?: boolean): Promise<Rendicion> {
+    const data = await pedir<{ rendicion: Rendicion }>(token, '/iniciar', {
+      method: 'POST',
+      body: JSON.stringify({ hojaDeRutaId, declaradoCentavos, forzar }),
+    });
+    return data.rendicion;
   },
 
   /** HU #48 */

@@ -1,7 +1,7 @@
 // Épica 2.3 · Rendición y control de efectivo, escritorio del supervisor.
 // HU #47 visualizar la declaración · HU #48 aprobar coincidente · HU #49 registrar diferencia · HU #50 aprobar con diferencia.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Banknote, CheckCircle2, RefreshCw, Scale } from 'lucide-react';
+import { AlertTriangle, Banknote, CheckCircle2, Plus, RefreshCw, Scale, X } from 'lucide-react';
 import { UserSession } from '../../types/auth';
 import {
   analizarConteo,
@@ -15,6 +15,7 @@ import {
   formDesdeConteo,
   formatoFecha,
   formatoPesos,
+  HojaPendienteArqueo,
   justificacionValida,
   LARGO_MINIMO_JUSTIFICACION,
   Rendicion,
@@ -56,6 +57,13 @@ export const RendicionEfectivo: React.FC<{ session: UserSession }> = ({ session 
   const [seleccionada, setSeleccionada] = useState<string | null>(null);
   const [aviso, setAviso] = useState('');
 
+  // Modal para iniciar arqueo directamente desde el escritorio (Opción 1)
+  const [modalIniciar, setModalIniciar] = useState(false);
+  const [hojasPendientes, setHojasPendientes] = useState<HojaPendienteArqueo[]>([]);
+  const [cargandoHojas, setCargandoHojas] = useState(false);
+  const [errorIniciar, setErrorIniciar] = useState('');
+  const [iniciandoId, setIniciandoId] = useState<string | null>(null);
+
   const cargar = useCallback(async () => {
     setCargando(true);
     setError('');
@@ -73,17 +81,55 @@ export const RendicionEfectivo: React.FC<{ session: UserSession }> = ({ session 
     void cargar();
   }, [cargar]);
 
+  const abrirModalIniciar = async () => {
+    setModalIniciar(true);
+    setCargandoHojas(true);
+    setErrorIniciar('');
+    try {
+      setHojasPendientes(await rendicionEfectivoService.listarHojasPendientes(session.token, fecha || undefined));
+    } catch (err: any) {
+      setErrorIniciar(err.message || 'Error al cargar hojas de ruta pendientes.');
+    } finally {
+      setCargandoHojas(false);
+    }
+  };
+
+  const ejecutarIniciarArqueo = async (hoja: HojaPendienteArqueo, forzar = false) => {
+    setIniciandoId(hoja.hojaId);
+    setErrorIniciar('');
+    try {
+      const nueva = await rendicionEfectivoService.iniciarArqueo(session.token, hoja.hojaId, undefined, forzar);
+      setModalIniciar(false);
+      setAviso(`Arqueo iniciado para la hoja ${hoja.codigoHoja} (${hoja.transportista.nombre}).`);
+      await cargar();
+      setSeleccionada(nueva.id);
+    } catch (err: any) {
+      setErrorIniciar(err.message || 'No se pudo iniciar el arqueo de la hoja.');
+    } finally {
+      setIniciandoId(null);
+    }
+  };
+
   return (
     <section className="grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
       <div className="space-y-3 rounded-md border border-slate-200 bg-white p-4 shadow-sm">
         <header className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="text-sm font-bold text-slate-900">Declaraciones de efectivo</h2>
-            <p className="mt-0.5 text-xs text-slate-500">Lo que cada transportista declaró desde la app al terminar la ruta.</p>
+            <h2 className="text-sm font-bold text-slate-900">Rendiciones y arqueo de efectivo</h2>
+            <p className="mt-0.5 text-xs text-slate-500">Las hojas finalizadas se auto-generan listas para conteo. Podés forzar arqueos manuales con "+ Iniciar Arqueo".</p>
           </div>
-          <button type="button" onClick={() => void cargar()} disabled={cargando} className="inline-flex items-center gap-1.5 rounded border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-            <RefreshCw className={`h-3.5 w-3.5 ${cargando ? 'animate-spin' : ''}`} /> Actualizar
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={abrirModalIniciar}
+              className="inline-flex items-center gap-1.5 rounded bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800 shadow-sm transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" /> Iniciar Arqueo
+            </button>
+            <button type="button" onClick={() => void cargar()} disabled={cargando} className="inline-flex items-center gap-1.5 rounded border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              <RefreshCw className={`h-3.5 w-3.5 ${cargando ? 'animate-spin' : ''}`} /> Actualizar
+            </button>
+          </div>
         </header>
 
         <div className="flex flex-wrap items-end gap-2">
@@ -166,6 +212,106 @@ export const RendicionEfectivo: React.FC<{ session: UserSession }> = ({ session 
           </div>
         )}
       </div>
+
+      {modalIniciar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+          <div className="w-full max-w-2xl rounded-lg bg-white p-5 shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Iniciar arqueo de efectivo</h3>
+                <p className="text-xs text-slate-500">Seleccioná la hoja de ruta del transportista para comenzar el conteo.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalIniciar(false)}
+                className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {errorIniciar && (
+              <p className="mt-3 rounded border border-red-200 bg-red-50 p-2.5 text-xs text-red-700">{errorIniciar}</p>
+            )}
+
+            <div className="mt-4 max-h-96 overflow-y-auto">
+              {cargandoHojas ? (
+                <div className="py-8 text-center text-xs text-slate-500">
+                  <RefreshCw className="mx-auto mb-2 h-5 w-5 animate-spin text-slate-400" />
+                  Buscando hojas de ruta disponibles…
+                </div>
+              ) : hojasPendientes.length === 0 ? (
+                <div className="rounded-md border border-dashed border-slate-200 p-8 text-center text-xs text-slate-500">
+                  No hay hojas de ruta pendientes de arqueo para la fecha seleccionada.
+                </div>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {hojasPendientes.map((hoja) => {
+                    const tienePendientes = hoja.visitasPendientesCount > 0;
+                    return (
+                      <li key={hoja.hojaId} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-sm text-slate-900">{hoja.codigoHoja}</span>
+                            <span className="text-xs text-slate-600 font-medium">{hoja.transportista.nombre}</span>
+                            {hoja.patente && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">{hoja.patente}</span>}
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                            <span>{formatoFecha(hoja.fechaReparto)}</span>
+                            <span>·</span>
+                            <span>{hoja.sucursal}</span>
+                            <span>·</span>
+                            <span className="font-medium text-emerald-700">
+                              Cobrado en efectivo: {formatoPesos(hoja.efectivoCobradoCentavos)} ({hoja.cantidadCobrosEfectivo} pagos)
+                            </span>
+                          </div>
+                          {tienePendientes && (
+                            <p className="mt-1 text-[11px] text-amber-600">
+                              ⚠️ Tiene {hoja.visitasPendientesCount} parada(s) con remitos o cobros pendientes. Debe completarse antes del arqueo.
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {tienePendientes ? (
+                            <button
+                              type="button"
+                              onClick={() => void ejecutarIniciarArqueo(hoja, true)}
+                              disabled={iniciandoId === hoja.hojaId}
+                              className="shrink-0 rounded border border-amber-500 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 transition-colors"
+                              title="Forzar el arqueo manual con paradas pendientes"
+                            >
+                              {iniciandoId === hoja.hojaId ? 'Iniciando…' : 'Forzar Arqueo Anticipado'}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => void ejecutarIniciarArqueo(hoja, false)}
+                              disabled={iniciandoId === hoja.hojaId}
+                              className="shrink-0 rounded bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800 disabled:bg-slate-200 transition-colors"
+                            >
+                              {iniciandoId === hoja.hojaId ? 'Iniciando…' : 'Iniciar Arqueo'}
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+
+            <div className="mt-5 flex justify-end border-t border-slate-100 pt-3">
+              <button
+                type="button"
+                onClick={() => setModalIniciar(false)}
+                className="rounded border border-slate-300 px-4 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 };

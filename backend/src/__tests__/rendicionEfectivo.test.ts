@@ -248,6 +248,62 @@ describe('Épica 2.3 · Rendición y control de efectivo', () => {
     });
   });
 
+  describe('Opción 1 · Inicio de arqueo por el supervisor (escritorio web)', () => {
+    it('lista hojas de ruta pendientes de arqueo', async () => {
+      const supervisor = await token('supervisor');
+      const res = await dispatch(efectivoRouter, 'GET', '/hojas-pendientes', {}, supervisor, undefined, { fecha: FECHA });
+      assert.equal(res.statusCode, 200);
+      assert.ok(res.body.hojas.length >= 1);
+      assert.ok(res.body.hojas.some((h: any) => h.codigoHoja === 'HR-0001'));
+    });
+
+    it('el supervisor inicia el arqueo precargando automáticamente el efectivo cobrado', async () => {
+      await terminarRuta();
+      const supervisor = await token('supervisor');
+      const res = await dispatch(efectivoRouter, 'POST', '/iniciar', {}, supervisor, { hojaDeRutaId: '1' });
+      assert.equal(res.statusCode, 201, JSON.stringify(res.body));
+      assert.equal(res.body.rendicion.estado, 'pendiente');
+      assert.equal(res.body.rendicion.declaradoCentavos, 4500000); // 15.000 + 30.000 de cobros en efectivo
+      assert.equal(res.body.rendicion.hojaDeRutaId, '1');
+
+      // Verifica que los cobros en efectivo quedaron ligados a la nueva rendición
+      const ligados = await uno(`SELECT count(*) AS n FROM cobro WHERE rendicion_id = $1`, [res.body.rendicion.id]);
+      assert.equal(Number(ligados.n), 2);
+
+      // Ahora la hoja 1 no debe aparecer en hojas pendientes de arqueo
+      const pendientes = await dispatch(efectivoRouter, 'GET', '/hojas-pendientes', {}, supervisor, undefined, { fecha: FECHA });
+      assert.ok(!pendientes.body.hojas.some((h: any) => h.hojaId === '1'));
+    });
+
+    it('bloquea el inicio del arqueo si la hoja tiene visitas pendientes', async () => {
+      // Hoja 1 sin terminar visitas
+      const supervisor = await token('supervisor');
+      const res = await dispatch(efectivoRouter, 'POST', '/iniciar', {}, supervisor, { hojaDeRutaId: '1' });
+      assert.equal(res.statusCode, 409);
+      assert.match(res.body.message, /visita\(s\) pendiente/);
+    });
+
+    it('permite forzar el arqueo manual con paradas pendientes si se indica forzar: true', async () => {
+      // Hoja 1 con visitas pendientes
+      const supervisor = await token('supervisor');
+      const res = await dispatch(efectivoRouter, 'POST', '/iniciar', {}, supervisor, { hojaDeRutaId: '1', forzar: true });
+      assert.equal(res.statusCode, 201, JSON.stringify(res.body));
+      assert.equal(res.body.rendicion.estado, 'pendiente');
+      assert.equal(res.body.rendicion.hojaDeRutaId, '1');
+    });
+
+    it('automatización: al terminar la ruta la rendición aparece automáticamente en la lista sin inicio manual', async () => {
+      await terminarRuta();
+      const supervisor = await token('supervisor');
+      // No llamamos a POST /iniciar ni a POST /rendicion
+      const lista = await dispatch(efectivoRouter, 'GET', '/rendiciones', {}, supervisor, undefined, { estado: 'pendiente' });
+      assert.equal(lista.statusCode, 200);
+      assert.ok(lista.body.rendiciones.some((r: any) => r.hojaDeRutaId === '1' && r.estado === 'pendiente'));
+      const auto = lista.body.rendiciones.find((r: any) => r.hojaDeRutaId === '1');
+      assert.equal(auto.declaradoCentavos, 4500000);
+    });
+  });
+
   describe('HU #47 · Visualizar declaración de efectivo (escritorio)', () => {
     it('ESCENARIO 1: muestra el nombre del transportista, el monto declarado y la fecha de la hoja de ruta', async () => {
       await terminarRuta();

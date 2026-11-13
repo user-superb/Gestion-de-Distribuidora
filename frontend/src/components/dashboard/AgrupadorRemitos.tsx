@@ -17,6 +17,7 @@ import {
   GripVertical,
   ArrowUp,
   ArrowDown,
+  ArrowUpDown,
   Truck,
   Plus,
   Calendar,
@@ -92,6 +93,9 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
   // Paso 1: Selección y agrupación
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
   const [busqueda, setBusqueda] = useState<string>('');
+  const [criterioOrdenPendientes, setCriterioOrdenPendientes] = useState<
+    'comercio' | 'numero' | 'importe_desc' | 'importe_asc'
+  >('comercio');
   const [ultimaVisitaId, setUltimaVisitaId] = useState<string | null>(null);
 
   // Paso 2: Orden y programación
@@ -710,18 +714,38 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
     }
   };
 
-  // Filtrado de remitos pendientes
+  // Filtrado y ordenamiento de remitos pendientes
   const terminoBusqueda = busqueda.trim().toLowerCase();
-  const pendientesFiltrados = pendientes.filter((r) => {
-    if (!terminoBusqueda) return true;
-    const marca = getMarca(r.marcaId);
-    const comercio = getComercio(r.comercioId);
-    return (
-      r.numeroRemito.toLowerCase().includes(terminoBusqueda) ||
-      (marca && marca.nombre.toLowerCase().includes(terminoBusqueda)) ||
-      (comercio && comercio.razonSocial.toLowerCase().includes(terminoBusqueda))
-    );
-  });
+  const pendientesFiltrados = pendientes
+    .filter((r) => {
+      if (!terminoBusqueda) return true;
+      const marca = getMarca(r.marcaId);
+      const comercio = getComercio(r.comercioId);
+      return (
+        r.numeroRemito.toLowerCase().includes(terminoBusqueda) ||
+        (marca && marca.nombre.toLowerCase().includes(terminoBusqueda)) ||
+        (comercio && comercio.razonSocial.toLowerCase().includes(terminoBusqueda))
+      );
+    })
+    .sort((a, b) => {
+      if (criterioOrdenPendientes === 'comercio') {
+        const comA = getComercio(a.comercioId)?.razonSocial || '';
+        const comB = getComercio(b.comercioId)?.razonSocial || '';
+        const comp = comA.localeCompare(comB, 'es', { sensitivity: 'base' });
+        if (comp !== 0) return comp;
+        return a.numeroRemito.localeCompare(b.numeroRemito, 'es', { numeric: true });
+      }
+      if (criterioOrdenPendientes === 'numero') {
+        return a.numeroRemito.localeCompare(b.numeroRemito, 'es', { numeric: true });
+      }
+      if (criterioOrdenPendientes === 'importe_desc') {
+        return b.importe - a.importe;
+      }
+      if (criterioOrdenPendientes === 'importe_asc') {
+        return a.importe - b.importe;
+      }
+      return 0;
+    });
 
   // Análisis de selección en Paso 1
   const remitosSeleccionadosObj = pendientes.filter((r) => seleccionados.has(r.id));
@@ -914,28 +938,52 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                 </button>
               </div>
 
-              {/* Búsqueda rápida */}
+              {/* Búsqueda rápida y Ordenamiento */}
               {pendientes.length > 0 && (
                 <div className="space-y-2.5">
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      placeholder="Buscar por nro. remito, comercio o marca..."
-                      value={busqueda}
-                      onChange={(e) => setBusqueda(e.target.value)}
-                      className="w-full pl-9 pr-8 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-md text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white transition-all"
-                    />
-                    {busqueda && (
-                      <button
-                        type="button"
-                        onClick={() => setBusqueda('')}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
-                        title="Limpiar búsqueda"
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <div className="relative flex-1">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Buscar por nro. remito, comercio o marca..."
+                        value={busqueda}
+                        onChange={(e) => setBusqueda(e.target.value)}
+                        className="w-full pl-9 pr-8 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-md text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white transition-all"
+                      />
+                      {busqueda && (
+                        <button
+                          type="button"
+                          onClick={() => setBusqueda('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                          title="Limpiar búsqueda"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0 bg-slate-50 border border-slate-200 rounded-md px-2.5 py-1.5">
+                      <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
+                      <label htmlFor="orden-remitos-select" className="text-xs text-slate-600 font-medium">
+                        Ordenar:
+                      </label>
+                      <select
+                        id="orden-remitos-select"
+                        value={criterioOrdenPendientes}
+                        onChange={(e) =>
+                          setCriterioOrdenPendientes(
+                            e.target.value as 'comercio' | 'numero' | 'importe_desc' | 'importe_asc'
+                          )
+                        }
+                        className="text-xs bg-white border border-slate-300 rounded px-2 py-0.5 text-slate-800 font-semibold focus:ring-1 focus:ring-blue-500 cursor-pointer"
                       >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
+                        <option value="comercio">Comercio (A-Z)</option>
+                        <option value="numero">Nro. de remito</option>
+                        <option value="importe_desc">Mayor importe</option>
+                        <option value="importe_asc">Menor importe</option>
+                      </select>
+                    </div>
                   </div>
 
                   {/* Filtro rápido por comercio */}
@@ -943,20 +991,23 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                     <span className="text-xs text-slate-600 font-medium mr-1">
                       Autoseleccionar por comercio:
                     </span>
-                    {comercios.map((com) => {
-                      const cant = pendientes.filter((r) => r.comercioId === com.id).length;
-                      if (cant === 0) return null;
-                      return (
-                        <button
-                          key={com.id}
-                          type="button"
-                          onClick={() => handleSeleccionarPorComercio(com.id)}
-                          className="px-2 py-0.5 text-xs bg-white hover:bg-blue-50 hover:border-blue-300 text-slate-700 font-medium rounded border border-slate-300 transition-colors shadow-2xs cursor-pointer"
-                        >
-                          {com.razonSocial} <span className="text-blue-600 font-bold">({cant})</span>
-                        </button>
-                      );
-                    })}
+                    {comercios
+                      .slice()
+                      .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, 'es', { sensitivity: 'base' }))
+                      .map((com) => {
+                        const cant = pendientes.filter((r) => r.comercioId === com.id).length;
+                        if (cant === 0) return null;
+                        return (
+                          <button
+                            key={com.id}
+                            type="button"
+                            onClick={() => handleSeleccionarPorComercio(com.id)}
+                            className="px-2 py-0.5 text-xs bg-white hover:bg-blue-50 hover:border-blue-300 text-slate-700 font-medium rounded border border-slate-300 transition-colors shadow-2xs cursor-pointer"
+                          >
+                            {com.razonSocial} <span className="text-blue-600 font-bold">({cant})</span>
+                          </button>
+                        );
+                      })}
                   </div>
                 </div>
               )}
@@ -2072,6 +2123,8 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                               r.estado === 'devuelto'
                           ))
                     );
+                  const esCompletadaOCerrada =
+                    todasCompletadas || hoja.estado === 'cerrada' || hoja.estado === 'anulada';
 
                   return (
                     <div
@@ -2133,7 +2186,7 @@ export const AgrupadorRemitos: React.FC<AgrupadorRemitosProps> = ({
                         </div>
 
                         <div className="flex items-center gap-1.5">
-                          {pendientes.length > 0 && (
+                          {pendientes.length > 0 && !esCompletadaOCerrada && (
                             <button
                               type="button"
                               onClick={() => handleAbrirAnexar(pendientes[0], hoja.id)}

@@ -96,3 +96,27 @@ describe('HU #50 · Aprobar rendición con diferencia', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('Opción 1 · Inicio de arqueo por el supervisor (escritorio web)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('lista hojas de ruta pendientes de arqueo', async () => {
+    const hojasMock = [{ hojaId: '1', codigoHoja: 'HR-0001', efectivoCobradoCentavos: 4500000, visitasPendientesCount: 0 }];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ hojas: hojasMock }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    const resultado = await rendicionEfectivoService.listarHojasPendientes('token', '2026-11-02');
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0].codigoHoja).toBe('HR-0001');
+    expect(resultado[0].efectivoCobradoCentavos).toBe(4500000);
+  });
+
+  it('inicia el arqueo de una hoja enviando hojaDeRutaId y forzar', async () => {
+    const rendicionMock = { id: '5', estado: 'pendiente', declaradoCentavos: 4500000 };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ rendicion: rendicionMock }), { status: 201, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const resultado = await rendicionEfectivoService.iniciarArqueo('token', '1', undefined, true);
+    expect(resultado.id).toBe('5');
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/\/efectivo\/iniciar$/);
+    expect(JSON.parse(String(init.body))).toEqual({ hojaDeRutaId: '1', forzar: true });
+  });
+});

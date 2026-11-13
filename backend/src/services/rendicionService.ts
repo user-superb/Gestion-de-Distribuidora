@@ -2,6 +2,7 @@
 // Épica 2.3 · Circuito digital de rendición y control de efectivo (HU #46 a #50).
 // Reglas y supuestos en docs/requerimientos/epica-2.3-rendicion-efectivo.md
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { PoolClient } from 'pg';
 import { db } from '../db.js';
 import { calcularImporteVisita } from './cobroService.js';
@@ -426,6 +427,7 @@ export const rendicionService = {
 
   /** HU #47: listado del supervisor. Identifica al transportista y la fecha de la hoja de ruta. */
   async listar(filtros: { estado?: string; fecha?: string } = {}) {
+    await this.asegurarArqueosAutomaticos();
     const condiciones: string[] = [];
     const params: unknown[] = [];
     if (filtros.estado) {
@@ -546,6 +548,160 @@ export const rendicionService = {
         motivo
       );
       return buscarRendicion(client, rendicion.id);
+    });
+  },
+
+  /**
+   * Opción 1: Hojas de ruta finalizadas o en curso que pueden ser arqueadas por el supervisor en la web.
+   */
+  async listarHojasPendientes(filtros: { fecha?: string } = {}) {
+    const params: unknown[] = [];
+    let fechaCond = '';
+    if (filtros.fecha) {
+      params.push(filtros.fecha);
+      fechaCond = `AND h.fecha_reparto = $1::date`;
+    }
+    const query = `
+      SELECT h.id::text AS hoja_id, h.fecha_reparto, h.patente, h.estado AS hoja_estado,
+             s.nombre AS sucursal,
+             t.id::text AS transportista_id, t.nombre AS transportista_nombre
+      FROM hoja_de_ruta h
+      JOIN sucursal s ON s.id = h.sucursal_id
+      LEFT JOIN usuario t ON t.id = h.transportista_id
+      LEFT JOIN rendicion_efectivo re ON re.hoja_de_ruta_id = h.id AND re.estado <> 'anulada'
+      WHERE h.estado NOT IN ('cerrada', 'anulada')
+        ${fechaCond}
+        AND re.id IS NULL
+      ORDER BY h.fecha_reparto DESC, h.id DESC
+    `;
+    const res = await db.query(query, params);
+    const resultado = [];
+    for (const row of res.rows) {
+      const cobros = await cobrosEfectivoDeHoja(db, row.hoja_id);
+      const pendientes = await visitasPendientes(db, row.hoja_id);
+      resultado.push({
+        hojaId: row.hoja_id,
+        codigoHoja: `HR-${String(row.hoja_id).padStart(4, '0')}`,
+        fechaReparto: aFecha(row.fecha_reparto),
+        patente: row.patente ?? null,
+        estadoHoja: row.hoja_estado,
+        sucursal: row.sucursal,
+        transportista: { id: row.transportista_id ?? '', nombre: row.transportista_nombre ?? 'Sin asignar' },
+        efectivoCobradoCentavos: cobros.reduce((acc, c) => acc + c.importeCentavos, 0),
+        cantidadCobrosEfectivo: cobros.length,
+        visitasPendientesCount: pendientes.length,
+        visitasPendientes: pendientes,
+      });
+    }
+    return resultado;
+  },
+
+  /**
+   * Automatización: busca hojas de ruta operativas con todas sus paradas terminadas y genera
+   * automáticamente la rendición en 'pendiente' para que aparezca directo en la bandeja del supervisor.
+   */
+  async asegurarArqueosAutomaticos() {
+    try {
+      const query = `
+        SELECT h.id::text AS hoja_id, h.transportista_id
+        FROM hoja_de_ruta h
+        LEFT JOIN rendicion_efectivo re ON re.hoja_de_ruta_id = h.id AND re.estado <> 'anulada'
+        WHERE h.estado NOT IN ('cerrada', 'anulada')
+          AND re.id IS NULL
+      `;
+      const res = await db.query(query);
+      for (const row of res.rows) {
+        const pendientes = await visitasPendientes(db, row.hoja_id);
+        if (pendientes.length === 0) {
+          try {
+            const transportistaId = row.transportista_id ? Number(row.transportista_id) : 1;
+            await this.iniciarArqueo(transportistaId, { hojaDeRutaId: row.hoja_id, automatico: true });
+          } catch {
+            // Ignorar si se procesó concurrentemente
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error al asegurar arqueos automáticos:', e);
+    }
+  },
+
+  /**
+   * Opción 1 & Opción B: Inicio de arqueo (automático o manual por el supervisor).
+   * Permite 'forzar: true' para casos de contingencia con paradas pendientes.
+   */
+  async iniciarArqueo(supervisorId: number, body: { hojaDeRutaId: string; declaradoCentavos?: number; forzar?: boolean; automatico?: boolean }) {
+    const hojaId = String(body?.hojaDeRutaId ?? '');
+    if (!/^[1-9]\d*$/.test(hojaId)) throw new RendicionError('Hoja de ruta inválida.', 400);
+
+    return enTransaccion(async (client) => {
+      const hojaRes = await client.query(
+        `SELECT h.id::text AS id, h.estado, h.transportista_id, t.nombre AS transportista_nombre
+         FROM hoja_de_ruta h
+         LEFT JOIN usuario t ON t.id = h.transportista_id
+         WHERE h.id::text = $1`,
+        [hojaId]
+      );
+      const hoja = hojaRes.rows[0];
+      if (!hoja) throw new RendicionError('La hoja de ruta no existe.', 404);
+      if (hoja.estado === 'cerrada') {
+        throw new RendicionError('La hoja de ruta ya está cerrada: no admite una nueva rendición.', 409, { estadoHoja: hoja.estado });
+      }
+      if (hoja.estado === 'anulada') {
+        throw new RendicionError('La hoja de ruta está anulada.', 409, { estadoHoja: hoja.estado });
+      }
+
+      // Verificar que no haya otra rendición activa
+      const existente = await client.query(
+        `SELECT id::text AS id FROM rendicion_efectivo WHERE hoja_de_ruta_id::text = $1 AND estado <> 'anulada'`,
+        [hojaId]
+      );
+      if (existente.rows[0]) {
+        throw new RendicionError('Ya existe un arqueo o rendición activa para esta hoja de ruta.', 409);
+      }
+
+      // Visitas pendientes: se bloquea salvo que se indique explícitamente forzar
+      const pendientes = await visitasPendientes(client, hojaId);
+      if (pendientes.length > 0 && !body?.forzar) {
+        throw new RendicionError(
+          `No se puede iniciar el arqueo: la hoja de ruta tiene ${pendientes.length} visita(s) pendiente(s).`,
+          409,
+          { codigo: 'VISITAS_PENDIENTES', visitasPendientes: pendientes }
+        );
+      }
+
+      const cobros = await cobrosEfectivoDeHoja(client, hojaId);
+      const efectivoCobrado = cobros.reduce((suma, c) => suma + c.importeCentavos, 0);
+      const declarado = body?.declaradoCentavos !== undefined && body?.declaradoCentavos !== null
+        ? Number(body.declaradoCentavos)
+        : efectivoCobrado;
+
+      if (declarado < 0 || !Number.isSafeInteger(declarado)) {
+        throw new RendicionError('El monto declarado no puede ser negativo.', 422, { campo: 'declaradoCentavos' });
+      }
+
+      const clave = crypto.randomUUID();
+      const transportistaId = hoja.transportista_id ? Number(hoja.transportista_id) : supervisorId;
+      const insert = await client.query(
+        `INSERT INTO rendicion_efectivo (hoja_de_ruta_id, transportista_id, declarado_centavos, declarado_en, clave_idempotencia, estado)
+         VALUES ($1, $2, $3, now(), $4, 'pendiente')
+         RETURNING id::text AS id`,
+        [hojaId, transportistaId, declarado, clave]
+      );
+      const id = insert.rows[0].id;
+      await client.query(
+        `UPDATE cobro SET rendicion_id = $1
+         WHERE medio_pago = 'efectivo'
+           AND visita_id IN (SELECT id FROM visita WHERE hoja_de_ruta_id::text = $2)`,
+        [id, hojaId]
+      );
+      await auditar(client, id, 'alta', supervisorId, null, {
+        hojaDeRutaId: hojaId,
+        declaradoCentavos: declarado,
+        iniciadoAutomatico: !!body?.automatico,
+        forzadoConVisitasPendientes: pendientes.length > 0 && !!body?.forzar,
+      });
+      return { rendicion: await buscarRendicion(client, id) };
     });
   },
 };
