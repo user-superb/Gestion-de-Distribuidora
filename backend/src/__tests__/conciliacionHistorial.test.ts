@@ -94,7 +94,7 @@ describe('Historial de Conciliaciones', () => {
       CREATE TABLE cuenta_recepcion (id serial PRIMARY KEY, sucursal_id bigint NOT NULL, alias text NOT NULL, activa boolean NOT NULL DEFAULT true);
       CREATE TABLE movimiento_bancario (id serial PRIMARY KEY, cuenta_id bigint NOT NULL, fecha_hora timestamp NOT NULL DEFAULT now(), ordenante text NOT NULL, ordenante_cuit char(11), concepto text, referencia_externa text, importe_centavos bigint NOT NULL, origen text NOT NULL DEFAULT 'Extracto Bancario', estado text NOT NULL DEFAULT 'imputado');
       CREATE TABLE movimiento_bancario_comprobante (movimiento_id bigint PRIMARY KEY, nombre_archivo text NOT NULL, tipo_mime text NOT NULL, contenido bytea NOT NULL, tamano_bytes bigint NOT NULL, subido_en timestamp DEFAULT now());
-      CREATE TABLE imputacion (id serial PRIMARY KEY, movimiento_bancario_id bigint, remito_id bigint NOT NULL, importe_centavos bigint NOT NULL, imputado_por bigint NOT NULL, imputado_en timestamp DEFAULT now(), anulado boolean NOT NULL DEFAULT false);
+      CREATE TABLE imputacion (id serial PRIMARY KEY, movimiento_bancario_id bigint, remito_id bigint NOT NULL, importe_centavos bigint NOT NULL, imputado_por bigint NOT NULL, imputado_en timestamp DEFAULT now());
     `);
 
     const hash = bcryptjs.hashSync(password, 4);

@@ -1522,7 +1522,7 @@ export const conciliacionService = {
       JOIN cuenta_recepcion cr ON cr.id = mb.cuenta_id
       LEFT JOIN sucursal s ON s.id = cr.sucursal_id
       LEFT JOIN movimiento_bancario_comprobante mbc ON mbc.movimiento_id = mb.id
-      JOIN imputacion imp ON imp.movimiento_bancario_id = mb.id AND imp.anulado = false
+      JOIN imputacion imp ON imp.movimiento_bancario_id = mb.id
       JOIN remito r ON r.id = imp.remito_id
       JOIN comercio c ON c.id = r.comercio_id
       LEFT JOIN usuario u ON u.id = imp.imputado_por
