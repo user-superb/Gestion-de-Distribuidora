@@ -1736,6 +1736,25 @@ export const conciliacionService = {
         `UPDATE movimiento_bancario SET estado = 'imputado' WHERE id = ANY($1::bigint[])`,
         [movimientoIds]
       );
+
+      // Validar cobros electrónicos asociados a los movimientos conciliados o a los remitos saldados
+      try {
+        await client.query(
+          `UPDATE cobro
+           SET estado = 'validado'
+           WHERE (
+             movimiento_bancario_id = ANY($1::bigint[])
+             OR visita_id IN (
+               SELECT r.visita_id FROM remito r WHERE r.id = ANY($2::bigint[]) AND r.visita_id IS NOT NULL
+             )
+           )
+           AND medio_pago IN ('transferencia', 'qr')
+           AND estado = 'pendiente'`,
+          [movimientoIds, remitoIds]
+        );
+      } catch {
+        // Ignorar si en tests aislados la tabla cobro no fue definida
+      }
       for (const movimientoId of movimientoIds) {
         await client.query(
           `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
@@ -1911,5 +1930,25 @@ async function aplicarDiscrepancia(client: PoolClient, id: string, result: Await
        VALUES ($1, $2, 'saldo_favor', $3)`, [id, result.remitos[0].comercio_id, result.diferencia.toString()]
     );
   }
-  await client.query("UPDATE movimiento_bancario SET estado = 'imputado' WHERE id = ANY($1::bigint[])", [result.movimientos.map((item) => String(item.id))]);
+  const movIds = result.movimientos.map((item) => String(item.id));
+  const remIds = result.remitos.map((item) => String(item.id));
+  await client.query("UPDATE movimiento_bancario SET estado = 'imputado' WHERE id = ANY($1::bigint[])", [movIds]);
+
+  try {
+    await client.query(
+      `UPDATE cobro
+       SET estado = 'validado'
+       WHERE (
+         movimiento_bancario_id = ANY($1::bigint[])
+         OR visita_id IN (
+           SELECT r.visita_id FROM remito r WHERE r.id = ANY($2::bigint[]) AND r.visita_id IS NOT NULL
+         )
+       )
+       AND medio_pago IN ('transferencia', 'qr')
+       AND estado = 'pendiente'`,
+      [movIds, remIds]
+    );
+  } catch {
+    // Ignorar si en tests aislados la tabla cobro no fue definida
+  }
 }

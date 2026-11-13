@@ -51,6 +51,6 @@ DELETE FROM imputacion;
 DELETE FROM movimiento_bancario_comprobante;
 DELETE FROM movimiento_bancario
 WHERE referencia_externa LIKE 'DEMO-%'
-   OR origen IN ('Carga Manual', 'QR - Carga Manual');
+   OR origen IN ('Carga Manual', 'QR - Carga Manual', 'Transferencia - Móvil', 'QR - Móvil');
 
 COMMIT;

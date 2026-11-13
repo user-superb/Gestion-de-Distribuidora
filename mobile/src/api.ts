@@ -5,7 +5,7 @@ import type { CobroDto, EntregaDto, HojaDeRuta, ItemEntregaLote, RechazoDto, Ses
 
 // Servidor predeterminado configurado para acceso desde celular / túnel
 export const DEFAULT_API_URL =
-  process.env.EXPO_PUBLIC_API_URL || 'https://p4jhdp6h-3001.brs.devtunnels.ms/api';
+  process.env.EXPO_PUBLIC_API_URL || 'https://h4s91txd-3001.brs.devtunnels.ms/api';
 export let API_URL = DEFAULT_API_URL;
 const CLAVE_STORAGE_API_URL = 'api-url-personalizada';
 const TIMEOUT_MS = 10000;

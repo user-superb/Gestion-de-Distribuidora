@@ -70,15 +70,31 @@ export const ModalAnexarEntrega: React.FC<ModalAnexarEntregaProps> = ({
       setErrorMsg(null);
       setSubmitting(false);
 
-      if (preselectedHojaId && hojasCandidatas.some((h) => h.id === preselectedHojaId)) {
-        setSelectedHojaId(preselectedHojaId);
-      } else if (hojasCandidatas.length > 0) {
-        setSelectedHojaId(hojasCandidatas[0].id);
-      } else {
-        setSelectedHojaId('');
-      }
+      setSelectedHojaId((prev) => {
+        // Si el usuario ya tiene seleccionada una hoja candidata válida, mantenerla
+        if (prev && hojasCandidatas.some((h) => h.id === prev)) {
+          return prev;
+        }
+        // Si viene una preseleccionada válida, usarla inicialmente
+        if (preselectedHojaId && hojasCandidatas.some((h) => h.id === preselectedHojaId)) {
+          return preselectedHojaId;
+        }
+        // Fallback a la primera hoja disponible
+        return hojasCandidatas.length > 0 ? hojasCandidatas[0].id : '';
+      });
+    } else {
+      setSelectedHojaId('');
+      setErrorMsg(null);
+      setSubmitting(false);
     }
-  }, [isOpen, preselectedHojaId, hojasDeRuta, remito]);
+  }, [isOpen, preselectedHojaId, remito?.id]);
+
+  // Si la hoja seleccionada deja de ser candidata válida en segundo plano, ajustar a la primera disponible
+  useEffect(() => {
+    if (isOpen && selectedHojaId && !hojasCandidatas.some((h) => h.id === selectedHojaId)) {
+      setSelectedHojaId(hojasCandidatas[0]?.id || '');
+    }
+  }, [isOpen, selectedHojaId, hojasCandidatas]);
 
   // Actualizar estado de conectividad al cambiar la hoja de ruta seleccionada y consultar en vivo al backend
   useEffect(() => {

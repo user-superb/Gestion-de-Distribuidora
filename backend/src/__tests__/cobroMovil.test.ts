@@ -88,7 +88,7 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
       );
       CREATE TABLE marca (id serial PRIMARY KEY, nombre text NOT NULL UNIQUE);
       CREATE TABLE comercio (
-        id serial PRIMARY KEY, razon_social text NOT NULL, nombre_fantasia text, domicilio text NOT NULL, localidad text,
+        id serial PRIMARY KEY, razon_social text NOT NULL, nombre_fantasia text, cuit char(11), domicilio text NOT NULL, localidad text,
         ventana_desde time, ventana_hasta time, telefono text
       );
       CREATE TABLE hoja_de_ruta (
@@ -108,15 +108,28 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
       CREATE TABLE cobro (
         id serial PRIMARY KEY, visita_id bigint NOT NULL, medio_pago text NOT NULL, importe_centavos bigint NOT NULL,
         registrado_en timestamptz NOT NULL, latitud numeric(9,6), longitud numeric(9,6), registrado_por bigint NOT NULL,
-        referencia_transferencia text, estado text NOT NULL DEFAULT 'pendiente',
+        movimiento_bancario_id bigint, referencia_transferencia text, estado text NOT NULL DEFAULT 'pendiente',
         clave_idempotencia uuid NOT NULL UNIQUE, sincronizado_en timestamptz, creado_en timestamptz DEFAULT now()
+      );
+      CREATE TABLE cuenta_recepcion (
+        id serial PRIMARY KEY, sucursal_id bigint NOT NULL, alias text NOT NULL,
+        banco text, activa boolean NOT NULL DEFAULT true
+      );
+      CREATE TABLE movimiento_bancario (
+        id serial PRIMARY KEY, cuenta_id bigint NOT NULL, fecha_hora timestamptz DEFAULT now(),
+        ordenante text NOT NULL, ordenante_cuit char(11), concepto text, referencia_externa text,
+        importe_centavos bigint NOT NULL, origen text NOT NULL DEFAULT 'Extracto Bancario',
+        estado text NOT NULL DEFAULT 'sin_imputar', creado_en timestamptz DEFAULT now(),
+        UNIQUE (cuenta_id, referencia_externa)
       );
       CREATE TABLE auditoria (
         id serial PRIMARY KEY, entidad text NOT NULL, entidad_id bigint NOT NULL, accion text NOT NULL,
-        usuario_id bigint NOT NULL, ocurrido_en timestamptz DEFAULT now(), valores_antes jsonb, valores_despues jsonb
+        usuario_id bigint NOT NULL, ocurrido_en timestamptz DEFAULT now(), valores_antes jsonb, valores_despues jsonb,
+        observacion text
       );
 
       INSERT INTO sucursal (id, nombre) VALUES (1, 'Sucursal Central - La Plata');
+      INSERT INTO cuenta_recepcion (id, sucursal_id, alias, banco, activa) VALUES (1, 1, 'tutucas.central', 'Banco Provincia', true);
       INSERT INTO usuario (id, usuario, nombre, password_hash, rol, es_transportista) VALUES
         (1, 'admin', 'Administrativo', '${hash}', 'Administrativo', false),
         (2, 'chofer', 'Carlos Repartidor', '${hash}', 'Transportista', true),
@@ -232,6 +245,13 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
       assert.equal(await contar('SELECT count(*) AS n FROM visita WHERE id = 2 AND cobrada_en IS NOT NULL'), 1);
       // El remito devuelto no pasa a entregado.
       assert.equal((await db.query('SELECT estado FROM remito WHERE id = 4')).rows[0].estado, 'devuelto');
+
+      // Demo conciliación: genera movimiento bancario automático
+      const movs = (await db.query('SELECT origen, importe_centavos, estado FROM movimiento_bancario')).rows;
+      assert.equal(movs.length, 1);
+      assert.equal(movs[0].origen, 'QR - Móvil');
+      assert.equal(String(movs[0].importe_centavos), '3000000');
+      assert.equal(movs[0].estado, 'sin_imputar');
     });
   });
 
@@ -239,6 +259,12 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
     it('ESCENARIO 1: con la referencia del banco se cierra el cobro', async () => {
       await cobroService.registrarCobro(CHOFER, '1', liquidacion([pago('transferencia', 5750050, ' op-998877 ')]));
       assert.equal((await db.query('SELECT referencia_transferencia FROM cobro')).rows[0].referencia_transferencia, 'OP-998877');
+
+      // Demo conciliación: genera movimiento bancario automático con referencia
+      const movs = (await db.query("SELECT origen, referencia_externa, importe_centavos FROM movimiento_bancario WHERE origen = 'Transferencia - Móvil'")).rows;
+      assert.equal(movs.length, 1);
+      assert.equal(movs[0].referencia_externa, 'OP-998877');
+      assert.equal(String(movs[0].importe_centavos), '5750050');
     });
 
     it('ESCENARIO 2: bloquea una referencia ya usada por el mismo comercio en el mismo día', async () => {

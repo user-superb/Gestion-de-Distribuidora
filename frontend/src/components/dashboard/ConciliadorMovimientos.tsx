@@ -790,8 +790,10 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
                               {item.origen && item.origen !== 'Extracto Bancario' && (
                                 <span
                                   className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                                    item.origen === 'QR - Carga Manual'
+                                    item.origen.includes('QR')
                                       ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                                      : item.origen.includes('Móvil') || item.origen.includes('Movil')
+                                      ? 'bg-teal-100 text-teal-800 border border-teal-200'
                                       : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
                                   }`}
                                 >

@@ -76,6 +76,26 @@ describe('HU Gerencia: Composición de Recaudación por Medio de Pago', () => {
       CREATE TABLE comercio (
         id serial PRIMARY KEY, razon_social text NOT NULL, domicilio text NOT NULL
       );
+      CREATE TABLE marca (
+        id serial PRIMARY KEY, nombre text NOT NULL
+      );
+      CREATE TABLE remito (
+        id serial PRIMARY KEY, marca_id bigint, comercio_id bigint, numero text,
+        importe_centavos bigint NOT NULL, estado text NOT NULL DEFAULT 'entregado',
+        visita_id bigint, sucursal_id bigint NOT NULL DEFAULT 1
+      );
+      CREATE TABLE cuenta_recepcion (
+        id serial PRIMARY KEY, sucursal_id bigint NOT NULL, alias text NOT NULL
+      );
+      CREATE TABLE movimiento_bancario (
+        id serial PRIMARY KEY, cuenta_id bigint NOT NULL, fecha_hora timestamptz DEFAULT now(),
+        ordenante text NOT NULL, referencia_externa text, importe_centavos bigint NOT NULL,
+        origen text NOT NULL DEFAULT 'Extracto Bancario', estado text NOT NULL DEFAULT 'imputado'
+      );
+      CREATE TABLE imputacion (
+        id serial PRIMARY KEY, movimiento_bancario_id bigint NOT NULL, remito_id bigint NOT NULL,
+        importe_centavos bigint NOT NULL, imputado_por bigint NOT NULL, imputado_en timestamptz DEFAULT now()
+      );
       CREATE TABLE hoja_de_ruta (
         id serial PRIMARY KEY, sucursal_id bigint NOT NULL, transportista_id bigint NOT NULL,
         fecha_reparto date NOT NULL, estado text NOT NULL DEFAULT 'en_curso'
@@ -87,7 +107,8 @@ describe('HU Gerencia: Composición de Recaudación por Medio de Pago', () => {
       CREATE TABLE cobro (
         id serial PRIMARY KEY, visita_id bigint NOT NULL, medio_pago text NOT NULL, importe_centavos bigint NOT NULL,
         registrado_en timestamptz NOT NULL, registrado_por bigint NOT NULL, estado text NOT NULL DEFAULT 'pendiente',
-        rendicion_id bigint, clave_idempotencia uuid NOT NULL UNIQUE, creado_en timestamptz DEFAULT now()
+        rendicion_id bigint, clave_idempotencia uuid NOT NULL UNIQUE, creado_en timestamptz DEFAULT now(),
+        movimiento_bancario_id bigint
       );
 
       INSERT INTO sucursal (id, nombre) VALUES
@@ -234,6 +255,26 @@ describe('HU Gerencia: Composición de Recaudación por Medio de Pago', () => {
     const qrSuc2 = resultadoSucursal2.desglose.find((d) => d.medioPago === 'qr');
     assert.equal(qrSuc2?.totalCentavos, 400000);
     assert.equal(qrSuc2?.porcentaje, 100);
+  });
+
+  it('incluye imputaciones bancarias confirmadas en la composición de recaudación', async () => {
+    await db.query(`
+      INSERT INTO marca (id, nombre) VALUES (1, 'Marca A');
+      INSERT INTO remito (id, marca_id, comercio_id, numero, importe_centavos, estado, visita_id, sucursal_id)
+      VALUES (1, 1, 1, 'R-01', 500000, 'entregado', 1, 1);
+      INSERT INTO cuenta_recepcion (id, sucursal_id, alias) VALUES (1, 1, 'cta.demo');
+      INSERT INTO movimiento_bancario (id, cuenta_id, ordenante, referencia_externa, importe_centavos, origen, estado)
+      VALUES (1, 1, 'Mayorista El Sol', 'REF-99', 500000, 'Extracto Bancario', 'imputado');
+      INSERT INTO imputacion (movimiento_bancario_id, remito_id, importe_centavos, imputado_por)
+      VALUES (1, 1, 500000, 1);
+    `);
+
+    const resultado = await tableroService.obtenerComposicionRecaudacion();
+    assert.equal(resultado.totalRecaudadoCentavos, 500000);
+    const transf = resultado.desglose.find((d) => d.medioPago === 'transferencia');
+    assert.equal(transf?.totalCentavos, 500000);
+    assert.equal(transf?.porcentaje, 100);
+    assert.equal(transf?.cantidadPagos, 1);
   });
 
   describe('Control de Accesos y API REST (/api/tablero/recaudacion)', () => {

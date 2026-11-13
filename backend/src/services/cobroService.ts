@@ -243,6 +243,122 @@ function respuestaCobros(visitaId: string, rows: any[], duplicado: boolean) {
   };
 }
 
+/**
+ * Registra automáticamente el ingreso en movimiento_bancario para transferencias y cobros QR
+ * realizados en la app móvil (vinculando la cuenta de recepción de la sucursal para la demo de conciliación).
+ */
+async function registrarMovimientoBancarioParaCobro(
+  client: PoolClient,
+  visita: { id: string; comercio_id: string; sucursal_id?: string },
+  pago: PagoDto,
+  cobroId: string,
+  registradoEn: string,
+  transportistaId: number
+) {
+  try {
+    // 1. Obtener datos del comercio para el ordenante
+    const comRes = await client.query(
+      `SELECT * FROM comercio WHERE id::text = $1`,
+      [visita.comercio_id]
+    );
+    const com = comRes.rows[0];
+    const ordenante = com?.razon_social || com?.nombre_fantasia || 'Comercio';
+    const cuitLimpio = com?.cuit ? String(com.cuit).replace(/\D/g, '') : null;
+    const ordenanteCuit = cuitLimpio && cuitLimpio.length === 11 ? cuitLimpio : null;
+
+    // 2. Buscar cuenta de recepción adecuada (priorizando la sucursal de la hoja de ruta)
+    let cuentaId: string | null = null;
+    if (visita.sucursal_id) {
+      const ctaSucRes = await client.query(
+        `SELECT id::text AS id FROM cuenta_recepcion WHERE sucursal_id::text = $1 AND activa = true ORDER BY id LIMIT 1`,
+        [visita.sucursal_id]
+      );
+      if (ctaSucRes.rows.length > 0) cuentaId = ctaSucRes.rows[0].id;
+    }
+    if (!cuentaId) {
+      const ctaRes = await client.query(
+        `SELECT id::text AS id FROM cuenta_recepcion WHERE activa = true ORDER BY id LIMIT 1`
+      );
+      if (ctaRes.rows.length > 0) cuentaId = ctaRes.rows[0].id;
+    }
+    if (!cuentaId) {
+      const ctaCualquiera = await client.query(
+        `SELECT id::text AS id FROM cuenta_recepcion ORDER BY id LIMIT 1`
+      );
+      if (ctaCualquiera.rows.length > 0) cuentaId = ctaCualquiera.rows[0].id;
+    }
+    if (!cuentaId) return;
+
+    // 3. Determinar referencia y origen
+    const esQr = pago.medioPago === 'qr';
+    let referencia = pago.referenciaTransferencia ? String(pago.referenciaTransferencia).trim() : '';
+    if (!referencia) {
+      referencia = esQr
+        ? `MP-QR-${pago.claveIdempotencia.slice(0, 8).toUpperCase()}`
+        : `TR-${pago.claveIdempotencia.slice(0, 8).toUpperCase()}`;
+    }
+
+    // Asegurar unicidad de referencia dentro de la cuenta
+    const dupRes = await client.query(
+      `SELECT id::text AS id FROM movimiento_bancario WHERE cuenta_id::text = $1 AND referencia_externa = $2`,
+      [cuentaId, referencia]
+    );
+    if (dupRes.rows.length > 0) {
+      referencia = `${referencia}-${pago.claveIdempotencia.slice(0, 4).toUpperCase()}`;
+    }
+
+    const concepto = esQr ? 'Cobro Móvil - QR' : 'Cobro Móvil - Transferencia';
+    const origen = esQr ? 'QR - Móvil' : 'Transferencia - Móvil';
+
+    // 4. Insertar movimiento bancario en estado 'sin_imputar'
+    const movRes = await client.query(
+      `INSERT INTO movimiento_bancario
+         (cuenta_id, fecha_hora, ordenante, ordenante_cuit, concepto, referencia_externa, importe_centavos, origen, estado)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'sin_imputar')
+       RETURNING id::text AS id`,
+      [
+        cuentaId,
+        registradoEn,
+        ordenante,
+        ordenanteCuit,
+        concepto,
+        referencia,
+        pago.importeCentavos,
+        origen,
+      ]
+    );
+
+    const movId = movRes.rows[0]?.id;
+    if (movId) {
+      await client.query(
+        `UPDATE cobro SET movimiento_bancario_id = $1 WHERE id::text = $2`,
+        [movId, cobroId]
+      );
+
+      await client.query(
+        `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
+         VALUES ('movimiento_bancario', $1, 'alta', $2, $3::jsonb, $4)`,
+        [
+          movId,
+          transportistaId,
+          JSON.stringify({
+            cobroId,
+            visitaId: visita.id,
+            medioPago: pago.medioPago,
+            cuentaId,
+            referencia,
+            importeCentavos: pago.importeCentavos,
+            origen,
+          }),
+          `Acreditación automática por cobro móvil (${pago.medioPago.toUpperCase()}) para demo`,
+        ]
+      );
+    }
+  } catch (err: any) {
+    console.warn('⚠️ No se pudo generar movimiento bancario automático para el cobro móvil:', err.message);
+  }
+}
+
 export const cobroService = {
   /** Hoja de ruta publicada del transportista para una fecha, con todo lo necesario para trabajar sin conexión. */
   async getHojaDelDia(transportistaId: number, fecha: string) {
@@ -328,7 +444,7 @@ export const cobroService = {
       return await enTransaccion(async (client) => {
         const visitaRes = await client.query(
           `SELECT v.id::text AS id, v.cobrada_en IS NOT NULL AS cobrada, v.comercio_id::text AS comercio_id,
-                  h.transportista_id::text AS transportista_id, h.estado AS hoja_estado
+                  h.transportista_id::text AS transportista_id, h.estado AS hoja_estado, h.sucursal_id::text AS sucursal_id
            FROM visita v
            JOIN hoja_de_ruta h ON h.id = v.hoja_de_ruta_id
            WHERE v.id::text = $1`,
@@ -411,6 +527,17 @@ export const cobroService = {
              VALUES ('cobro', $1, 'alta', $2, $3)`,
             [cobro.id, transportistaId, JSON.stringify({ visitaId, ...pago })]
           );
+
+          if (pago.medioPago === 'transferencia' || pago.medioPago === 'qr') {
+            await registrarMovimientoBancarioParaCobro(
+              client,
+              visita,
+              pago,
+              cobro.id,
+              dto.registradoEn,
+              transportistaId
+            );
+          }
         }
 
         // D5: la visita queda cobrada. El estado de la visita y de sus remitos lo maneja la entrega (HU #22).

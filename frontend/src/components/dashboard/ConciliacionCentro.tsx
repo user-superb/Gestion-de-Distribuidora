@@ -547,6 +547,7 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
           {items.map((mov) => {
             const origenEsManual = mov.origen.includes('Manual');
             const origenEsQr = mov.origen.includes('QR');
+            const origenEsMovil = mov.origen.includes('Móvil') || mov.origen.includes('Movil');
 
             return (
               <article
@@ -565,6 +566,8 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
                         className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
                           origenEsQr
                             ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                            : origenEsMovil
+                            ? 'bg-teal-100 text-teal-800 border border-teal-200'
                             : origenEsManual
                             ? 'bg-blue-100 text-blue-800 border border-blue-200'
                             : 'bg-slate-100 text-slate-700 border border-slate-200'
