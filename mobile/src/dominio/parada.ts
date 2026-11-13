@@ -296,11 +296,14 @@ export function verificarParadaActiva(
       : [paradaId];
 
   const comercioId = typeof paradaOId === 'object' ? paradaOId.comercio?.id : undefined;
+  const paradaOrden = typeof paradaOId === 'object' ? paradaOId.orden : undefined;
 
   // Buscar visitas que coincidan con la parada
   const visitasCoincidentes = hoja.visitas.filter((v) => {
     if (idsVisitasParada.includes(v.id)) return true;
-    if (comercioId && v.comercio?.id === comercioId) return true;
+    if (comercioId && v.comercio?.id === comercioId && paradaOrden !== undefined) {
+      return v.orden === paradaOrden;
+    }
     return false;
   });
 
@@ -321,9 +324,13 @@ export function verificarParadaActiva(
 
   // Consolidar para obtener la versión actualizada de la parada
   const paradasConsolidadas = consolidarParadas(hoja.visitas, cola);
-  const paradaActualizada = paradasConsolidadas.find(
-    (p) => p.id === paradaId || (comercioId && p.comercio?.id === comercioId)
-  );
+  const paradaActualizada =
+    paradasConsolidadas.find(
+      (p) => p.id === paradaId || p.visitas.some((v) => idsVisitasParada.includes(v.id))
+    ) ||
+    (comercioId && paradaOrden !== undefined
+      ? paradasConsolidadas.find((p) => p.comercio?.id === comercioId && p.orden === paradaOrden)
+      : undefined);
 
   if (!paradaActualizada) {
     return {

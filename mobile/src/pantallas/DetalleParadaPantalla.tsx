@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Aviso } from '../componentes/Aviso';
 import { formatearPesos } from '../dominio/dinero';
-import type { ColaPorClave } from '../dominio/estadoVisita';
+import { esRemitoResuelto, type ColaPorClave } from '../dominio/estadoVisita';
 import { agruparRemitosPorMarca } from '../dominio/parada';
 import { colores, estilos } from '../estilos';
 import type { EstadoOperativoParada, ParadaConsolidada, Visita } from '../tipos';
@@ -206,7 +206,12 @@ export function DetalleParadaPantalla({
       <View style={{ marginTop: 12 }}>
         <Pressable
           style={estilos.boton}
-          onPress={() => onIniciarEntrega(parada.visitaPrincipal)}
+          onPress={() => {
+            const visitaParaGestionar =
+              parada.visitas.find((v) => (v.remitos || []).some((r) => !esRemitoResuelto(r, cola))) ||
+              parada.visitaPrincipal;
+            onIniciarEntrega(visitaParaGestionar);
+          }}
           accessibilityRole="button"
           accessibilityLabel="Iniciar entrega de la parada"
         >

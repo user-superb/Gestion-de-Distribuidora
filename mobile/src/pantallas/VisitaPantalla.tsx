@@ -112,6 +112,7 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
       }
       if (enLinea) await colaOperaciones.sincronizar();
       await onCambio();
+      setDesmarcados(new Set());
       setAvisoEntrega(
         `${seleccionados.length} remito(s) entregado(s).` + (restantes.length ? ` Quedan ${restantes.length} sin confirmar.` : '')
       );

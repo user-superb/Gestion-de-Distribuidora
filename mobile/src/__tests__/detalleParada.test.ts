@@ -307,5 +307,44 @@ describe('HU: Despliegue de Detalle de Parada y Clasificación por Marca', () =>
       assert.equal(resultado.paradaActualizada.totalBultos, 3);
       assert.deepEqual(resultado.paradaActualizada.marcas, ['Bagley']);
     });
+
+    it('identifica correctamente la parada anexada de un mismo comercio cuando la parada anterior ya fue entregada', () => {
+      const comercioId = 'com-central-1';
+      // Parada 1: remito ya entregado
+      const r1 = crearRemito('r1', '0001-0001', 'Arcor', 50000, 'entregado', 2);
+      const v1 = crearVisita('v1', 1, 'Kiosco Central', [r1], 'entregada', comercioId);
+      v1.cobrada = true;
+
+      // Parada 2: remito anexado posteriormente a la misma ruta y para el mismo comercio
+      const r2 = crearRemito('r2', '0001-0002', 'Bagley', 30000, 'en_ruta', 1);
+      const v2 = crearVisita('v2', 2, 'Kiosco Central', [r2], 'en_ruta', comercioId);
+
+      const hojaServidor: HojaDeRuta = {
+        id: 'h1',
+        fechaReparto: '2026-11-13',
+        patente: 'AA123BB',
+        estado: 'en_curso',
+        sucursal: 'Sur',
+        visitas: [v1, v2],
+      };
+
+      const paradas = consolidarParadas(hojaServidor.visitas, colaVacia);
+      assert.equal(paradas.length, 2);
+      assert.equal(paradas[0].orden, 1);
+      assert.equal(paradas[0].estadoOperativo, 'Entregado');
+      assert.equal(paradas[1].orden, 2);
+      assert.equal(paradas[1].estadoOperativo, 'Pendiente');
+
+      // Chofer pulsa la parada anexada (paradas[1])
+      const resultado = verificarParadaActiva(paradas[1], hojaServidor, colaVacia);
+      assert.equal(resultado.activa, true);
+      assert.ok(resultado.paradaActualizada);
+      // Debe corresponder a la parada 2 anexada y NO a la parada 1 ya entregada
+      assert.equal(resultado.paradaActualizada.orden, 2);
+      assert.equal(resultado.paradaActualizada.documentos.length, 1);
+      assert.equal(resultado.paradaActualizada.documentos[0].id, 'r2');
+      assert.equal(resultado.paradaActualizada.documentos[0].numero, '0001-0002');
+      assert.equal(resultado.paradaActualizada.documentos[0].estadoOperativo, 'Pendiente');
+    });
   });
 });
