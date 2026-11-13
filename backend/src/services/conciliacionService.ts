@@ -1487,6 +1487,127 @@ export const conciliacionService = {
     return { horasUmbral: HORAS_PARA_HUERFANO, movimientos };
   },
 
+  async getHistorialConciliaciones(
+    filters: { sucursalId?: string; cuentaId?: string; desde?: string; hasta?: string; busqueda?: string } = {},
+    userSession?: { id?: string; role?: string }
+  ) {
+    const params: unknown[] = [];
+    let sucursalFiltro = '';
+    const rol = userSession?.role;
+    const esGlobal = esRolGlobal(rol);
+
+    if (!esGlobal && userSession?.id) {
+      const usuarioId = Number(String(userSession.id).replace(/^usr_/, ''));
+      if (Number.isSafeInteger(usuarioId) && usuarioId > 0) {
+        params.push(usuarioId);
+        sucursalFiltro = `AND cr.sucursal_id IN (SELECT sucursal_id FROM usuario_sucursal WHERE usuario_id = $${params.length})`;
+      }
+    }
+
+    const query = `
+      SELECT mb.id::text AS id, mb.fecha_hora, mb.ordenante, mb.ordenante_cuit,
+             mb.concepto, mb.referencia_externa,
+             COALESCE(mb.origen, 'Extracto Bancario') AS origen,
+             mb.importe_centavos::text AS importe_centavos,
+             mb.estado, mb.cuenta_id::text AS cuenta_id, cr.alias AS cuenta,
+             cr.sucursal_id::text AS sucursal_id, s.nombre AS sucursal,
+             mbc.nombre_archivo AS comprobante_nombre,
+             imp.id::text AS imputacion_id, imp.importe_centavos::text AS imputado_centavos,
+             imp.imputado_en, imp.imputado_por::text AS imputado_por,
+             COALESCE(u.nombre, u.email, 'Administrativo') AS imputador_nombre,
+             r.id::text AS remito_id, r.numero AS remito_numero,
+             COALESCE(c.nombre_fantasia, c.razon_social) AS comercio,
+             c.cuit AS comercio_cuit
+      FROM movimiento_bancario mb
+      JOIN cuenta_recepcion cr ON cr.id = mb.cuenta_id
+      LEFT JOIN sucursal s ON s.id = cr.sucursal_id
+      LEFT JOIN movimiento_bancario_comprobante mbc ON mbc.movimiento_id = mb.id
+      JOIN imputacion imp ON imp.movimiento_bancario_id = mb.id AND imp.anulado = false
+      JOIN remito r ON r.id = imp.remito_id
+      JOIN comercio c ON c.id = r.comercio_id
+      LEFT JOIN usuario u ON u.id = imp.imputado_por
+      WHERE mb.estado IN ('imputado', 'parcial')
+        ${sucursalFiltro}
+      ORDER BY imp.imputado_en DESC, mb.fecha_hora DESC, mb.id DESC
+    `;
+
+    const result = await db.query(query, params);
+
+    const mapa = new Map<string, any>();
+    for (const row of result.rows) {
+      if (!mapa.has(row.id)) {
+        mapa.set(row.id, {
+          id: row.id,
+          fecha_hora: row.fecha_hora,
+          ordenante: row.ordenante,
+          ordenante_cuit: row.ordenante_cuit,
+          concepto: row.concepto,
+          referencia_externa: row.referencia_externa,
+          origen: row.origen,
+          importe_centavos: row.importe_centavos,
+          estado: row.estado,
+          cuenta_id: row.cuenta_id,
+          cuenta: row.cuenta,
+          sucursal_id: row.sucursal_id,
+          sucursal: row.sucursal,
+          comprobante_nombre: row.comprobante_nombre,
+          imputado_en: row.imputado_en,
+          imputaciones: [],
+        });
+      }
+      const mov = mapa.get(row.id)!;
+      mov.imputaciones.push({
+        id: row.imputacion_id,
+        remitoId: row.remito_id,
+        remitoNumero: row.remito_numero,
+        comercio: row.comercio,
+        comercioCuit: row.comercio_cuit,
+        importeCentavos: row.imputado_centavos,
+        imputadoEn: row.imputado_en,
+        imputadoPor: row.imputador_nombre,
+      });
+      if (new Date(row.imputado_en) > new Date(mov.imputado_en)) {
+        mov.imputado_en = row.imputado_en;
+      }
+    }
+
+    let items = Array.from(mapa.values());
+
+    if (filters.sucursalId) {
+      items = items.filter((m) => m.sucursal_id === filters.sucursalId);
+    }
+    if (filters.cuentaId && filters.cuentaId !== 'todas') {
+      items = items.filter((m) => m.cuenta_id === filters.cuentaId);
+    }
+    if (filters.desde) {
+      items = items.filter((m) => {
+        const fecha = new Date(m.imputado_en || m.fecha_hora).toISOString().slice(0, 10);
+        return fecha >= filters.desde!;
+      });
+    }
+    if (filters.hasta) {
+      items = items.filter((m) => {
+        const fecha = new Date(m.imputado_en || m.fecha_hora).toISOString().slice(0, 10);
+        return fecha <= filters.hasta!;
+      });
+    }
+    if (filters.busqueda && filters.busqueda.trim()) {
+      const q = filters.busqueda.trim().toLowerCase();
+      items = items.filter((m) =>
+        (m.ordenante && m.ordenante.toLowerCase().includes(q)) ||
+        (m.concepto && m.concepto.toLowerCase().includes(q)) ||
+        (m.referencia_externa && m.referencia_externa.toLowerCase().includes(q)) ||
+        (m.cuenta && m.cuenta.toLowerCase().includes(q)) ||
+        m.imputaciones.some((imp: any) =>
+          imp.remitoNumero.toLowerCase().includes(q) ||
+          imp.comercio.toLowerCase().includes(q)
+        )
+      );
+    }
+
+    return items;
+  },
+
   async getRemitosPendientes(userSession?: { id?: string; role?: string }) {
     const rol = userSession?.role;
     const esGlobal = esRolGlobal(rol);

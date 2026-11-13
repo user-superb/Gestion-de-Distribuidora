@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Landmark, GitCompareArrows, ClockAlert, RefreshCw } from 'lucide-react';
+import { Landmark, GitCompareArrows, ClockAlert, RefreshCw, History, Download, Search, CheckCircle2 } from 'lucide-react';
 import { UserSession } from '../../types/auth';
 import { API_BASE } from '../../config/api';
 import { ConciliadorMovimientos } from './ConciliadorMovimientos';
@@ -31,7 +31,37 @@ interface MovimientoHuerfano {
   antiguedad_horas: number;
 }
 
-type Vista = 'conciliar' | 'sugerencias' | 'huerfanos';
+interface ImputacionHistorial {
+  id: string;
+  remitoId: string;
+  remitoNumero: string;
+  comercio: string;
+  comercioCuit: string;
+  importeCentavos: string;
+  imputadoEn: string;
+  imputadoPor: string;
+}
+
+interface MovimientoConciliado {
+  id: string;
+  fecha_hora: string;
+  ordenante: string | null;
+  ordenante_cuit: string | null;
+  concepto: string | null;
+  referencia_externa: string | null;
+  origen: string;
+  importe_centavos: string;
+  estado: string;
+  cuenta_id: string;
+  cuenta: string;
+  sucursal_id: string;
+  sucursal: string;
+  comprobante_nombre: string | null;
+  imputado_en: string;
+  imputaciones: ImputacionHistorial[];
+}
+
+type Vista = 'conciliar' | 'sugerencias' | 'huerfanos' | 'historial';
 
 function formatoARS(centavos: string): string {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(Number(centavos) / 100);
@@ -112,6 +142,21 @@ export const ConciliacionCentro: React.FC<{ session: UserSession }> = ({ session
             <ClockAlert className="w-4 h-4 text-amber-600" />
             <span>Movimientos huérfanos</span>
           </button>
+
+          <button
+            role="tab"
+            aria-selected={vista === 'historial'}
+            type="button"
+            onClick={() => setVista('historial')}
+            className={`px-3 py-1.5 font-bold rounded-md transition-all flex items-center gap-2 cursor-pointer ${
+              vista === 'historial'
+                ? 'bg-white text-marca-azul shadow-xs border border-slate-200/80'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <History className="w-4 h-4 text-purple-600" />
+            <span>Historial de conciliaciones</span>
+          </button>
         </div>
 
         {vista === 'conciliar' ? (
@@ -152,6 +197,7 @@ export const ConciliacionCentro: React.FC<{ session: UserSession }> = ({ session
         />
       )}
       {vista === 'huerfanos' && <BandejaMovimientosHuerfanos session={session} />}
+      {vista === 'historial' && <HistorialConciliaciones session={session} />}
     </section>
   );
 };
@@ -319,6 +365,285 @@ const BandejaMovimientosHuerfanos: React.FC<{ session: UserSession }> = ({ sessi
             <thead className="bg-slate-50 uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Fecha</th><th className="px-3 py-2">Ordenante</th><th className="px-3 py-2">Sucursal / cuenta</th><th className="px-3 py-2 text-right">Importe disponible</th><th className="px-3 py-2 text-right">Antigüedad</th></tr></thead>
             <tbody className="divide-y divide-slate-100">{visibles.map((item) => <tr key={item.id}><td className="px-3 py-2 text-slate-600">{new Date(item.fecha_hora).toLocaleString('es-AR')}</td><td className="px-3 py-2 font-medium text-slate-800">{item.ordenante || 'Ordenante no informado'}</td><td className="px-3 py-2 text-slate-600">{item.sucursal} · {item.cuenta}</td><td className="px-3 py-2 text-right font-semibold text-slate-900">{formatoARS(item.importe_centavos)}</td><td className="px-3 py-2 text-right text-amber-800">{item.antiguedad_horas} h</td></tr>)}</tbody>
           </table>
+        </div>
+      )}
+    </section>
+  );
+};
+
+const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }) => {
+  const [items, setItems] = useState<MovimientoConciliado[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [sucursal, setSucursal] = useState('');
+  const [cuenta, setCuenta] = useState('');
+  const [desde, setDesde] = useState('');
+  const [hasta, setHasta] = useState('');
+  const [busqueda, setBusqueda] = useState('');
+  const [descargandoId, setDescargandoId] = useState<string | null>(null);
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const params = new URLSearchParams();
+      if (sucursal) params.set('sucursalId', sucursal);
+      if (cuenta && cuenta !== 'todas') params.set('cuentaId', cuenta);
+      if (desde) params.set('desde', desde);
+      if (hasta) params.set('hasta', hasta);
+      if (busqueda.trim()) params.set('busqueda', busqueda.trim());
+
+      const url = `${API_BASE}/conciliacion/historial?${params.toString()}`;
+      const response = await fetch(url, { headers: { Authorization: `Bearer ${session.token}` } });
+      const data = await response.json();
+      if (!response.ok) throw new Error(mensajeError(data, 'No se pudo cargar el historial de conciliaciones.'));
+      setItems(Array.isArray(data) ? data : []);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo cargar el historial de conciliaciones.');
+    } finally {
+      setLoading(false);
+    }
+  }, [session.token, sucursal, cuenta, desde, hasta, busqueda]);
+
+  useEffect(() => {
+    void cargar();
+  }, [cargar]);
+
+  const descargarComprobante = async (mov: MovimientoConciliado) => {
+    setDescargandoId(mov.id);
+    try {
+      const response = await fetch(`${API_BASE}/conciliacion/movimientos/${mov.id}/comprobante`, {
+        headers: { Authorization: `Bearer ${session.token}` },
+      });
+      if (!response.ok) throw new Error('No se pudo descargar el comprobante.');
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = mov.comprobante_nombre || `comprobante-mov-${mov.id}`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err: any) {
+      alert(err.message || 'Error al descargar comprobante.');
+    } finally {
+      setDescargandoId(null);
+    }
+  };
+
+  const sucursales = useMemo(
+    () => [...new Map(items.map((item) => [item.sucursal_id, item.sucursal])).entries()],
+    [items]
+  );
+  const cuentas = useMemo(
+    () => [...new Map(items.map((item) => [item.cuenta_id, item.cuenta])).entries()],
+    [items]
+  );
+
+  return (
+    <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 sm:p-5 shadow-xs">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        <div className="flex items-center gap-2">
+          <History className="w-5 h-5 text-purple-600 shrink-0" />
+          <div>
+            <h2 className="text-base font-bold text-slate-900">Historial de conciliaciones</h2>
+            <p className="text-xs text-slate-500">
+              Movimientos bancarios imputados y remitos saldados.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void cargar()}
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white hover:bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 disabled:opacity-50 cursor-pointer shadow-2xs"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          <span>Actualizar</span>
+        </button>
+      </header>
+
+      {/* Barra de Filtros */}
+      <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-6 bg-slate-50 p-3 rounded-md border border-slate-200/80 text-xs">
+        <div className="lg:col-span-2">
+          <label className="text-slate-600 font-medium block mb-1">Buscar</label>
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+            <input
+              type="text"
+              placeholder="Comercio, remito, ordenante o referencia..."
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              className="w-full pl-8 pr-2.5 py-1.5 border border-slate-300 rounded bg-white text-slate-800 placeholder:text-slate-400"
+            />
+          </div>
+        </div>
+        <div>
+          <label className="text-slate-600 font-medium block mb-1">Sucursal</label>
+          <select
+            value={sucursal}
+            onChange={(e) => setSucursal(e.target.value)}
+            className="w-full border border-slate-300 rounded bg-white px-2 py-1.5 text-slate-800"
+          >
+            <option value="">Todas</option>
+            {sucursales.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-slate-600 font-medium block mb-1">Cuenta</label>
+          <select
+            value={cuenta}
+            onChange={(e) => setCuenta(e.target.value)}
+            className="w-full border border-slate-300 rounded bg-white px-2 py-1.5 text-slate-800"
+          >
+            <option value="">Todas</option>
+            {cuentas.map(([id, alias]) => (
+              <option key={id} value={id}>
+                {alias}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-slate-600 font-medium block mb-1">Desde</label>
+          <input
+            type="date"
+            value={desde}
+            onChange={(e) => setDesde(e.target.value)}
+            className="w-full border border-slate-300 rounded bg-white px-2 py-1.5 text-slate-800"
+          />
+        </div>
+        <div>
+          <label className="text-slate-600 font-medium block mb-1">Hasta</label>
+          <input
+            type="date"
+            value={hasta}
+            onChange={(e) => setHasta(e.target.value)}
+            className="w-full border border-slate-300 rounded bg-white px-2 py-1.5 text-slate-800"
+          />
+        </div>
+      </div>
+
+      {error && (
+        <p role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+          {error}
+        </p>
+      )}
+
+      {loading ? (
+        <p className="py-8 text-center text-xs text-slate-500">Cargando historial de conciliaciones…</p>
+      ) : items.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-300 p-8 text-center">
+          <p className="text-sm font-semibold text-slate-700">No se encontraron movimientos conciliados</p>
+          <p className="text-xs text-slate-500 mt-1">
+            Los movimientos imputados desde las pestañas "Conciliar" o "Sugerencias" se listarán aquí.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {items.map((mov) => {
+            const origenEsManual = mov.origen.includes('Manual');
+            const origenEsQr = mov.origen.includes('QR');
+
+            return (
+              <article
+                key={mov.id}
+                className="border border-slate-200 rounded-lg p-3.5 sm:p-4 hover:border-slate-300 transition-all bg-white shadow-2xs space-y-3"
+              >
+                {/* Cabecera del Movimiento */}
+                <div className="flex flex-wrap items-start justify-between gap-2.5 pb-2.5 border-b border-slate-100">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        <span>Imputado</span>
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                          origenEsQr
+                            ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                            : origenEsManual
+                            ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                            : 'bg-slate-100 text-slate-700 border border-slate-200'
+                        }`}
+                      >
+                        {mov.origen}
+                      </span>
+                      <span className="text-xs font-bold text-slate-800">
+                        {mov.ordenante || 'Ordenante no informado'}
+                      </span>
+                      {mov.ordenante_cuit && (
+                        <span className="text-[11px] text-slate-500">CUIT: {mov.ordenante_cuit}</span>
+                      )}
+                    </div>
+
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
+                      <span>Cuenta: <strong className="text-slate-700">{mov.cuenta}</strong> ({mov.sucursal})</span>
+                      {mov.referencia_externa && (
+                        <span>Ref / Op: <strong className="font-mono text-slate-700">{mov.referencia_externa}</strong></span>
+                      )}
+                      <span>Acreditado: {new Date(mov.fecha_hora).toLocaleDateString('es-AR')}</span>
+                      <span>Imputado: {new Date(mov.imputado_en).toLocaleString('es-AR')}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col items-end gap-1.5 shrink-0">
+                    <span className="text-xs text-slate-500">Monto total</span>
+                    <strong className="font-mono text-base text-slate-900">
+                      {formatoARS(mov.importe_centavos)}
+                    </strong>
+                    {mov.comprobante_nombre && (
+                      <button
+                        type="button"
+                        onClick={() => void descargarComprobante(mov)}
+                        disabled={descargandoId === mov.id}
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 hover:text-blue-900 hover:underline cursor-pointer"
+                        title={mov.comprobante_nombre}
+                      >
+                        <Download className="w-3 h-3" />
+                        <span>{descargandoId === mov.id ? 'Descargando…' : 'Comprobante'}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Desglose de Remitos Imputados */}
+                <div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">
+                    Remitos saldados ({mov.imputaciones.length}):
+                  </span>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {mov.imputaciones.map((imp) => (
+                      <div
+                        key={imp.id}
+                        className="flex items-center justify-between gap-2 p-2 rounded-md bg-slate-50 border border-slate-200/80 text-xs"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono font-bold text-slate-900 bg-white px-1.5 py-0.5 rounded border border-slate-200 text-[11px]">
+                              {imp.remitoNumero}
+                            </span>
+                            <span className="font-semibold text-slate-700 truncate" title={imp.comercio}>
+                              {imp.comercio}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            Por: {imp.imputadoPor}
+                          </div>
+                        </div>
+                        <strong className="font-mono text-xs text-emerald-700 shrink-0">
+                          {formatoARS(imp.importeCentavos)}
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
         </div>
       )}
     </section>
