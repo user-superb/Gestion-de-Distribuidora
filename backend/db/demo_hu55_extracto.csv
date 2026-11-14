@@ -1,0 +1,7 @@
+# CBU: 2850590940090418135201
+# MONEDA: ARS
+fecha;concepto;importe;referencia;ordenante;cuit
+2026-11-10;Transferencia recibida;31250,00;DEMO55-0001;Ferretería El Tornillo;30766666668
+2026-11-11;Transferencia recibida;8990,50;DEMO55-0002;Librería Punto y Coma;30777777774
+2026-11-12;Pago de factura;120400,00;DEMO55-0003;Supermercado Norte S.A.;30788888880
+2026-11-12;Transferencia recibida;8990,50;DEMO55-0002;Librería Punto y Coma;30777777774
