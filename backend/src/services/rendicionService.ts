@@ -29,6 +29,11 @@ export interface ConteoBilletes {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ESTADOS_HOJA_OPERATIVOS = ['publicada', 'asignada', 'en_curso', 'pendiente_de_despacho'];
+const ESTADOS_HOJA_OPERATIVOS_SQL = ESTADOS_HOJA_OPERATIVOS.map((estado) => `'${estado}'`).join(', ');
+/** Deja afuera las hojas sin paradas. Va como JOIN a una subconsulta para que también lo resuelva pg-mem (tests). */
+const JOIN_HOJAS_CON_PARADAS = `JOIN (
+          SELECT DISTINCT hoja_de_ruta_id FROM visita WHERE hoja_de_ruta_id IS NOT NULL
+        ) con_paradas ON con_paradas.hoja_de_ruta_id = h.id`;
 const ESTADOS_REMITO_SIN_RESOLVER = ['pendiente', 'en_ruta'];
 const LARGO_MINIMO_JUSTIFICACION = 10;
 
@@ -566,10 +571,11 @@ export const rendicionService = {
              s.nombre AS sucursal,
              t.id::text AS transportista_id, t.nombre AS transportista_nombre
       FROM hoja_de_ruta h
+      ${JOIN_HOJAS_CON_PARADAS}
       JOIN sucursal s ON s.id = h.sucursal_id
       LEFT JOIN usuario t ON t.id = h.transportista_id
       LEFT JOIN rendicion_efectivo re ON re.hoja_de_ruta_id = h.id AND re.estado <> 'anulada'
-      WHERE h.estado NOT IN ('cerrada', 'anulada')
+      WHERE h.estado IN (${ESTADOS_HOJA_OPERATIVOS_SQL})
         ${fechaCond}
         AND re.id IS NULL
       ORDER BY h.fecha_reparto DESC, h.id DESC
@@ -602,11 +608,14 @@ export const rendicionService = {
    */
   async asegurarArqueosAutomaticos() {
     try {
+      // Solo hojas despachadas y con paradas: una hoja en borrador o vacía no tiene pendientes,
+      // pero tampoco tiene nada que rendir.
       const query = `
         SELECT h.id::text AS hoja_id, h.transportista_id
         FROM hoja_de_ruta h
+        ${JOIN_HOJAS_CON_PARADAS}
         LEFT JOIN rendicion_efectivo re ON re.hoja_de_ruta_id = h.id AND re.estado <> 'anulada'
-        WHERE h.estado NOT IN ('cerrada', 'anulada')
+        WHERE h.estado IN (${ESTADOS_HOJA_OPERATIVOS_SQL})
           AND re.id IS NULL
       `;
       const res = await db.query(query);
@@ -649,6 +658,15 @@ export const rendicionService = {
       }
       if (hoja.estado === 'anulada') {
         throw new RendicionError('La hoja de ruta está anulada.', 409, { estadoHoja: hoja.estado });
+      }
+      // Ni siquiera forzando: una hoja que no salió a la calle o no tiene paradas no tiene efectivo que rendir,
+      // y aprobar su arqueo la cerraría mientras se está armando.
+      if (!ESTADOS_HOJA_OPERATIVOS.includes(hoja.estado)) {
+        throw new RendicionError('La hoja de ruta todavía no fue despachada: no tiene efectivo para arquear.', 409, { estadoHoja: hoja.estado });
+      }
+      const paradas = await client.query(`SELECT id FROM visita WHERE hoja_de_ruta_id::text = $1 LIMIT 1`, [hojaId]);
+      if (paradas.rows.length === 0) {
+        throw new RendicionError('La hoja de ruta no tiene paradas: no hay efectivo para arquear.', 409, { estadoHoja: hoja.estado });
       }
 
       // Verificar que no haya otra rendición activa

@@ -302,6 +302,43 @@ describe('Épica 2.3 · Rendición y control de efectivo', () => {
       const auto = lista.body.rendiciones.find((r: any) => r.hojaDeRutaId === '1');
       assert.equal(auto.declaradoCentavos, 4500000);
     });
+
+    describe('hojas que no se arquean: en borrador o sin paradas', () => {
+      // 10: en borrador y vacía (se está armando) · 11: publicada pero sin paradas · 12: en borrador con una parada sin remitos
+      beforeEach(async () => {
+        await db.query(`
+          INSERT INTO hoja_de_ruta (id, sucursal_id, transportista_id, fecha_reparto, patente, estado) VALUES
+            (10, 1, 3, '${FECHA}', 'BORRADOR', 'borrador'),
+            (11, 1, 3, '${FECHA}', 'VACIA', 'publicada'),
+            (12, 1, 3, '${FECHA}', 'ARMANDO', 'borrador')`);
+        await db.query(`INSERT INTO visita (id, hoja_de_ruta_id, comercio_id, orden) VALUES (20, 12, 2, 1)`);
+      });
+
+      it('la automatización no les genera un arqueo de $0', async () => {
+        const supervisor = await token('supervisor');
+        const lista = await dispatch(efectivoRouter, 'GET', '/rendiciones', {}, supervisor);
+        assert.equal(lista.statusCode, 200);
+        assert.deepEqual(lista.body.rendiciones, []);
+        assert.equal(Number((await uno(`SELECT count(*) AS n FROM rendicion_efectivo`)).n), 0);
+      });
+
+      it('no aparecen entre las hojas para iniciar arqueo', async () => {
+        const supervisor = await token('supervisor');
+        const res = await dispatch(efectivoRouter, 'GET', '/hojas-pendientes', {}, supervisor);
+        assert.deepEqual(res.body.hojas.map((h: any) => h.hojaId).sort(), ['1', '2']);
+      });
+
+      it('no se les puede iniciar un arqueo, ni siquiera forzándolo', async () => {
+        const supervisor = await token('supervisor');
+        for (const [hojaDeRutaId, mensaje] of [['10', /todavía no fue despachada/], ['11', /no tiene paradas/], ['12', /todavía no fue despachada/]] as const) {
+          const res = await dispatch(efectivoRouter, 'POST', '/iniciar', {}, supervisor, { hojaDeRutaId, forzar: true });
+          assert.equal(res.statusCode, 409, `hoja ${hojaDeRutaId}: ${JSON.stringify(res.body)}`);
+          assert.match(res.body.message, mensaje);
+        }
+        assert.equal(Number((await uno(`SELECT count(*) AS n FROM rendicion_efectivo`)).n), 0);
+        assert.deepEqual((await db.query(`SELECT estado FROM hoja_de_ruta WHERE id IN (10, 11, 12) ORDER BY id`)).rows.map((r) => r.estado), ['borrador', 'publicada', 'borrador']);
+      });
+    });
   });
 
   describe('HU #47 · Visualizar declaración de efectivo (escritorio)', () => {

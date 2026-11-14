@@ -434,7 +434,7 @@ const DetalleDeclaracion: React.FC<{
         <div className="rounded-md border border-marca-naranja/40 bg-orange-50 p-3">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">Efectivo declarado</p>
           <p className="text-2xl font-extrabold text-slate-900">{formatoPesos(detalle.declaradoCentavos)}</p>
-          <p className="text-[11px] text-slate-500">Declarado desde la app: {horaLocal(detalle.declaradoEn)}</p>
+          <p className="text-[11px] text-slate-500">Arqueo generado por el sistema: {horaLocal(detalle.declaradoEn)}</p>
         </div>
         <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">Cobrado en efectivo según sistema</p>
