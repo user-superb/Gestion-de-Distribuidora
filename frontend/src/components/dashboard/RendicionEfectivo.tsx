@@ -116,7 +116,7 @@ export const RendicionEfectivo: React.FC<{ session: UserSession }> = ({ session 
         <header className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-bold text-slate-900">Rendiciones y arqueo de efectivo</h2>
-            <p className="mt-0.5 text-xs text-slate-500">Las hojas finalizadas se auto-generan listas para conteo. Podés forzar arqueos manuales con "+ Iniciar Arqueo".</p>
+            <p className="mt-0.5 text-xs text-slate-500">Las hojas finalizadas con cobros en efectivo se auto-generan listas para conteo. Podés forzar arqueos manuales con "+ Iniciar Arqueo".</p>
           </div>
           <div className="flex items-center gap-2">
             <button

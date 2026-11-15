@@ -36,6 +36,7 @@ export const GestionSucursales: React.FC<{ session: UserSession }> = ({ session 
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'No se pudo guardar la sucursal.');
       setDraft(null); await load();
+      window.dispatchEvent(new Event('tutucas-session-refresh'));
     } catch (e: any) { setError(e.message); }
     finally { setBusy(false); }
   };

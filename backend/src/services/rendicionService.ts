@@ -585,6 +585,10 @@ export const rendicionService = {
     for (const row of res.rows) {
       const cobros = await cobrosEfectivoDeHoja(db, row.hoja_id);
       const pendientes = await visitasPendientes(db, row.hoja_id);
+      const efectivoCobradoCentavos = cobros.reduce((acc, c) => acc + c.importeCentavos, 0);
+      if (pendientes.length === 0 && efectivoCobradoCentavos <= 0) {
+        continue;
+      }
       resultado.push({
         hojaId: row.hoja_id,
         codigoHoja: `HR-${String(row.hoja_id).padStart(4, '0')}`,
@@ -593,7 +597,7 @@ export const rendicionService = {
         estadoHoja: row.hoja_estado,
         sucursal: row.sucursal,
         transportista: { id: row.transportista_id ?? '', nombre: row.transportista_nombre ?? 'Sin asignar' },
-        efectivoCobradoCentavos: cobros.reduce((acc, c) => acc + c.importeCentavos, 0),
+        efectivoCobradoCentavos,
         cantidadCobrosEfectivo: cobros.length,
         visitasPendientesCount: pendientes.length,
         visitasPendientes: pendientes,
@@ -603,13 +607,44 @@ export const rendicionService = {
   },
 
   /**
-   * Automatización: busca hojas de ruta operativas con todas sus paradas terminadas y genera
-   * automáticamente la rendición en 'pendiente' para que aparezca directo en la bandeja del supervisor.
+   * Automatización: busca hojas de ruta operativas con todas sus paradas terminadas y con cobros en efectivo,
+   * y genera automáticamente la rendición en 'pendiente' para que aparezca directo en la bandeja del supervisor.
    */
   async asegurarArqueosAutomaticos() {
     try {
-      // Solo hojas despachadas y con paradas: una hoja en borrador o vacía no tiene pendientes,
-      // pero tampoco tiene nada que rendir.
+      // Limpia arqueos automáticos de $0 generados previamente cuando no hubo cobros en efectivo.
+      const autoCero = await db.query(
+        `SELECT re.id::text AS id, re.hoja_de_ruta_id::text AS hoja_id
+         FROM rendicion_efectivo re
+         WHERE re.estado = 'pendiente'
+           AND re.declarado_centavos = 0
+           AND re.rendido_centavos IS NULL`
+      );
+      for (const row of autoCero.rows) {
+        const cobros = await cobrosEfectivoDeHoja(db, row.hoja_id);
+        const efectivoCobrado = cobros.reduce((suma, c) => suma + c.importeCentavos, 0);
+        if (cobros.length > 0 && efectivoCobrado > 0) continue;
+        const auditRes = await db.query(
+          `SELECT valores_despues
+           FROM auditoria
+           WHERE entidad = 'rendicion_efectivo' AND entidad_id::text = $1 AND accion = 'alta'
+           ORDER BY id DESC LIMIT 1`,
+          [row.id]
+        );
+        const raw = auditRes.rows[0]?.valores_despues;
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (parsed?.iniciadoAutomatico === true) {
+          await db.query(`UPDATE cobro SET rendicion_id = NULL WHERE rendicion_id::text = $1`, [row.id]);
+          await db.query(
+            `DELETE FROM rendicion_efectivo
+             WHERE id::text = $1 AND estado = 'pendiente' AND declarado_centavos = 0 AND rendido_centavos IS NULL`,
+            [row.id]
+          );
+        }
+      }
+
+      // Solo hojas despachadas, con paradas y con cobros en efectivo: una hoja en borrador, vacía o sin
+      // pagos en efectivo no tiene nada que rendir.
       const query = `
         SELECT h.id::text AS hoja_id, h.transportista_id
         FROM hoja_de_ruta h
@@ -620,8 +655,12 @@ export const rendicionService = {
       `;
       const res = await db.query(query);
       for (const row of res.rows) {
-        const pendientes = await visitasPendientes(db, row.hoja_id);
-        if (pendientes.length === 0) {
+        const [pendientes, cobros] = await Promise.all([
+          visitasPendientes(db, row.hoja_id),
+          cobrosEfectivoDeHoja(db, row.hoja_id),
+        ]);
+        const efectivoCobrado = cobros.reduce((suma, c) => suma + c.importeCentavos, 0);
+        if (pendientes.length === 0 && cobros.length > 0 && efectivoCobrado > 0) {
           try {
             const transportistaId = row.transportista_id ? Number(row.transportista_id) : 1;
             await this.iniciarArqueo(transportistaId, { hojaDeRutaId: row.hoja_id, automatico: true });
@@ -690,6 +729,16 @@ export const rendicionService = {
 
       const cobros = await cobrosEfectivoDeHoja(client, hojaId);
       const efectivoCobrado = cobros.reduce((suma, c) => suma + c.importeCentavos, 0);
+      if (body?.automatico && (cobros.length === 0 || efectivoCobrado <= 0)) {
+        throw new RendicionError('La hoja de ruta no tiene cobros en efectivo para arquear automáticamente.', 409, {
+          codigo: 'SIN_COBROS_EFECTIVO',
+        });
+      }
+      if (!body?.forzar && pendientes.length === 0 && (cobros.length === 0 || efectivoCobrado <= 0)) {
+        throw new RendicionError('La hoja de ruta finalizó sin cobros en efectivo para arquear.', 409, {
+          codigo: 'SIN_COBROS_EFECTIVO',
+        });
+      }
       const declarado = body?.declaradoCentavos !== undefined && body?.declaradoCentavos !== null
         ? Number(body.declaradoCentavos)
         : efectivoCobrado;

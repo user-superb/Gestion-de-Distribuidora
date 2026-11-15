@@ -185,6 +185,13 @@ class AuthService {
       }
 
       const data = await response.json();
+      if (data.valid && data.session) {
+        try {
+          sessionStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(data.session));
+        } catch {
+          // Ignorar si storage está deshabilitado
+        }
+      }
       return {
         valid: data.valid,
         session: data.session,

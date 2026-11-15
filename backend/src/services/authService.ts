@@ -17,8 +17,28 @@ export interface UserSessionData {
   email: string;
   role: 'Administrador del sistema' | 'Administrativo' | 'Transportista' | 'Supervisor' | 'Gerente' | 'CEO';
   branch: string;
+  branches: string[];
   token: string;
   authenticatedAt: string;
+}
+
+async function getUserBranches(userId: number): Promise<string[]> {
+  const branchesResult = await db.query(
+    `SELECT s.nombre
+     FROM usuario_sucursal us
+     JOIN sucursal s ON s.id = us.sucursal_id
+     WHERE us.usuario_id = $1
+     ORDER BY s.nombre ASC, s.id ASC`,
+    [userId]
+  );
+
+  return branchesResult.rows
+    .map((row: any) => row.nombre)
+    .filter((nombre: unknown): nombre is string => typeof nombre === 'string' && nombre.trim().length > 0);
+}
+
+function buildBranchSummary(branches: string[]): string {
+  return branches.length > 0 ? branches.join(', ') : 'Sin sucursal asignada';
 }
 
 const MAX_FAILED_ATTEMPTS = 5;
@@ -99,10 +119,8 @@ export const authService = {
     try {
       // 2. Consulta en PostgreSQL buscando por usuario o email
       const result = await db.query(
-        `SELECT u.id, u.usuario, u.nombre, u.email, u.password_hash, u.rol, u.activo, s.nombre as sucursal_nombre
+        `SELECT u.id, u.usuario, u.nombre, u.email, u.password_hash, u.rol, u.activo
          FROM usuario u
-         LEFT JOIN usuario_sucursal us ON us.usuario_id = u.id
-         LEFT JOIN sucursal s ON s.id = us.sucursal_id
          WHERE LOWER(u.usuario) = $1 OR LOWER(u.email) = $1
          LIMIT 1`,
         [cleanId]
@@ -165,6 +183,8 @@ export const authService = {
         [sessionId, user.id, token, dto.ip || null, dto.userAgent || null, expiresAt]
       );
 
+      const branches = await getUserBranches(Number(user.id));
+
       // 7. Determinar redirección según rol
       const redirectMap: Record<string, string> = {
         'Administrador del sistema': '/dashboard/configuracion',
@@ -182,7 +202,8 @@ export const authService = {
           name: user.nombre,
           email: user.email,
           role: user.rol,
-          branch: user.sucursal_nombre || 'Sucursal Central - La Plata',
+          branch: buildBranchSummary(branches),
+          branches,
           token,
           authenticatedAt,
         },
@@ -240,11 +261,9 @@ export const authService = {
 
       const result = await db.query(
         `SELECT s.id, s.token, s.expira_en, s.revocado, s.creado_en,
-                u.id as user_id, u.usuario, u.nombre, u.email, u.rol, u.activo, suc.nombre as sucursal_nombre
+                u.id as user_id, u.usuario, u.nombre, u.email, u.rol, u.activo
          FROM sesion_usuario s
          JOIN usuario u ON u.id = s.usuario_id
-         LEFT JOIN usuario_sucursal us ON us.usuario_id = u.id
-         LEFT JOIN sucursal suc ON suc.id = us.sucursal_id
          WHERE s.token = $1
          LIMIT 1`,
         [cleanToken]
@@ -298,6 +317,8 @@ export const authService = {
         [nextExpiration, row.id]
       );
 
+      const branches = await getUserBranches(Number(row.user_id));
+
       return {
         valid: true,
         session: {
@@ -305,7 +326,8 @@ export const authService = {
           name: row.nombre,
           email: row.email,
           role: row.rol,
-          branch: row.sucursal_nombre || 'Sucursal Central - La Plata',
+          branch: buildBranchSummary(branches),
+          branches,
           token: row.token,
           authenticatedAt: new Date(row.creado_en).toISOString(),
         },

@@ -63,9 +63,21 @@ export const App: React.FC = () => {
               'La sesión previa en este equipo ha expirado por inactividad. Por favor, vuelva a identificarse.'
             );
           }
+        } else if (res.session) {
+          setCurrentSession(res.session);
         }
       });
     }
+
+    const handleSessionRefresh = () => {
+      authService.verifySession().then((res) => {
+        if (!res.valid) {
+          setCurrentSession(null);
+        } else if (res.session) {
+          setCurrentSession(res.session);
+        }
+      });
+    };
 
     // Regla de seguridad: Si el usuario presiona botón "Atrás", evitar mostrar datos en caché si no hay sesión
     const handlePopState = () => {
@@ -77,8 +89,12 @@ export const App: React.FC = () => {
       setResetToken(params.get('token'));
     };
 
+    window.addEventListener('tutucas-session-refresh', handleSessionRefresh);
     window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('tutucas-session-refresh', handleSessionRefresh);
+      window.removeEventListener('popstate', handlePopState);
+    };
   }, []);
 
   const handleLoginSuccess = (result: AuthResult) => {

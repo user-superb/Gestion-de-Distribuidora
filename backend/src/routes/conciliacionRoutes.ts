@@ -287,13 +287,13 @@ conciliacionRouter.post('/discrepancias', requireAdministrativo, (req, res, next
 
 conciliacionRouter.post('/discrepancias/:id/aprobar', async (req, res) => {
   try {
-    return res.json(await conciliacionService.resolverDiscrepancia(req.params.id, getUsuarioId(req), true, req.body?.observacion || 'Aprobado'));
+    return res.json(await conciliacionService.resolverDiscrepancia(req.params.id, getUsuarioId(req), true, req.body?.observacion || 'Aprobado', (req as any).userSession?.role));
   } catch (error) { return responderError(error, res); }
 });
 
 conciliacionRouter.post('/discrepancias/:id/rechazar', async (req, res) => {
   try {
-    return res.json(await conciliacionService.resolverDiscrepancia(req.params.id, getUsuarioId(req), false, req.body?.observacion));
+    return res.json(await conciliacionService.resolverDiscrepancia(req.params.id, getUsuarioId(req), false, req.body?.observacion, (req as any).userSession?.role));
   } catch (error) { return responderError(error, res); }
 });
 
@@ -305,6 +305,29 @@ conciliacionRouter.get('/notificaciones', async (req, res) => {
       [getUsuarioId(req)]
     );
     return res.json(result.rows);
+  } catch (error) { return responderError(error, res); }
+});
+
+conciliacionRouter.post('/notificaciones/leer-todas', async (req, res) => {
+  try {
+    await db.query(
+      `UPDATE discrepancia_notificacion SET leida_en = now() WHERE usuario_id = $1 AND leida_en IS NULL`,
+      [getUsuarioId(req)]
+    );
+    return res.json({ success: true });
+  } catch (error) { return responderError(error, res); }
+});
+
+conciliacionRouter.post('/notificaciones/:id/leer', async (req, res) => {
+  if (!/^[1-9]\d*$/.test(String(req.params.id || ''))) {
+    return res.status(400).json({ error: 'INVALID_ID', message: 'Identificador de notificación inválido.' });
+  }
+  try {
+    await db.query(
+      `UPDATE discrepancia_notificacion SET leida_en = now() WHERE id = $1 AND usuario_id = $2 AND leida_en IS NULL`,
+      [req.params.id, getUsuarioId(req)]
+    );
+    return res.json({ success: true });
   } catch (error) { return responderError(error, res); }
 });
 

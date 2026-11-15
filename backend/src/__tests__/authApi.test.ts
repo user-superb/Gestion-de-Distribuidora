@@ -160,4 +160,47 @@ describe('Backend PostgreSQL - HU: Autenticación, Roles y Cierre de Sesión (Lo
     assert.equal(verify.valid, false);
     assert.equal(verify.error?.type, 'SESSION_EXPIRED');
   });
+
+  it('MULTI-SUCURSAL: login y verifySession devuelven todas las sucursales asignadas a la cuenta', async () => {
+    await db.query('INSERT INTO usuario_sucursal (usuario_id, sucursal_id) VALUES (1, 2)');
+
+    const loginRes = await authService.login({
+      identifier: 'admin@tutucas.com.ar',
+      password: 'Password123!',
+    });
+
+    assert.equal(loginRes.success, true);
+    assert.deepEqual(loginRes.session?.branches, [
+      'Depósito Sur - Berisso',
+      'Sucursal Central - La Plata',
+    ]);
+    assert.equal(
+      loginRes.session?.branch,
+      'Depósito Sur - Berisso, Sucursal Central - La Plata'
+    );
+
+    const verifyRes = await authService.verifySession(loginRes.session!.token);
+    assert.equal(verifyRes.valid, true);
+    assert.deepEqual(verifyRes.session?.branches, [
+      'Depósito Sur - Berisso',
+      'Sucursal Central - La Plata',
+    ]);
+    assert.equal(
+      verifyRes.session?.branch,
+      'Depósito Sur - Berisso, Sucursal Central - La Plata'
+    );
+  });
+
+  it('MULTI-SUCURSAL: una cuenta sin sucursales asignadas informa lista vacía y etiqueta explícita', async () => {
+    await db.query('DELETE FROM usuario_sucursal WHERE usuario_id = 1');
+
+    const loginRes = await authService.login({
+      identifier: 'admin@tutucas.com.ar',
+      password: 'Password123!',
+    });
+
+    assert.equal(loginRes.success, true);
+    assert.deepEqual(loginRes.session?.branches, []);
+    assert.equal(loginRes.session?.branch, 'Sin sucursal asignada');
+  });
 });

@@ -99,6 +99,7 @@ interface Discrepancia {
   diferencia_centavos: string;
   nota: string;
   remito_ids: string;
+  remito_numeros?: string[];
   motivo_codigo: string;
   estado: string;
   creada_por: string;
@@ -194,6 +195,7 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
       onDataLoaded?.({ movimientos: movData.length, discrepancias: discData.length });
       setCuentaId((current) => current === 'todas' || movData.some((item: Movimiento) => item.cuenta_id === current) ? current : 'todas');
       setMovimientosSeleccionados((current) => new Set([...current].filter((id) => movData.some((item: Movimiento) => item.id === id))));
+      setRemitosSeleccionados((current) => new Set([...current].filter((id) => remData.some((item: RemitoPendiente) => item.id === id))));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al cargar la conciliación.');
     } finally {
@@ -543,7 +545,8 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
   };
 
   const resolver = async (item: Discrepancia, accion: 'aprobar' | 'rechazar') => {
-    if (accion === 'rechazar' && !observacionResolucion.trim()) { setError('Escribí el motivo del rechazo.'); return; }
+    const esAdminSistema = session.role === 'Administrador del sistema';
+    if (accion === 'rechazar' && !esAdminSistema && !observacionResolucion.trim()) { setError('Escribí el motivo del rechazo.'); return; }
     setError(''); setMensaje(''); setCargando(true);
     try {
       const response = await fetch(`${API_BASE}/conciliacion/discrepancias/${item.id}/${accion}`, {
@@ -564,6 +567,16 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
     const url = URL.createObjectURL(await response.blob());
     const link = document.createElement('a'); link.href = url; link.download = item.comprobante_nombre || 'comprobante'; link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+
+  const descartarNotificacion = async (id?: string) => {
+    setNotificaciones((prev) => (id ? prev.filter((item) => item.id !== id) : []));
+    try {
+      const endpoint = id ? `${API_BASE}/conciliacion/notificaciones/${id}/leer` : `${API_BASE}/conciliacion/notificaciones/leer-todas`;
+      await fetch(endpoint, { method: 'POST', headers: { Authorization: `Bearer ${session.token}` } });
+    } catch {
+      // Silenciar error de red puntual; la UI ya descartó el aviso en la sesión actual
+    }
   };
 
   const paso1Completo = movimientosElegidos.length > 0;
@@ -604,11 +617,34 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
           </button>
         </div>
       )}
-      {notificaciones.map((item) => (
-        <p key={item.id} role="status" className="rounded-lg border border-blue-200 bg-blue-50 px-3.5 py-2.5 text-xs font-medium text-blue-900">
-          {item.mensaje}
-        </p>
-      ))}
+      {notificaciones.length > 0 && (
+        <div className="space-y-1.5">
+          {notificaciones.length > 1 && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => void descartarNotificacion()}
+                className="text-xs font-medium text-blue-700 hover:text-blue-900 underline cursor-pointer"
+              >
+                Limpiar notificaciones ({notificaciones.length})
+              </button>
+            </div>
+          )}
+          {notificaciones.map((item) => (
+            <div key={item.id} role="status" className="rounded-lg border border-blue-200 bg-blue-50 px-3.5 py-2.5 text-xs font-medium text-blue-900 flex items-center justify-between gap-2">
+              <span>{item.mensaje}</span>
+              <button
+                type="button"
+                onClick={() => void descartarNotificacion(item.id)}
+                className="text-blue-500 hover:text-blue-800 p-0.5 shrink-0 cursor-pointer"
+                aria-label="Cerrar notificación"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Indicador de Progreso Secuencial (Stepper de 3 Pasos al estilo Hoja de Ruta) */}
       <nav aria-label="Progreso de conciliación bancaria" className="bg-white border border-slate-200 rounded-lg p-2.5 sm:p-3 shadow-xs">
@@ -1142,11 +1178,18 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
             <span>Bandeja de discrepancias pendientes ({discrepancias.length})</span>
           </h3>
           <div className="space-y-2">
-            {discrepancias.map((item) => (
+            {discrepancias.map((item) => {
+              const esAdminSistema = session.role === 'Administrador del sistema';
+              const remitoIdsLista = String(item.remito_ids || '').replace(/[{}\[\]\s]/g, '').split(',').filter(Boolean);
+              const remitosEtiqueta = item.remito_numeros?.length
+                ? item.remito_numeros
+                : remitoIdsLista.map((id) => `#${id}`);
+              const movIdsLista = String(item.movimiento_ids || item.movimiento_id || '').replace(/[{}\[\]\s]/g, '').split(',').filter(Boolean);
+              return (
               <div key={item.id} className="rounded border border-amber-200 bg-amber-50 p-3 text-xs space-y-2">
                 <div className="flex flex-wrap justify-between gap-2">
                   <span>
-                    Movimientos #{item.movimiento_ids.replace(/[{}]/g, '').replace(/,/g, ', #')} · {item.ordenante || 'Ordenante sin informar'} · Remitos: {item.remito_ids.replace(/[{}]/g, '')}
+                    Movimientos ({movIdsLista.length}): {movIdsLista.map((id) => `#${id}`).join(', ')} · {item.ordenante || 'Ordenante sin informar'} · Remitos ({remitosEtiqueta.length}): {remitosEtiqueta.join(', ')}
                     <br />
                     {item.motivo_codigo}: {item.nota} · Estado: {item.estado}
                   </span>
@@ -1164,12 +1207,12 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
                     value={observacionResolucion}
                     onChange={(event) => setObservacionResolucion(event.target.value)}
                     maxLength={500}
-                    placeholder="Observación (obligatoria al rechazar)"
+                    placeholder={esAdminSistema ? 'Observación (opcional)' : 'Observación (obligatoria al rechazar)'}
                     className="min-w-48 flex-1 rounded border border-slate-300 bg-white px-2 py-1"
                   />
                   <button
                     type="button"
-                    disabled={cargando || item.creada_por === session.id.replace(/^usr_/, '')}
+                    disabled={cargando || (!esAdminSistema && item.creada_por === session.id.replace(/^usr_/, ''))}
                     onClick={() => void resolver(item, 'aprobar')}
                     className="rounded bg-emerald-700 px-2.5 py-1 font-semibold text-white disabled:opacity-50"
                   >
@@ -1177,7 +1220,7 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
                   </button>
                   <button
                     type="button"
-                    disabled={cargando || !observacionResolucion.trim()}
+                    disabled={cargando || (!esAdminSistema && !observacionResolucion.trim())}
                     onClick={() => void resolver(item, 'rechazar')}
                     className="rounded bg-red-700 px-2.5 py-1 font-semibold text-white disabled:opacity-50"
                   >
@@ -1185,7 +1228,8 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}

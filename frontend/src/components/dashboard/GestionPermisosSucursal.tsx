@@ -53,6 +53,9 @@ export const GestionPermisosSucursal: React.FC<{ session: UserSession }> = ({ se
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'No se pudieron guardar los permisos.');
       await load(); setSaved(true);
+      if (userId === session.id.replace(/^usr_/, '')) {
+        window.dispatchEvent(new Event('tutucas-session-refresh'));
+      }
     } catch (e: any) { setError(e.message); }
     finally { setBusy(false); }
   };
@@ -68,6 +71,9 @@ export const GestionPermisosSucursal: React.FC<{ session: UserSession }> = ({ se
       await load();
       setSelected([]);
       setSaved(true);
+      if (userId === session.id.replace(/^usr_/, '')) {
+        window.dispatchEvent(new Event('tutucas-session-refresh'));
+      }
     } catch (e: any) { setError(e.message); }
     finally { setBusy(false); }
   };

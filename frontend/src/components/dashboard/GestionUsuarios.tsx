@@ -64,6 +64,9 @@ export const GestionUsuarios: React.FC<{ session: UserSession }> = ({ session })
       if (!response.ok) throw new Error(data.message || 'No se pudo guardar el usuario.');
       setDraft(null);
       await load();
+      if (id && String(id) === session.id.replace(/^usr_/, '')) {
+        window.dispatchEvent(new Event('tutucas-session-refresh'));
+      }
     } catch (e: any) {
       setError(e.message);
     } finally {

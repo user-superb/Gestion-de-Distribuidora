@@ -1,6 +1,7 @@
 // frontend/src/services/__tests__/authService.test.ts
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { authService } from '../authService';
+import { getSessionBranches } from '../../types/auth';
 
 // Polyfill de sessionStorage para entorno de tests sin browser
 const createStorageMock = () => {
@@ -226,5 +227,58 @@ describe('Frontend authService - Autenticación y Cierre de Sesión', () => {
         body: JSON.stringify({ token: 'tok_xyz', newPassword: 'NuevaClaveValida2026!' }),
       })
     );
+  });
+
+  it('MULTI-SUCURSAL: verifySession actualiza sessionStorage con todas las sucursales y getSessionBranches las expone', async () => {
+    storageMock.setItem(
+      'tutucas_auth_session',
+      JSON.stringify({
+        id: 'usr_1',
+        name: 'Administrador del Sistema',
+        email: 'admin.sistema@tutucas.com.ar',
+        role: 'Administrador del sistema',
+        branch: 'Sucursal Central - La Plata',
+        token: 'tutucas_tok_refresh',
+        authenticatedAt: new Date().toISOString(),
+      })
+    );
+
+    const refreshedSession = {
+      id: 'usr_1',
+      name: 'Administrador del Sistema',
+      email: 'admin.sistema@tutucas.com.ar',
+      role: 'Administrador del sistema',
+      branch: 'Depósito Sur - Berisso, Sucursal Central - La Plata',
+      branches: ['Depósito Sur - Berisso', 'Sucursal Central - La Plata'],
+      token: 'tutucas_tok_refresh',
+      authenticatedAt: new Date().toISOString(),
+    };
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ valid: true, session: refreshedSession }),
+    } as any);
+
+    const check = await authService.verifySession();
+    expect(check.valid).toBe(true);
+    expect(check.session?.branches).toEqual([
+      'Depósito Sur - Berisso',
+      'Sucursal Central - La Plata',
+    ]);
+    expect(authService.getCurrentSession()?.branches).toEqual([
+      'Depósito Sur - Berisso',
+      'Sucursal Central - La Plata',
+    ]);
+    expect(getSessionBranches(check.session!)).toEqual([
+      'Depósito Sur - Berisso',
+      'Sucursal Central - La Plata',
+    ]);
+    expect(
+      getSessionBranches({ branch: 'Sucursal A, Sucursal B' })
+    ).toEqual(['Sucursal A', 'Sucursal B']);
+    expect(
+      getSessionBranches({ branch: 'Sin sucursal asignada', branches: [] })
+    ).toEqual([]);
   });
 });

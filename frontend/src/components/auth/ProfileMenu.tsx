@@ -1,6 +1,6 @@
 // frontend/src/components/auth/ProfileMenu.tsx
 import React, { useState, useRef, useEffect } from 'react';
-import { UserSession } from '../../types/auth';
+import { UserSession, getSessionBranches } from '../../types/auth';
 import { LogOut, ChevronDown, Building, KeyRound, X } from 'lucide-react';
 import { authService } from '../../services/authService';
 
@@ -58,6 +58,8 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ session, onLogout, onA
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const branches = getSessionBranches(session);
+
   // Iniciales del usuario para el avatar
   const initials = session.name
     .split(' ')
@@ -98,9 +100,19 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ session, onLogout, onA
             <p className="text-xs font-semibold text-slate-900 truncate">{session.name}</p>
             <p className="text-[11px] text-slate-500 font-mono truncate">{session.email}</p>
             
-            <div className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-600 bg-slate-50 p-1.5 rounded border border-slate-100">
-              <Building className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
-              <span className="truncate">{session.branch}</span>
+            <div className="mt-2 flex items-start gap-1.5 text-[11px] text-slate-600 bg-slate-50 p-1.5 rounded border border-slate-100">
+              <Building className="w-3.5 h-3.5 text-slate-500 flex-shrink-0 mt-0.5" />
+              {branches.length <= 1 ? (
+                <span className="leading-snug">{branches[0] || 'Sin sucursal asignada'}</span>
+              ) : (
+                <ul className="space-y-0.5 min-w-0 flex-1 max-h-32 overflow-y-auto">
+                  {branches.map((branchName) => (
+                    <li key={branchName} className="leading-snug text-slate-700">
+                      {branchName}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
 

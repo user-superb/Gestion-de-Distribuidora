@@ -12,6 +12,10 @@ export function esRolGlobal(rol?: string | null): boolean {
   );
 }
 
+function esAdministradorSistema(rol?: string | null): boolean {
+  return typeof rol === 'string' && rol.trim().toLowerCase() === 'administrador del sistema';
+}
+
 export class ConciliacionError extends Error {
   constructor(
     message: string,
@@ -596,6 +600,57 @@ async function enTransaccion<T>(action: (client: PoolClient) => Promise<T>): Pro
   } finally {
     client.release();
   }
+}
+
+function agregarIdsArray(destino: Set<string>, valor: unknown) {
+  if (Array.isArray(valor)) {
+    for (const id of valor) {
+      if (id != null && String(id).trim()) destino.add(String(id).trim());
+    }
+    return;
+  }
+  if (typeof valor === 'string') {
+    for (const id of valor.replace(/[{}\[\]\s]/g, '').split(',')) {
+      if (id) destino.add(id);
+    }
+  }
+}
+
+/**
+ * Obtiene los IDs de movimientos bancarios y remitos bloqueados por discrepancias activas
+ * (`pendiente` o `escalada`) para excluirlos de las bandejas de conciliación y sugerencias.
+ */
+async function getIdsEnDiscrepanciaActiva(): Promise<{ movimientos: Set<string>; remitos: Set<string> }> {
+  const movimientos = new Set<string>();
+  const remitos = new Set<string>();
+  try {
+    const res = await db.query(
+      `SELECT movimiento_id::text AS movimiento_id, movimiento_ids, remito_ids
+       FROM discrepancia_conciliacion
+       WHERE estado IN ('pendiente', 'escalada')`
+    );
+    for (const row of res.rows) {
+      if (row.movimiento_id != null) movimientos.add(String(row.movimiento_id));
+      agregarIdsArray(movimientos, row.movimiento_ids);
+      agregarIdsArray(remitos, row.remito_ids);
+    }
+  } catch (err: any) {
+    const msg = String(err?.message || '');
+    if (msg.includes('movimiento_ids')) {
+      const res = await db.query(
+        `SELECT movimiento_id::text AS movimiento_id, remito_ids
+         FROM discrepancia_conciliacion
+         WHERE estado IN ('pendiente', 'escalada')`
+      );
+      for (const row of res.rows) {
+        if (row.movimiento_id != null) movimientos.add(String(row.movimiento_id));
+        agregarIdsArray(remitos, row.remito_ids);
+      }
+    } else if (!msg.includes('discrepancia_conciliacion')) {
+      throw err;
+    }
+  }
+  return { movimientos, remitos };
 }
 
 function fechaActualArgentina(): string {
@@ -1337,12 +1392,18 @@ export const conciliacionService = {
     };
 
     try {
-      const result = await db.query(buildQuery(db.isMemory()), params);
-      return result.rows;
+      const [result, { movimientos: movimientosEnDiscrepancia }] = await Promise.all([
+        db.query(buildQuery(db.isMemory()), params),
+        getIdsEnDiscrepanciaActiva(),
+      ]);
+      return result.rows.filter((row: any) => !movimientosEnDiscrepancia.has(String(row.id)));
     } catch (err: any) {
       if (fecha && String(err?.message || '').includes('AT TIME ZONE')) {
-        const fallbackRes = await db.query(buildQuery(true), params);
-        return fallbackRes.rows;
+        const [fallbackRes, { movimientos: movimientosEnDiscrepancia }] = await Promise.all([
+          db.query(buildQuery(true), params),
+          getIdsEnDiscrepanciaActiva(),
+        ]);
+        return fallbackRes.rows.filter((row: any) => !movimientosEnDiscrepancia.has(String(row.id)));
       }
       throw err;
     }
@@ -1366,7 +1427,7 @@ export const conciliacionService = {
       }
     }
 
-    const [movimientosRes, remitosRes] = await Promise.all([
+    const [movimientosRes, remitosRes, enDiscrepancia] = await Promise.all([
       db.query(
         `SELECT mb.id::text AS movimiento_id, mb.fecha_hora, mb.ordenante, mb.ordenante_cuit,
                 (mb.importe_centavos - COALESCE(i.imputado_centavos, 0))::text AS importe_disponible_centavos,
@@ -1380,10 +1441,6 @@ export const conciliacionService = {
          WHERE mb.estado IN ('sin_imputar', 'parcial')
            AND mb.importe_centavos > COALESCE(i.imputado_centavos, 0)
            ${movSucursalFiltro}
-           AND NOT EXISTS (
-             SELECT 1 FROM discrepancia_conciliacion dc
-             WHERE dc.estado IN ('pendiente','escalada') AND mb.id = ANY(dc.movimiento_ids)
-           )
          ORDER BY mb.fecha_hora DESC, mb.id DESC`,
         paramsMov
       ),
@@ -1400,11 +1457,15 @@ export const conciliacionService = {
          ORDER BY r.entregado_en DESC NULLS LAST, r.id DESC`,
         paramsRem
       ),
+      getIdsEnDiscrepanciaActiva(),
     ]);
 
+    const movimientosDisponibles = movimientosRes.rows.filter(
+      (movimiento: any) => !enDiscrepancia.movimientos.has(String(movimiento.movimiento_id))
+    );
     const remitosPorSucursal = new Map<string, any[]>();
     for (const remito of remitosRes.rows) {
-      if (!remito.fecha_entrega) continue;
+      if (!remito.fecha_entrega || enDiscrepancia.remitos.has(String(remito.remito_id))) continue;
       const sucursal = String(remito.sucursal_id);
       const grupo = remitosPorSucursal.get(sucursal) || [];
       grupo.push(remito);
@@ -1415,7 +1476,7 @@ export const conciliacionService = {
     }
 
     const sugerencias: any[] = [];
-    for (const movimiento of movimientosRes.rows) {
+    for (const movimiento of movimientosDisponibles) {
       const fechaMovimiento = new Date(movimiento.fecha_hora).getTime();
       const remitos = remitosPorSucursal.get(String(movimiento.sucursal_id)) || [];
       for (const remito of remitos) {
@@ -1622,26 +1683,29 @@ export const conciliacionService = {
       }
     }
 
-    const result = await db.query(
-      `SELECT r.id::text AS id, r.numero, r.estado,
-              COALESCE(r.entregado_en, v.registrada_en) AS fecha_entrega,
-              c.id::text AS comercio_id, c.razon_social,
-              m.nombre AS marca, rs.importe_centavos::text AS importe_centavos,
-              rs.saldo_centavos::text AS saldo_centavos,
-              s.id::text AS sucursal_id, s.nombre AS sucursal
-       FROM remito r
-       JOIN comercio c ON c.id = r.comercio_id
-       JOIN marca m ON m.id = r.marca_id
-       JOIN sucursal s ON s.id = r.sucursal_id
-       LEFT JOIN visita v ON v.id = r.visita_id
-       JOIN remito_saldo rs ON rs.remito_id = r.id
-       WHERE rs.saldo_centavos > 0
-         AND r.estado = 'entregado'
-         ${sucursalFiltro}
-       ORDER BY r.entregado_en DESC NULLS LAST, c.razon_social, r.numero`,
-      params
-    );
-    return result.rows;
+    const [result, { remitos: remitosEnDiscrepancia }] = await Promise.all([
+      db.query(
+        `SELECT r.id::text AS id, r.numero, r.estado,
+                COALESCE(r.entregado_en, v.registrada_en) AS fecha_entrega,
+                c.id::text AS comercio_id, c.razon_social,
+                m.nombre AS marca, rs.importe_centavos::text AS importe_centavos,
+                rs.saldo_centavos::text AS saldo_centavos,
+                s.id::text AS sucursal_id, s.nombre AS sucursal
+         FROM remito r
+         JOIN comercio c ON c.id = r.comercio_id
+         JOIN marca m ON m.id = r.marca_id
+         JOIN sucursal s ON s.id = r.sucursal_id
+         LEFT JOIN visita v ON v.id = r.visita_id
+         JOIN remito_saldo rs ON rs.remito_id = r.id
+         WHERE rs.saldo_centavos > 0
+           AND r.estado = 'entregado'
+           ${sucursalFiltro}
+         ORDER BY r.entregado_en DESC NULLS LAST, c.razon_social, r.numero`,
+        params
+      ),
+      getIdsEnDiscrepanciaActiva(),
+    ]);
+    return result.rows.filter((row: any) => !remitosEnDiscrepancia.has(String(row.id)));
   },
 
   async getDiscrepanciasPendientes(userSession?: { id?: string; role?: string }) {
@@ -1675,7 +1739,29 @@ export const conciliacionService = {
        ORDER BY dc.creada_en DESC`,
       params
     );
-    return result.rows;
+    if (!result.rows.length) return [];
+
+    const numeroPorRemitoId = new Map<string, string>();
+    try {
+      const remRes = await db.query('SELECT id::text AS id, numero FROM remito');
+      for (const rem of remRes.rows) {
+        numeroPorRemitoId.set(String(rem.id), String(rem.numero));
+      }
+    } catch {
+      // Ignorar si en tests aislados no existe la tabla remito
+    }
+
+    return result.rows.map((row: any) => {
+      const remitoIdList = String(row.remito_ids || '')
+        .replace(/[{}\[\]\s]/g, '')
+        .split(',')
+        .filter(Boolean);
+      const remitoNumeros = remitoIdList.map((id) => numeroPorRemitoId.get(id) || `#${id}`);
+      return {
+        ...row,
+        remito_numeros: remitoNumeros,
+      };
+    });
   },
 
   async conciliar(movimientoIdsValue: unknown, remitoIdsValue: unknown, usuarioId: number, aceptarSugerencia = false) {
@@ -1849,18 +1935,29 @@ export const conciliacionService = {
     });
   },
 
-  async resolverDiscrepancia(idValue: unknown, usuarioId: number, aprobar: boolean, observacion: unknown) {
+  async resolverDiscrepancia(idValue: unknown, usuarioId: number, aprobar: boolean, observacion: unknown, userRole?: string) {
     const id = String(idValue || '');
     if (!/^[1-9]\d*$/.test(id)) throw new ConciliacionError('Identificador de discrepancia inválido.', 400);
-    if (typeof observacion !== 'string' || !observacion.trim() || observacion.trim().length > 500) throw new ConciliacionError('La observación es obligatoria y no puede superar 500 caracteres.', 400);
+    const adminPorRol = esAdministradorSistema(userRole);
+    const obsTexto = typeof observacion === 'string' ? observacion.trim() : '';
+    if (obsTexto.length > 500) {
+      throw new ConciliacionError('La observación es obligatoria y no puede superar 500 caracteres.', 400);
+    }
+    if (!obsTexto && !adminPorRol) {
+      throw new ConciliacionError('La observación es obligatoria y no puede superar 500 caracteres.', 400);
+    }
+    const observacionFinal = obsTexto || (aprobar ? 'Aprobado' : 'Rechazado');
     return enTransaccion(async (client) => {
       const caso = await client.query('SELECT * FROM discrepancia_conciliacion WHERE id = $1 FOR UPDATE', [id]);
       if (!caso.rows.length) throw new ConciliacionError('No se encontró la discrepancia.', 404);
       const dc = caso.rows[0];
       if (!['pendiente','escalada'].includes(dc.estado)) throw new ConciliacionError('El caso ya fue resuelto por otro usuario.', 409);
-      if (aprobar && String(dc.creada_por) === String(usuarioId)) throw new ConciliacionError('Otro usuario debe aprobar la discrepancia.', 403);
-      if (aprobar) {
-        const usuario = await client.query('SELECT limite_autorizacion_centavos FROM usuario WHERE id = $1', [usuarioId]);
+      const usuario = await client.query('SELECT limite_autorizacion_centavos, rol FROM usuario WHERE id = $1', [usuarioId]);
+      const esAdminSistema = adminPorRol || esAdministradorSistema(usuario.rows[0]?.rol);
+      if (!esAdminSistema && aprobar && String(dc.creada_por) === String(usuarioId)) {
+        throw new ConciliacionError('Otro usuario debe aprobar la discrepancia.', 403);
+      }
+      if (aprobar && !esAdminSistema) {
         const magnitud = BigInt(dc.diferencia_centavos) < 0n ? -BigInt(dc.diferencia_centavos) : BigInt(dc.diferencia_centavos);
         if (!usuario.rows.length || BigInt(usuario.rows[0].limite_autorizacion_centavos || 0) < magnitud) {
           await client.query("UPDATE discrepancia_conciliacion SET estado = 'escalada' WHERE id = $1", [id]);
@@ -1874,26 +1971,32 @@ export const conciliacionService = {
       }
       const movimientoIds = (dc.movimiento_ids || [dc.movimiento_id]).map(String);
       const remitoIds = dc.remito_ids.map(String);
-      const result = await validarSeleccion(client, movimientoIds, remitoIds);
-      if (result.importeMovimiento.toString() !== String(dc.importe_movimiento) ||
-          result.importeSeleccionado.toString() !== String(dc.importe_seleccionado) ||
-          result.diferencia.toString() !== String(dc.diferencia_centavos)) {
-        throw new ConciliacionError('Los saldos cambiaron desde que se registró el caso; revisalo nuevamente.', 409);
+      if (aprobar) {
+        const result = await validarSeleccion(client, movimientoIds, remitoIds);
+        if (result.importeMovimiento.toString() !== String(dc.importe_movimiento) ||
+            result.importeSeleccionado.toString() !== String(dc.importe_seleccionado) ||
+            result.diferencia.toString() !== String(dc.diferencia_centavos)) {
+          throw new ConciliacionError('Los saldos cambiaron desde que se registró el caso; revisalo nuevamente.', 409);
+        }
+        await aplicarDiscrepancia(client, id, result, usuarioId);
       }
-      if (aprobar) await aplicarDiscrepancia(client, id, result, usuarioId);
       const estado = aprobar ? 'aprobada' : 'rechazada';
       await client.query(
         `UPDATE discrepancia_conciliacion SET estado = $1, resuelta_por = $2, resuelta_en = now(), observacion_resolucion = $3 WHERE id = $4`,
-        [estado, usuarioId, observacion.trim(), id]
+        [estado, usuarioId, observacionFinal, id]
       );
       await client.query(
         `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
          VALUES ('discrepancia_conciliacion', $1, $2, $3, $4::jsonb, $5)`,
-        [id, estado, usuarioId, JSON.stringify({ estado, movimientoIds, remitoIds, importeMovimiento: String(dc.importe_movimiento), importeSeleccionado: String(dc.importe_seleccionado), diferenciaCentavos: String(dc.diferencia_centavos) }), observacion.trim()]
+        [id, estado, usuarioId, JSON.stringify({ estado, movimientoIds, remitoIds, importeMovimiento: String(dc.importe_movimiento), importeSeleccionado: String(dc.importe_seleccionado), diferenciaCentavos: String(dc.diferencia_centavos) }), observacionFinal]
+      );
+      await client.query(
+        `UPDATE discrepancia_notificacion SET leida_en = now() WHERE discrepancia_id = $1 AND leida_en IS NULL`,
+        [id]
       );
       if (!aprobar) await client.query(
         `INSERT INTO discrepancia_notificacion (discrepancia_id, usuario_id, mensaje)
-         VALUES ($1, $2, $3)`, [id, dc.creada_por, `La discrepancia fue rechazada: ${observacion.trim()}`]
+         VALUES ($1, $2, $3)`, [id, dc.creada_por, `La discrepancia fue rechazada: ${observacionFinal}`]
       );
       return { id, estado };
     });

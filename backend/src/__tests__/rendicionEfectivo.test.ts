@@ -303,6 +303,51 @@ describe('Épica 2.3 · Rendición y control de efectivo', () => {
       assert.equal(auto.declaradoCentavos, 4500000);
     });
 
+    it('automatización: si la ruta termina sin cobros en efectivo (ej. solo transferencia o rechazos), no genera arqueo de $0', async () => {
+      // Hoja 2 (Mario Flete): entrega completada y cobrada por transferencia, 0 cobros en efectivo
+      await db.query(`UPDATE remito SET estado = 'entregado' WHERE visita_id = 4`);
+      await db.query(`UPDATE visita SET estado = 'completada', cobrada_en = now() WHERE id = 4`);
+      await db.query(
+        `INSERT INTO cobro (visita_id, medio_pago, importe_centavos, registrado_en, registrado_por, clave_idempotencia)
+         VALUES (4, 'transferencia', 1000000, now(), 3, '${crypto.randomUUID()}')`
+      );
+
+      const supervisor = await token('supervisor');
+      const lista = await dispatch(efectivoRouter, 'GET', '/rendiciones', {}, supervisor, undefined, { estado: 'pendiente' });
+      assert.equal(lista.statusCode, 200);
+      assert.equal(lista.body.rendiciones.some((r: any) => r.hojaDeRutaId === '2'), false);
+      assert.equal(Number((await uno(`SELECT count(*) AS n FROM rendicion_efectivo WHERE hoja_de_ruta_id = 2`)).n), 0);
+
+      // Tampoco debe aparecer como pendiente en + Iniciar Arqueo ni permitir iniciar sin efectivo
+      const pendientes = await dispatch(efectivoRouter, 'GET', '/hojas-pendientes', {}, supervisor, undefined, { fecha: FECHA });
+      assert.equal(pendientes.body.hojas.some((h: any) => h.hojaId === '2'), false);
+
+      const iniciar = await dispatch(efectivoRouter, 'POST', '/iniciar', {}, supervisor, { hojaDeRutaId: '2' });
+      assert.equal(iniciar.statusCode, 409);
+      assert.match(iniciar.body.message, /sin cobros en efectivo/);
+    });
+
+    it('automatización: depura arqueos automáticos de $0 sin cobros en efectivo generados previamente', async () => {
+      await db.query(`UPDATE remito SET estado = 'no_entregado', motivo_no_entrega = 'Cerrado' WHERE visita_id = 4`);
+      await db.query(`UPDATE visita SET estado = 'no_realizada' WHERE id = 4`);
+      const ins = await db.query(
+        `INSERT INTO rendicion_efectivo (hoja_de_ruta_id, transportista_id, declarado_centavos, declarado_en, clave_idempotencia, estado)
+         VALUES (2, 3, 0, now(), '${crypto.randomUUID()}', 'pendiente')
+         RETURNING id::text AS id`
+      );
+      await db.query(
+        `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_antes, valores_despues)
+         VALUES ('rendicion_efectivo', $1, 'alta', 3, NULL, $2)`,
+        [ins.rows[0].id, JSON.stringify({ hojaDeRutaId: '2', declaradoCentavos: 0, iniciadoAutomatico: true })]
+      );
+
+      const supervisor = await token('supervisor');
+      const lista = await dispatch(efectivoRouter, 'GET', '/rendiciones', {}, supervisor, undefined, { estado: 'pendiente' });
+      assert.equal(lista.statusCode, 200);
+      assert.equal(lista.body.rendiciones.some((r: any) => r.hojaDeRutaId === '2'), false);
+      assert.equal(Number((await uno(`SELECT count(*) AS n FROM rendicion_efectivo WHERE hoja_de_ruta_id = 2`)).n), 0);
+    });
+
     describe('hojas que no se arquean: en borrador o sin paradas', () => {
       // 10: en borrador y vacía (se está armando) · 11: publicada pero sin paradas · 12: en borrador con una parada sin remitos
       beforeEach(async () => {

@@ -6,8 +6,22 @@ export interface UserSession {
   email: string;
   role: UserRole;
   branch: string;
+  branches?: string[];
   token: string;
   authenticatedAt: string;
+}
+
+export function getSessionBranches(session: Pick<UserSession, 'branch' | 'branches'>): string[] {
+  if (Array.isArray(session.branches)) {
+    return session.branches.filter((b) => typeof b === 'string' && b.trim().length > 0);
+  }
+  if (session.branch && session.branch.trim() && session.branch !== 'Sin sucursal asignada') {
+    return session.branch
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
 }
 
 export interface LoginCredentials {

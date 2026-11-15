@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { UserSession } from '../../types/auth';
+import { UserSession, getSessionBranches } from '../../types/auth';
 import {
   Truck,
   Building2,
@@ -164,6 +164,14 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
 
   const badge = getRoleBadge();
   const isAdmin = session.role === 'Administrativo' || session.role === 'Administrador del sistema';
+  const branches = getSessionBranches(session);
+  const branchHeaderLabel =
+    branches.length === 0
+      ? 'Sin sucursal asignada'
+      : branches.length === 1
+      ? branches[0]
+      : `${branches[0]} (+${branches.length - 1})`;
+  const branchFullLabel = branches.length > 0 ? branches.join(', ') : 'Sin sucursal asignada';
 
   const navigate = (next: Seccion) => {
     const path =
@@ -234,9 +242,12 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
             </nav>
 
             <div className="ml-auto flex items-center gap-4 sm:order-3">
-              <div className="hidden items-center gap-2 text-xs text-marca-crema md:flex bg-white/10 px-3 py-1.5 rounded-full border border-white/15">
+              <div
+                title={branchFullLabel}
+                className="hidden items-center gap-2 text-xs text-marca-crema md:flex bg-white/10 px-3 py-1.5 rounded-full border border-white/15"
+              >
                 <Building2 className="h-4 w-4 text-marca-naranja" />
-                <span>{session.branch}</span>
+                <span>{branchHeaderLabel}</span>
               </div>
               <ProfileMenu session={session} onLogout={onLogout} onAuditoria={isAdmin ? () => navigate('auditoria') : undefined} />
             </div>
@@ -314,9 +325,9 @@ export const RoleRedirectView: React.FC<RoleRedirectViewProps> = ({
               </span>
               <div className="text-sm font-semibold text-slate-900">{session.name}</div>
               <div className="text-xs text-slate-600 font-mono">{session.email}</div>
-              <div className="text-xs text-slate-700 font-medium pt-1 flex items-center gap-1.5">
-                <Package className="w-3.5 h-3.5 text-slate-500" />
-                <span>{session.branch}</span>
+              <div className="text-xs text-slate-700 font-medium pt-1 flex items-start gap-1.5">
+                <Package className="w-3.5 h-3.5 text-slate-500 mt-0.5 flex-shrink-0" />
+                <span>{branchFullLabel}</span>
               </div>
             </div>
 
