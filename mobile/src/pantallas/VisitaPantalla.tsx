@@ -1,8 +1,8 @@
 // Una parada: entrega de sus remitos (HU #22, #23, #24) y cobro (HU #25 a #29).
 // Correcciones del cliente (24/10): se ven primero los remitos, el transportista elige cuáles entrega
 // y puede rechazar los restantes, los resueltos quedan abajo y el cobro no muestra datos del comercio.
-import { useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, BackHandler, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { colaOperaciones } from '../almacenamiento';
 import { Aviso } from '../componentes/Aviso';
@@ -16,9 +16,9 @@ import {
   validarCobro,
 } from '../dominio/cobro';
 import { centavosATexto, formatearPesos, parsearPesos } from '../dominio/dinero';
-import { armarEntrega, armarEntregaLote, armarRechazo, MOTIVOS_RECHAZO_PREESTABLECIDOS } from '../dominio/entrega';
-import { ColaPorClave, esRemitoResuelto, estadoCobro, InfoEstadoRemito, infoEstadoRemito } from '../dominio/estadoVisita';
-import { ordenarRemitosParaEntrega, planificarEntrega } from '../dominio/organizacion';
+import { armarEntrega, armarEntregaLote, armarRechazo, motivosRechazoPreestablecidos } from '../dominio/entrega';
+import { ColaPorClave, esRemitoResuelto, estadoCobro, estadoEntrega, InfoEstadoRemito, infoEstadoRemito } from '../dominio/estadoVisita';
+import { esVisitaTerminada, ordenarRemitosParaEntrega, planificarEntrega } from '../dominio/organizacion';
 import { colores, estilos } from '../estilos';
 import type { CobroDto, Remito, Visita } from '../tipos';
 import { obtenerUbicacion } from '../ubicacion';
@@ -70,7 +70,14 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
   const porEntregar = remitos.filter((remito) => !esRemitoResuelto(remito, cola));
   const seleccionados = porEntregar.filter((remito) => !desmarcados.has(remito.id));
   const restantes = porEntregar.filter((remito) => desmarcados.has(remito.id));
-  const ocupado = entregando || rechazando;
+  const ocupado = guardando || entregando || rechazando;
+
+  const algunRemitoEntregado = (visita.remitos || []).some((r) =>
+    ['hecho', 'sin_sincronizar'].includes(estadoEntrega(r, cola))
+  );
+  const esRechazoTotal =
+    !algunRemitoEntregado && seleccionados.length === 0 && aRechazar.length === porEntregar.length;
+  const motivosDisponibles = motivosRechazoPreestablecidos(esRechazoTotal);
 
   const motivoRechazoFinal = (motivoManual.trim() || motivoPreestablecido || '').trim();
 
@@ -90,8 +97,34 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
     }
   }
 
+  function intentarVolver(): boolean {
+    const algunEntregado = (visita.remitos || []).some((r) =>
+      ['hecho', 'sin_sincronizar'].includes(estadoEntrega(r, cola))
+    );
+    const faltaCobro = !yaCobrada && !importe.sinCobroEnDestino;
+
+    if (algunEntregado && faltaCobro) {
+      Alert.alert(
+        'Cobro pendiente',
+        'Ya confirmaste la entrega de los remitos. Debés registrar el cobro para poder salir de la parada y volver a la hoja de ruta.',
+        [{ text: 'Entendido' }]
+      );
+      return true;
+    }
+
+    onVolver();
+    return true;
+  }
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      return intentarVolver();
+    });
+    return () => sub.remove();
+  }, [visita, cola, yaCobrada, importe.sinCobroEnDestino, porEntregar.length]);
+
   // HU #22 / #23: confirma los remitos elegidos, con hora y GPS. Se guarda primero en el celular.
-  async function confirmarSeleccion() {
+  async function confirmarEntrega() {
     const plan = planificarEntrega(seleccionados, porEntregar);
     if (plan === 'nada') return;
     setEntregando(true);
@@ -99,31 +132,106 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
     setAvisoEntrega(null);
     try {
       const ubicacion = await obtenerUbicacion();
+      if (!ubicacion) {
+        setErrorEntrega(SIN_GPS);
+        return;
+      }
       if (plan === 'lote') {
         const lote = armarEntregaLote(porEntregar, ubicacion);
         if (!lote) return setErrorEntrega(SIN_GPS);
-        await colaOperaciones.encolar({ tipo: 'entrega_lote', visitaId: visita.id, entregas: lote.entregas, cuerpoGeneral: lote.cuerpoGeneral });
+        await colaOperaciones.encolar({
+          tipo: 'entrega_lote',
+          visitaId: visita.id,
+          entregas: lote.entregas,
+          cuerpoGeneral: lote.cuerpoGeneral,
+        });
       } else {
         const entrega = armarEntrega(ubicacion);
         if (!entrega) return setErrorEntrega(SIN_GPS);
         for (const remito of seleccionados) {
-          await colaOperaciones.encolar({ tipo: 'entrega', visitaId: visita.id, remitoId: remito.id, cuerpo: { ...entrega } });
+          await colaOperaciones.encolar({
+            tipo: 'entrega',
+            visitaId: visita.id,
+            remitoId: remito.id,
+            cuerpo: { ...entrega },
+          });
         }
       }
       if (enLinea) await colaOperaciones.sincronizar();
       await onCambio();
       setDesmarcados(new Set());
-      setAvisoEntrega(
-        `${seleccionados.length} remito(s) entregado(s).` + (restantes.length ? ` Quedan ${restantes.length} sin confirmar.` : '')
-      );
+
+      // Si con esta entrega la visita quedó completamente terminada (ej. sin cobro en destino o ya cobrada), vuelve
+      const colaActualizada = await colaOperaciones.estadoPorClave();
+      if (esVisitaTerminada(visita, colaActualizada)) {
+        const nombre = comercio.nombreFantasia || comercio.razonSocial;
+        onListo(`Parada entregada y finalizada: ${nombre}`);
+      } else {
+        setAvisoEntrega(
+          `${seleccionados.length} remito(s) entregado(s). Ahora debés registrar el cobro para completar la parada.`
+        );
+      }
+    } catch (err: any) {
+      setErrorEntrega(err.message || 'Error al confirmar la entrega.');
     } finally {
       setEntregando(false);
+    }
+  }
+
+  // HU #26 a #29: cobro de la visita. Exige que la entrega esté previamente confirmada.
+  async function confirmarCobro() {
+    if (porEntregar.length > 0) {
+      setErrorEntrega('Primero debés confirmar la entrega de los remitos antes de registrar el cobro.');
+      return;
+    }
+    if (!validacion.puedeConfirmar) return;
+
+    setGuardando(true);
+    setRechazo(null);
+    try {
+      const cuerpo: CobroDto = {
+        pagos: pagos.map((pago) => ({
+          claveIdempotencia: Crypto.randomUUID(),
+          medioPago: pago.medioPago,
+          importeCentavos: parsearPesos(pago.importeTexto) as number,
+          ...(pago.medioPago === 'transferencia' ? { referenciaTransferencia: pago.referencia.trim() } : {}),
+        })),
+        registradoEn: new Date().toISOString(),
+        ubicacion: await obtenerUbicacion().catch(() => null),
+      };
+      await colaOperaciones.encolar({ tipo: 'cobro', visitaId: visita.id, cuerpo });
+      if (enLinea) await colaOperaciones.sincronizar();
+      await onCambio();
+
+      const resultado = (await colaOperaciones.estadoPorClave()).get(`cobro:${visita.id}`);
+      if (resultado?.estado === 'rechazado') {
+        setRechazo(resultado.motivo || 'El servidor rechazó el cobro.');
+        return;
+      }
+
+      const colaActualizada = await colaOperaciones.estadoPorClave();
+      if (esVisitaTerminada(visita, colaActualizada)) {
+        const nombre = comercio.nombreFantasia || comercio.razonSocial;
+        onListo(
+          resultado?.estado === 'sincronizado'
+            ? `Parada cobrada y completada: ${nombre}`
+            : `Cobro guardado en el celular (${nombre}). Se enviará al recuperar la conexión.`
+        );
+      } else {
+        setAvisoEntrega('Cobro registrado. Faltan acciones para completar la parada.');
+      }
+    } finally {
+      setGuardando(false);
     }
   }
 
   // HU #24: rechazo con motivo. Corrección 5: un solo motivo para todos los remitos restantes.
   async function confirmarRechazo() {
     if (aRechazar.length === 0 || !motivoRechazoFinal) return;
+    if (!esRechazoTotal && motivoRechazoFinal.toLowerCase().includes('comercio cerrado')) {
+      setErrorEntrega("El motivo 'Comercio cerrado' solo se permite cuando se rechazan todos los remitos de la entrega.");
+      return;
+    }
     setRechazando(true);
     setErrorEntrega(null);
     try {
@@ -137,6 +245,14 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
       await onCambio();
       setAvisoEntrega(`${aRechazar.length} remito(s) rechazado(s): ${motivoRechazoFinal}.`);
       cerrarModal();
+      setDesmarcados(new Set());
+
+      // Si con este rechazo la visita quedó totalmente terminada (ej. todos rechazados y sin nada por cobrar):
+      const colaActualizada = await colaOperaciones.estadoPorClave();
+      if (esVisitaTerminada(visita, colaActualizada)) {
+        const nombre = comercio.nombreFantasia || comercio.razonSocial;
+        onListo(`Parada finalizada: ${nombre}`);
+      }
     } catch (err: any) {
       setErrorEntrega(err.message || 'Error al registrar el rechazo.');
     } finally {
@@ -159,46 +275,11 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
     setPagos(pagos.map((pago, j) => (j === i ? { ...pago, ...cambios } : pago)));
   }
 
-  async function confirmarCobro() {
-    if (!validacion.puedeConfirmar) return;
-    setGuardando(true);
-    setRechazo(null);
-    try {
-      const cuerpo: CobroDto = {
-        pagos: pagos.map((pago) => ({
-          claveIdempotencia: Crypto.randomUUID(),
-          medioPago: pago.medioPago,
-          importeCentavos: parsearPesos(pago.importeTexto) as number,
-          ...(pago.medioPago === 'transferencia' ? { referenciaTransferencia: pago.referencia.trim() } : {}),
-        })),
-        registradoEn: new Date().toISOString(),
-        ubicacion: await obtenerUbicacion(),
-      };
-      // Primero se guarda en el celular: el registro no depende de la señal (HU #26 E2, #29 E2).
-      await colaOperaciones.encolar({ tipo: 'cobro', visitaId: visita.id, cuerpo });
-      if (enLinea) await colaOperaciones.sincronizar();
-
-      const resultado = (await colaOperaciones.estadoPorClave()).get(`cobro:${visita.id}`);
-      if (resultado?.estado === 'rechazado') {
-        setRechazo(resultado.motivo || 'El servidor rechazó el cobro.');
-        return;
-      }
-      const nombre = comercio.nombreFantasia || comercio.razonSocial;
-      onListo(
-        resultado?.estado === 'sincronizado'
-          ? `Parada cobrada: ${nombre}`
-          : `Cobro guardado en el celular (${nombre}). Se enviará al recuperar la conexión.`
-      );
-    } finally {
-      setGuardando(false);
-    }
-  }
-
   return (
     <View style={{ flex: 1 }}>
       {/* Corrección 6: encabezado fijo para volver y actualizar sin buscar los botones */}
       <View style={[estilos.fila, { paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colores.borde, backgroundColor: colores.fondo }]}>
-        <Pressable onPress={onVolver} accessibilityRole="button" accessibilityLabel="Volver a la hoja de ruta" hitSlop={12}>
+        <Pressable onPress={intentarVolver} accessibilityRole="button" accessibilityLabel="Volver a la hoja de ruta" hitSlop={12}>
           <Text style={estilos.botonSecundarioTexto}>‹ Hoja de ruta</Text>
         </Pressable>
         <Pressable onPress={actualizar} disabled={actualizando} accessibilityRole="button" accessibilityLabel="Actualizar parada" hitSlop={12}>
@@ -261,16 +342,23 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
           })}
         </View>
 
-        {/* Corrección 5: confirmar los marcados y, si quedan, rechazar los restantes */}
+        {/* Corrección 5: los remitos pendientes se seleccionan con checkbox, y si quedan desmarcados se pueden rechazar */}
         {porEntregar.length ? (
           <View style={{ gap: 10 }}>
             <Pressable
-              style={[estilos.boton, (seleccionados.length === 0 || ocupado) && estilos.botonDeshabilitado]}
+              style={[
+                estilos.boton,
+                (seleccionados.length === 0 || ocupado) && estilos.botonDeshabilitado,
+              ]}
               disabled={seleccionados.length === 0 || ocupado}
-              onPress={confirmarSeleccion}
+              onPress={confirmarEntrega}
               accessibilityRole="button"
             >
-              {entregando ? <ActivityIndicator color="#fff" /> : <Text style={estilos.botonTexto}>Confirmar entrega ({seleccionados.length})</Text>}
+              {entregando ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={estilos.botonTexto}>Confirmar entrega ({seleccionados.length})</Text>
+              )}
             </Pressable>
             {restantes.length ? (
               <Pressable
@@ -302,10 +390,29 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
 
         {rechazo ? <Aviso tono="error">No se pudo registrar el cobro: {rechazo}</Aviso> : null}
 
-        {yaCobrada ? (
-          <Aviso tono="ok">{estado === 'hecho' ? 'Esta parada ya está cobrada.' : 'Cobro guardado en el celular, pendiente de sincronizar.'}</Aviso>
+        {porEntregar.length === 0 && yaCobrada ? (
+          <View style={{ gap: 12 }}>
+            <Aviso tono="ok">Esta parada ya está completada (entregada y cobrada).</Aviso>
+            <Pressable
+              style={estilos.botonSecundario}
+              onPress={intentarVolver}
+              accessibilityRole="button"
+              accessibilityLabel="Volver a la hoja de ruta"
+            >
+              <Text style={estilos.botonSecundarioTexto}>‹ Volver a la hoja de ruta</Text>
+            </Pressable>
+          </View>
+        ) : yaCobrada ? (
+          <Aviso tono="ok">
+            {estado === 'hecho' ? 'Esta parada ya está cobrada.' : 'Cobro guardado en el celular, pendiente de sincronizar.'}
+          </Aviso>
         ) : importe.sinCobroEnDestino ? (
-          <BotonConfirmar texto="Cerrar parada" habilitado={!guardando} guardando={guardando} onPress={confirmarCobro} />
+          <BotonConfirmar
+            texto="Cerrar parada"
+            habilitado={porEntregar.length === 0 && !guardando && !ocupado}
+            guardando={guardando}
+            onPress={confirmarCobro}
+          />
         ) : (
           <>
             {pagos.map((pago, i) => {
@@ -367,20 +474,28 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
             </View>
             {!enLinea ? <Text style={estilos.textoSuave}>El cobro por QR necesita conexión.</Text> : null}
 
-            {pagos.length ? (
-              <>
-                {/* HU #29 ESCENARIO 3: se resalta la diferencia y se bloquea la confirmación */}
-                {(validacion.erroresGenerales || []).map((mensaje) => (
-                  <Aviso key={mensaje} tono="error">{mensaje}</Aviso>
-                ))}
-                <BotonConfirmar
-                  texto={`Confirmar cobro · ${formatearPesos(validacion.declaradoCentavos)}`}
-                  habilitado={validacion.puedeConfirmar && !guardando}
-                  guardando={guardando}
-                  onPress={confirmarCobro}
-                />
-              </>
+            {porEntregar.length > 0 ? (
+              <Aviso tono="info">Primero confirmá la entrega de los remitos arriba para poder registrar el cobro.</Aviso>
             ) : null}
+
+            {pagos.length
+              ? (validacion.erroresGenerales || []).map((mensaje) => (
+                  <Aviso key={mensaje} tono="error">{mensaje}</Aviso>
+                ))
+              : null}
+
+            <BotonConfirmar
+              texto={`Confirmar cobro · ${formatearPesos(pagos.length > 0 ? validacion.declaradoCentavos : importe.totalCentavos)}`}
+              habilitado={
+                porEntregar.length === 0 &&
+                pagos.length > 0 &&
+                validacion.puedeConfirmar &&
+                !guardando &&
+                !ocupado
+              }
+              guardando={guardando}
+              onPress={confirmarCobro}
+            />
           </>
         )}
       </ScrollView>
@@ -393,7 +508,7 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
             <Text style={estilos.subtitulo}>{aRechazar.map((remito) => `${remito.numero} · ${remito.marca}`).join('\n')}</Text>
             <Text style={estilos.textoSuave}>Elegí un motivo o escribilo:</Text>
 
-            {MOTIVOS_RECHAZO_PREESTABLECIDOS.map((motivo) => {
+            {motivosDisponibles.map((motivo) => {
               const elegido = motivoPreestablecido === motivo && !motivoManual.trim();
               return (
                 <Pressable

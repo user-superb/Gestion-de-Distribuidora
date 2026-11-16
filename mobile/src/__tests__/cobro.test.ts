@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { calcularImporteVisitaLocal, importeRestante, PagoEnCarga, validarCobro } from '../dominio/cobro';
 import { centavosATexto, formatearPesos, parsearPesos } from '../dominio/dinero';
-import { armarEntrega, armarEntregaLote, armarRechazo, MOTIVOS_RECHAZO_PREESTABLECIDOS, puedeConfirmarse } from '../dominio/entrega';
+import { armarEntrega, armarEntregaLote, armarRechazo, MOTIVOS_RECHAZO_PREESTABLECIDOS, MOTIVO_COMERCIO_CERRADO, motivosRechazoPreestablecidos, puedeConfirmarse } from '../dominio/entrega';
 import {
   esRemitoRechazado,
   esRemitoResuelto,
@@ -275,6 +275,18 @@ describe('HU #23 · Confirmación de entrega multimarca', () => {
 });
 
 describe('HU: Registro de rechazo de un remito (Dominio)', () => {
+  it('motivosRechazoPreestablecidos incluye "Comercio cerrado" solo cuando esRechazoTotal es true', () => {
+    const motivosTotal = motivosRechazoPreestablecidos(true);
+    assert.ok(motivosTotal.includes(MOTIVO_COMERCIO_CERRADO));
+    assert.equal(motivosTotal.length, MOTIVOS_RECHAZO_PREESTABLECIDOS.length);
+
+    const motivosParcial = motivosRechazoPreestablecidos(false);
+    assert.equal(motivosParcial.includes(MOTIVO_COMERCIO_CERRADO), false);
+    assert.equal(motivosParcial.length, MOTIVOS_RECHAZO_PREESTABLECIDOS.length - 1);
+    assert.ok(motivosParcial.includes('Mercadería dañada o en mal estado'));
+    assert.ok(motivosParcial.includes('Pedido duplicado o no solicitado'));
+  });
+
   it('armarRechazo con motivo preestablecido genera RechazoDto válido', () => {
     const motivo = MOTIVOS_RECHAZO_PREESTABLECIDOS[0]; // 'Comercio cerrado'
     const ahora = new Date('2026-10-20T15:30:00.000Z');

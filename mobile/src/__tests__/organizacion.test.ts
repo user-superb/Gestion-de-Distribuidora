@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { ColaPorClave } from '../dominio/estadoVisita';
-import { esParadaTerminada, faltaCobrar, ordenarRemitosParaEntrega, planificarEntrega, separarParadas } from '../dominio/organizacion';
+import { esParadaTerminada, esVisitaTerminada, faltaCobrar, ordenarRemitosParaEntrega, planificarEntrega, separarParadas } from '../dominio/organizacion';
 import { consolidarParadas } from '../dominio/parada';
 import type { ItemCola } from '../sincronizacion/cola';
 import type { Remito, Visita } from '../tipos';
@@ -101,3 +101,37 @@ describe('Corrección 5 · Elegir qué remitos se entregan', () => {
     assert.equal(planificarEntrega([], pendientes), 'nada');
   });
 });
+
+describe('Evaluación de visita terminada (esVisitaTerminada)', () => {
+  it('no está terminada si aún tiene remitos por entregar aunque esté cobrada', () => {
+    const v = visita('1', 1, [remito('a'), remito('b', 'entregado')], true);
+    assert.equal(esVisitaTerminada(v, vacia), false);
+  });
+
+  it('no está terminada si los remitos están entregados pero aún falta cobrar', () => {
+    const v = visita('1', 1, [remito('a', 'entregado')], false);
+    assert.equal(esVisitaTerminada(v, vacia), false);
+  });
+
+  it('está terminada si los remitos están entregados y el cobro está hecho', () => {
+    const v = visita('1', 1, [remito('a', 'entregado')], true);
+    assert.equal(esVisitaTerminada(v, vacia), true);
+  });
+
+  it('está terminada si los remitos y el cobro están encolados localmente', () => {
+    const cola: ColaPorClave = new Map([entregaEnCola('1', 'a'), cobroEnCola('1')]);
+    const v = visita('1', 1, [remito('a')], false);
+    assert.equal(esVisitaTerminada(v, cola), true);
+  });
+
+  it('está terminada si todos los remitos fueron rechazados (sin cobro exigible)', () => {
+    const v = visita('1', 1, [remito('a', 'no_entregado')], false);
+    assert.equal(esVisitaTerminada(v, vacia), true);
+  });
+
+  it('está terminada si los remitos están entregados y la visita no tiene cobro en destino', () => {
+    const v = visita('1', 1, [remito('a', 'entregado', 0)], false);
+    assert.equal(esVisitaTerminada(v, vacia), true);
+  });
+});
+

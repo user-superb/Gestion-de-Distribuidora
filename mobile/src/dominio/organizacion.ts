@@ -2,7 +2,19 @@
 // Detalle en docs/requerimientos/epica-1.4-cobro-movil.md · "Correcciones de Martín".
 import { calcularImporteVisitaLocal } from './cobro';
 import { ColaPorClave, esRemitoResuelto, estadoCobro } from './estadoVisita';
-import type { ParadaConsolidada, Remito } from '../tipos';
+import type { ParadaConsolidada, Remito, Visita } from '../tipos';
+
+/**
+ * Una visita individual está terminada cuando sus remitos ya se resolvieron
+ * (entregados o rechazados) y no queda nada por cobrar o no tiene cobro en destino.
+ */
+export function esVisitaTerminada(visita: Visita, cola: ColaPorClave): boolean {
+  const pendientes = (visita.remitos || []).filter((r) => !esRemitoResuelto(r, cola)).length;
+  if (pendientes > 0) return false;
+  const cobro = estadoCobro(visita, cola);
+  if (cobro === 'hecho' || cobro === 'sin_sincronizar') return true;
+  return calcularImporteVisitaLocal(visita, cola).sinCobroEnDestino;
+}
 
 /**
  * Una parada está terminada cuando sus remitos ya se resolvieron (entregados o rechazados)

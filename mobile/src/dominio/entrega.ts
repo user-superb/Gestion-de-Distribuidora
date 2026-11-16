@@ -11,6 +11,18 @@ export const MOTIVOS_RECHAZO_PREESTABLECIDOS = [
   'Falta de dinero / No puede pagar',
 ] as const;
 
+export const MOTIVO_COMERCIO_CERRADO = 'Comercio cerrado';
+
+/**
+ * Obtiene los motivos de rechazo preestablecidos aplicables.
+ * 'Comercio cerrado' solo se permite cuando se rechazan todos los remitos de la entrega
+ * (no aplica para rechazos parciales donde algún remito se entrega o ya fue entregado).
+ */
+export function motivosRechazoPreestablecidos(esRechazoTotal: boolean): readonly string[] {
+  if (esRechazoTotal) return MOTIVOS_RECHAZO_PREESTABLECIDOS;
+  return MOTIVOS_RECHAZO_PREESTABLECIDOS.filter((m) => m !== MOTIVO_COMERCIO_CERRADO);
+}
+
 /** Estados que ya no se confirman: entregado, rechazado o devuelto, anulado. */
 export const ESTADOS_REMITO_TERMINALES = ['entregado', 'no_entregado', 'devuelto', 'anulado'];
 
