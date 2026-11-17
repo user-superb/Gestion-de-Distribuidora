@@ -178,7 +178,7 @@ describe('Conciliación 1 a N y exclusión de movimientos con discrepancias', ()
         observacion_resolucion text
       );
       CREATE TABLE discrepancia_comprobante (discrepancia_id bigint PRIMARY KEY, nombre_archivo text NOT NULL, tipo_mime text NOT NULL, contenido bytea NOT NULL, tamano_bytes bigint NOT NULL);
-      CREATE TABLE discrepancia_ajuste (id serial PRIMARY KEY, discrepancia_id bigint NOT NULL, remito_id bigint, comercio_id bigint, tipo text NOT NULL, importe_centavos bigint NOT NULL);
+      CREATE TABLE discrepancia_ajuste (id serial PRIMARY KEY, discrepancia_id bigint NOT NULL, remito_id bigint, comercio_id bigint, tipo text NOT NULL, importe_centavos bigint NOT NULL CHECK (importe_centavos > 0));
       CREATE TABLE discrepancia_notificacion (id serial PRIMARY KEY, discrepancia_id bigint NOT NULL, usuario_id bigint NOT NULL, mensaje text NOT NULL, creada_en timestamp DEFAULT now(), leida_en timestamp);
 
       CREATE VIEW remito_saldo AS
@@ -471,5 +471,34 @@ describe('Conciliación 1 a N y exclusión de movimientos con discrepancias', ()
     assert.equal(resAll.statusCode, 200);
     const afterAll = await pool.query('SELECT id FROM discrepancia_notificacion WHERE usuario_id = 1 AND leida_en IS NULL');
     assert.equal(afterAll.rows.length, 0);
+  });
+
+  it('aprueba un faltante con múltiples remitos sin insertar ajustes de $0 y salda todos los remitos', async () => {
+    const disc = await conciliacionService.registrarDiscrepancia(
+      [2],
+      [1, 2],
+      'Retención IIBB sobre pago consolidado',
+      'retenciones_impositivas',
+      { originalname: 'ret.pdf', mimetype: 'application/pdf', size: 8, buffer: Buffer.from('%PDF-1.7') },
+      1
+    );
+    const aprobada = await conciliacionService.resolverDiscrepancia(disc.id, 2, true, 'Aprobado con retención');
+    assert.equal(aprobada.estado, 'aprobada');
+
+    const ajustes = await pool.query(
+      'SELECT remito_id::text AS remito_id, tipo, importe_centavos::text AS importe_centavos FROM discrepancia_ajuste WHERE discrepancia_id = $1 ORDER BY id',
+      [disc.id]
+    );
+    assert.deepEqual(ajustes.rows, [
+      { remito_id: '2', tipo: 'reduccion_saldo', importe_centavos: '5000' },
+    ]);
+
+    const saldos = await pool.query(
+      'SELECT remito_id::text AS remito_id, saldo_centavos::text AS saldo_centavos, estado_pago FROM remito_saldo WHERE remito_id IN (1, 2) ORDER BY remito_id'
+    );
+    assert.deepEqual(saldos.rows, [
+      { remito_id: '1', saldo_centavos: '0', estado_pago: 'saldado' },
+      { remito_id: '2', saldo_centavos: '0', estado_pago: 'saldado' },
+    ]);
   });
 });

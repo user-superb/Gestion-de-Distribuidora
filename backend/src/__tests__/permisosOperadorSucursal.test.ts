@@ -151,6 +151,8 @@ describe('HU #53: Asignar Permisos de Operador de Sucursal (Épica 2.4: Modelo M
       CREATE TABLE IF NOT EXISTS discrepancia_conciliacion (
         id serial PRIMARY KEY,
         movimiento_id bigint,
+        movimiento_ids bigint[] NOT NULL DEFAULT '{}',
+        remito_ids bigint[] NOT NULL DEFAULT '{}',
         estado text NOT NULL DEFAULT 'pendiente'
       );
 

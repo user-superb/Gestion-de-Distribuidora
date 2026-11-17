@@ -623,31 +623,37 @@ function agregarIdsArray(destino: Set<string>, valor: unknown) {
 async function getIdsEnDiscrepanciaActiva(): Promise<{ movimientos: Set<string>; remitos: Set<string> }> {
   const movimientos = new Set<string>();
   const remitos = new Set<string>();
-  try {
-    const res = await db.query(
-      `SELECT movimiento_id::text AS movimiento_id, movimiento_ids, remito_ids
-       FROM discrepancia_conciliacion
-       WHERE estado IN ('pendiente', 'escalada')`
-    );
-    for (const row of res.rows) {
-      if (row.movimiento_id != null) movimientos.add(String(row.movimiento_id));
-      agregarIdsArray(movimientos, row.movimiento_ids);
-      agregarIdsArray(remitos, row.remito_ids);
-    }
-  } catch (err: any) {
-    const msg = String(err?.message || '');
-    if (msg.includes('movimiento_ids')) {
-      const res = await db.query(
-        `SELECT movimiento_id::text AS movimiento_id, remito_ids
-         FROM discrepancia_conciliacion
-         WHERE estado IN ('pendiente', 'escalada')`
-      );
+  // Respaldo escalonado para esquemas parciales o legados sin movimiento_ids / remito_ids.
+  const consultas = [
+    `SELECT movimiento_id::text AS movimiento_id, movimiento_ids, remito_ids
+     FROM discrepancia_conciliacion
+     WHERE estado IN ('pendiente', 'escalada')`,
+    `SELECT movimiento_id::text AS movimiento_id, remito_ids
+     FROM discrepancia_conciliacion
+     WHERE estado IN ('pendiente', 'escalada')`,
+    `SELECT movimiento_id::text AS movimiento_id
+     FROM discrepancia_conciliacion
+     WHERE estado IN ('pendiente', 'escalada')`,
+  ];
+
+  for (let i = 0; i < consultas.length; i++) {
+    try {
+      const res = await db.query(consultas[i]);
       for (const row of res.rows) {
         if (row.movimiento_id != null) movimientos.add(String(row.movimiento_id));
+        agregarIdsArray(movimientos, row.movimiento_ids);
         agregarIdsArray(remitos, row.remito_ids);
       }
-    } else if (!msg.includes('discrepancia_conciliacion')) {
-      throw err;
+      return { movimientos, remitos };
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      if (msg.includes('discrepancia_conciliacion')) {
+        return { movimientos, remitos };
+      }
+      const columnaFaltante = msg.includes('movimiento_ids') || msg.includes('remito_ids');
+      if (!columnaFaltante || i === consultas.length - 1) {
+        throw err;
+      }
     }
   }
   return { movimientos, remitos };
@@ -2026,6 +2032,7 @@ async function aplicarDiscrepancia(client: PoolClient, id: string, result: Await
       if (!restante) break;
       const saldo = saldos.get(String(remito.id))!;
       const ajuste = saldo < restante ? saldo : restante;
+      if (ajuste <= 0n) continue;
       await client.query(
         `INSERT INTO discrepancia_ajuste (discrepancia_id, remito_id, tipo, importe_centavos) VALUES ($1, $2, 'reduccion_saldo', $3)`,
         [id, remito.id, ajuste.toString()]
