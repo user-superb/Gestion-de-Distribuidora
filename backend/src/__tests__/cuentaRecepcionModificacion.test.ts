@@ -376,4 +376,22 @@ describe('HU: Modificar los datos de una cuenta de recepción para mantener la v
     assert.equal(okOperativos.body.cuenta.nombre_fantasia, 'Cuenta Galic Recaudación');
     assert.equal(okOperativos.body.cuenta.cbu.trim(), '0070000900000000000048');
   });
+
+  it('ESCENARIO 4: Rechaza reasignar sucursal si la cuenta está inactiva', async () => {
+    const token = await getAdminToken();
+
+    // Crear cuenta inactiva en sucursal 1
+    await db.query(`
+      INSERT INTO cuenta_recepcion (id, sucursal_id, alias, banco, activa)
+      VALUES (999, 1, 'CUENTA.INACTIVA.TEST', 'Banco Galicia', false);
+    `);
+
+    const res = await dispatch(configuracionRouter, 'put', '/configuracion/cuentas-recepcion/999', {
+      alias: 'CUENTA.INACTIVA.TEST',
+      sucursal_id: 2,
+    }, token);
+
+    assert.equal(res.statusCode, 422);
+    assert.equal(res.body.error, 'CUENTA_INACTIVA');
+  });
 });

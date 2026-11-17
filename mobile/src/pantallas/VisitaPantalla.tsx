@@ -59,6 +59,7 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
   const [motivoPreestablecido, setMotivoPreestablecido] = useState<string | null>(null);
   const [motivoManual, setMotivoManual] = useState<string>('');
   const [rechazando, setRechazando] = useState(false);
+  const [intentoCobro, setIntentoCobro] = useState(false);
 
   const enColaCobro = cola.get(`cobro:${visita.id}`);
   const [rechazo, setRechazo] = useState<string | null>(enColaCobro?.estado === 'rechazado' ? enColaCobro.motivo || null : null);
@@ -122,6 +123,10 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
     });
     return () => sub.remove();
   }, [visita, cola, yaCobrada, importe.sinCobroEnDestino, porEntregar.length]);
+
+  useEffect(() => {
+    setIntentoCobro(false);
+  }, [visita.id]);
 
   // HU #22 / #23: confirma los remitos elegidos, con hora y GPS. Se guarda primero en el celular.
   async function confirmarEntrega() {
@@ -267,6 +272,10 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
   }
 
   function agregarMedio(medioPago: MedioPago) {
+    if (porEntregar.length > 0) {
+      setIntentoCobro(true);
+      return;
+    }
     const restante = importeRestante(pagos, importe.totalCentavos);
     setPagos([...pagos, { medioPago, importeTexto: restante ? centavosATexto(restante) : '', referencia: '' }]);
   }
@@ -474,8 +483,8 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
             </View>
             {!enLinea ? <Text style={estilos.textoSuave}>El cobro por QR necesita conexión.</Text> : null}
 
-            {porEntregar.length > 0 ? (
-              <Aviso tono="info">Primero confirmá la entrega de los remitos arriba para poder registrar el cobro.</Aviso>
+            {(intentoCobro || pagos.length > 0) && porEntregar.length > 0 ? (
+              <Aviso tono="info">Primero confirmá la visita antes de confirmar el cobro.</Aviso>
             ) : null}
 
             {pagos.length

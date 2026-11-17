@@ -754,6 +754,13 @@ configuracionRouter.put('/configuracion/cuentas-recepcion/:id', async (req, res)
     // Validar sucursal si se desea cambiar o asociar
     const nuevaSucursalId = sucursalId !== undefined ? sucursalId : current.sucursal_id;
     if (sucursalId !== undefined && sucursalId !== current.sucursal_id) {
+      if (!current.activa) {
+        return res.status(422).json({
+          error: 'CUENTA_INACTIVA',
+          message: 'La cuenta receptora debe encontrarse activa para reasignarse a otra sucursal.',
+        });
+      }
+
       const branchCheck = await db.query('SELECT id, activa FROM sucursal WHERE id = $1', [nuevaSucursalId]);
       if (!branchCheck.rowCount || !branchCheck.rows[0].activa) {
         return res.status(422).json({

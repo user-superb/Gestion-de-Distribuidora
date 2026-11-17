@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, Building2, Check, Edit2, Lock, Plus, X } from 'lucide-react';
+import { AlertTriangle, Check, Edit2, Lock, Plus, X } from 'lucide-react';
 import { UserSession } from '../../types/auth';
 
 import { API_ROOT as API } from '../../config/api';
@@ -32,14 +32,10 @@ type Draft = {
   banco: string;
   cuit_titular: string;
   moneda: 'ARS' | 'USD';
+  activa?: boolean;
   tiene_movimientos?: boolean;
   en_conciliacion_activa?: boolean;
   periodo_contable_bloqueado?: boolean;
-};
-
-type AsociarModal = {
-  cuenta: Cuenta;
-  sucursal_id: string;
 };
 
 function validarCbuChecksumFrontend(cbu: string): boolean {
@@ -66,7 +62,6 @@ export const GestionCuentasRecepcion: React.FC<{ session: UserSession }> = ({ se
   const [cuentas, setCuentas] = useState<Cuenta[]>([]);
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [asociarModal, setAsociarModal] = useState<AsociarModal | null>(null);
   const [error, setError] = useState('');
   const [errorField, setErrorField] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState('');
@@ -86,6 +81,20 @@ export const GestionCuentasRecepcion: React.FC<{ session: UserSession }> = ({ se
   };
 
   useEffect(() => { load().catch((e) => setError(e.message)); }, [session.token]);
+
+  useEffect(() => {
+    if (!successMsg) return;
+    const timer = window.setTimeout(() => {
+      setSuccessMsg('');
+    }, 5000);
+    return () => window.clearTimeout(timer);
+  }, [successMsg]);
+
+  const handleCancelDraft = () => {
+    setDraft(null);
+    setError('');
+    setErrorField(null);
+  };
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -130,32 +139,6 @@ export const GestionCuentasRecepcion: React.FC<{ session: UserSession }> = ({ se
     }
   };
 
-  const handleAsociar = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!asociarModal) return;
-    setBusy(true); setError(''); setSuccessMsg('');
-    try {
-      const response = await fetch(`${API}/api/configuracion/cuentas-recepcion/${asociarModal.cuenta.id}/asociar`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          sucursal_id: Number(asociarModal.sucursal_id),
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || 'No se pudo asociar la cuenta a la sucursal.');
-      }
-      setSuccessMsg(data.message || 'Cuenta asociada a la sucursal exitosamente.');
-      setAsociarModal(null);
-      await load();
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const startEdit = (cuenta: Cuenta) => {
     setError('');
     setSuccessMsg('');
@@ -176,22 +159,10 @@ export const GestionCuentasRecepcion: React.FC<{ session: UserSession }> = ({ se
       banco: cuenta.banco || '',
       cuit_titular: cuenta.cuit_titular?.trim() || '',
       moneda: (cuenta.moneda === 'USD' ? 'USD' : 'ARS'),
+      activa: cuenta.activa,
       tiene_movimientos: cuenta.tiene_movimientos,
       en_conciliacion_activa: cuenta.en_conciliacion_activa,
       periodo_contable_bloqueado: cuenta.periodo_contable_bloqueado,
-    });
-  };
-
-  const startAsociar = (cuenta: Cuenta) => {
-    setError('');
-    setSuccessMsg('');
-    if (!cuenta.activa) {
-      setError('La cuenta receptora debe encontrarse activa para poder asociarse a una sucursal.');
-      return;
-    }
-    setAsociarModal({
-      cuenta,
-      sucursal_id: String(cuenta.sucursal_id),
     });
   };
 
@@ -223,6 +194,8 @@ export const GestionCuentasRecepcion: React.FC<{ session: UserSession }> = ({ se
           type="button"
           onClick={() => {
             setError('');
+            setErrorField(null);
+            setSuccessMsg('');
             setDraft({
               sucursal_id: '',
               nombre_fantasia: '',
@@ -242,66 +215,42 @@ export const GestionCuentasRecepcion: React.FC<{ session: UserSession }> = ({ se
       </div>
 
       {error && (
-        <div role="alert" className="flex items-start gap-2 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-          <AlertTriangle className="h-4 w-4 shrink-0 text-red-600 mt-0.5" />
-          <div>{error}</div>
+        <div role="alert" className="flex items-start justify-between gap-2 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-red-600 mt-0.5" />
+            <div>{error}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setError('');
+              setErrorField(null);
+            }}
+            className="text-red-500 hover:text-red-700 p-0.5 rounded transition-colors"
+            title="Cerrar notificación"
+            aria-label="Cerrar notificación de error"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
       )}
 
       {successMsg && (
-        <div role="status" className="flex items-start gap-2 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-          <Check className="h-4 w-4 shrink-0 text-emerald-600 mt-0.5" />
-          <div>{successMsg}</div>
+        <div role="status" className="flex items-start justify-between gap-2 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          <div className="flex items-start gap-2">
+            <Check className="h-4 w-4 shrink-0 text-emerald-600 mt-0.5" />
+            <div>{successMsg}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSuccessMsg('')}
+            className="text-emerald-500 hover:text-emerald-700 p-0.5 rounded transition-colors"
+            title="Cerrar notificación"
+            aria-label="Cerrar notificación de éxito"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
-      )}
-
-      {asociarModal && (
-        <form onSubmit={handleAsociar} className="grid gap-3 rounded border border-blue-200 bg-blue-50/50 p-4 sm:grid-cols-2">
-          <div className="sm:col-span-2">
-            <h3 className="text-sm font-semibold text-blue-900 flex items-center gap-1.5">
-              <Building2 className="h-4 w-4 text-blue-700" />
-              Asociar cuenta a sucursal habilitada: {asociarModal.cuenta.alias}
-            </h3>
-            <p className="mt-1 text-xs text-blue-800">
-              Sectorizá los fondos recaudados vinculando esta cuenta activa a una sucursal operativa vigente. La visibilidad de la cuenta quedará limitada a los operadores autorizados en dicha sede.
-            </p>
-          </div>
-
-          <label className="text-sm text-slate-700 sm:col-span-2">
-            Seleccionar Sucursal destino
-            <select
-              required
-              value={asociarModal.sucursal_id}
-              onChange={(e) => setAsociarModal({ ...asociarModal, sucursal_id: e.target.value })}
-              className="mt-1 w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm"
-            >
-              <option value="">Seleccioná una sucursal operativa vigente</option>
-              {sucursales.map((sucursal) => (
-                <option key={sucursal.id} value={sucursal.id}>
-                  {sucursal.nombre} {Number(asociarModal.cuenta.sucursal_id) === sucursal.id ? '(Actualmente asociada)' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div className="flex gap-2 sm:col-span-2 pt-1">
-            <button
-              disabled={busy}
-              className="inline-flex items-center gap-2 rounded bg-blue-700 px-4 py-2 text-sm text-white hover:bg-blue-800 disabled:opacity-50"
-            >
-              <Check className="h-4 w-4" />
-              Confirmar asociación
-            </button>
-            <button
-              type="button"
-              onClick={() => setAsociarModal(null)}
-              className="inline-flex items-center gap-2 rounded border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-            >
-              <X className="h-4 w-4" />
-              Cancelar
-            </button>
-          </div>
-        </form>
       )}
 
       {draft && (
@@ -313,7 +262,7 @@ export const GestionCuentasRecepcion: React.FC<{ session: UserSession }> = ({ se
             {draft.id && draft.tiene_movimientos && (
               <p className="mt-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 flex items-center gap-1.5">
                 <Lock className="h-3.5 w-3.5 shrink-0" />
-                Los datos estructurales (CBU, CUIT del titular y Moneda) se encuentran en <strong>modo solo lectura</strong> porque la cuenta ya registra movimientos contables históricos.
+                Los datos estructurales (Banco emisor, CBU, CUIT del titular y Moneda) se encuentran en <strong>modo solo lectura</strong> porque la cuenta ya registra movimientos contables históricos.
               </p>
             )}
           </div>
@@ -340,28 +289,49 @@ export const GestionCuentasRecepcion: React.FC<{ session: UserSession }> = ({ se
           </label>
 
           <label className="text-sm text-slate-700">
-            Sucursal asignada
+            <span className="flex items-center justify-between">
+              <span>Sucursal asignada *</span>
+              {draft.id && !draft.activa && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium">
+                  <Lock className="h-3 w-3" /> Solo lectura (cuenta inactiva)
+                </span>
+              )}
+            </span>
             <select
               required
+              disabled={Boolean(draft.id && !draft.activa)}
               value={draft.sucursal_id}
               onChange={(e) => setDraft({ ...draft, sucursal_id: e.target.value })}
-              className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
+              className="mt-1 w-full rounded border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
             >
               <option value="">Seleccioná una sucursal</option>
               {sucursales.map((sucursal) => (
                 <option key={sucursal.id} value={sucursal.id}>{sucursal.nombre}</option>
               ))}
             </select>
+            {draft.id && !draft.activa && (
+              <p className="mt-1 text-xs text-slate-500">
+                La cuenta debe encontrarse activa para poder reasignarse a otra sucursal.
+              </p>
+            )}
           </label>
 
           <label className="text-sm text-slate-700">
-            Banco emisor *
+            <span className="flex items-center justify-between">
+              <span>Banco emisor *</span>
+              {draft.id && draft.tiene_movimientos && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium">
+                  <Lock className="h-3 w-3" /> Solo lectura
+                </span>
+              )}
+            </span>
             <input
               required
+              disabled={Boolean(draft.id && draft.tiene_movimientos)}
               value={draft.banco}
               onChange={(e) => setDraft({ ...draft, banco: e.target.value })}
               placeholder="Ej: Banco Galicia"
-              className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
+              className="mt-1 w-full rounded border border-slate-300 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
             />
           </label>
 
@@ -450,7 +420,7 @@ export const GestionCuentasRecepcion: React.FC<{ session: UserSession }> = ({ se
             </button>
             <button
               type="button"
-              onClick={() => setDraft(null)}
+              onClick={handleCancelDraft}
               className="inline-flex items-center gap-2 rounded border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
             >
               <X className="h-4 w-4" />
@@ -516,24 +486,6 @@ export const GestionCuentasRecepcion: React.FC<{ session: UserSession }> = ({ se
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => startAsociar(cuenta)}
-                        disabled={!cuenta.activa}
-                        className={`inline-flex items-center gap-1 text-sm font-medium ${
-                          !cuenta.activa
-                            ? 'text-slate-400 cursor-not-allowed'
-                            : 'text-indigo-700 hover:underline'
-                        }`}
-                        title={
-                          !cuenta.activa
-                            ? 'La cuenta debe estar activa para poder asociarse a una sucursal'
-                            : 'Asociar a sucursal habilitada'
-                        }
-                      >
-                        <Building2 className="h-3.5 w-3.5" />
-                        Asociar
-                      </button>
                       <button
                         type="button"
                         onClick={() => startEdit(cuenta)}

@@ -139,6 +139,7 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
   const [notificaciones, setNotificaciones] = useState<{ id: string; mensaje: string }[]>([]);
   const [mensaje, setMensaje] = useState('');
   const [error, setError] = useState('');
+  const [errorDiscrepancia, setErrorDiscrepancia] = useState<{ id?: string; mensaje: string } | null>(null);
   const [cargando, setCargando] = useState(false);
 
   // Estado para HU: Importación de extracto bancario digital y Cargas Manuales (Transferencia y QR)
@@ -203,7 +204,42 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
     }
   }, [fecha, headers, onDataLoaded]);
 
+  const descartarNotificacion = useCallback(async (id?: string) => {
+    setNotificaciones((prev) => (id ? prev.filter((item) => item.id !== id) : []));
+    try {
+      const endpoint = id ? `${API_BASE}/conciliacion/notificaciones/${id}/leer` : `${API_BASE}/conciliacion/notificaciones/leer-todas`;
+      await fetch(endpoint, { method: 'POST', headers });
+    } catch {
+      // Silenciar error de red puntual; la UI ya descartó el aviso en la sesión actual
+    }
+  }, [headers]);
+
   useEffect(() => { void cargar(); }, [cargar]);
+
+  useEffect(() => {
+    if (!mensaje) return;
+    const timer = window.setTimeout(() => setMensaje(''), 5000);
+    return () => window.clearTimeout(timer);
+  }, [mensaje]);
+
+  // Mensajes de notificación superior (ej: discrepancia rechazada): se van tras 6s
+  useEffect(() => {
+    if (notificaciones.length === 0) return;
+    const timer = window.setTimeout(() => {
+      void descartarNotificacion();
+    }, 6000);
+    return () => window.clearTimeout(timer);
+  }, [notificaciones, descartarNotificacion]);
+
+  // Al cambiar de paso/pantalla, se limpian los errores, mensajes y avisos
+  useEffect(() => {
+    setError('');
+    setErrorDiscrepancia(null);
+    setMensaje('');
+    if (notificaciones.length > 0) {
+      void descartarNotificacion();
+    }
+  }, [pasoActual, descartarNotificacion]);
 
   useEffect(() => {
     const pasoCfg = PASOS_CONCILIACION.find((p) => p.id === pasoActual);
@@ -546,37 +582,52 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
 
   const resolver = async (item: Discrepancia, accion: 'aprobar' | 'rechazar') => {
     const esAdminSistema = session.role === 'Administrador del sistema';
-    if (accion === 'rechazar' && !esAdminSistema && !observacionResolucion.trim()) { setError('Escribí el motivo del rechazo.'); return; }
-    setError(''); setMensaje(''); setCargando(true);
+    if (accion === 'rechazar' && !esAdminSistema && !observacionResolucion.trim()) {
+      const msg = 'Escribí el motivo del rechazo.';
+      setErrorDiscrepancia({ id: item.id, mensaje: msg });
+      return;
+    }
+    setErrorDiscrepancia(null);
+    setMensaje('');
+    setCargando(true);
     try {
       const response = await fetch(`${API_BASE}/conciliacion/discrepancias/${item.id}/${accion}`, {
-        method: 'POST', headers,
+        method: 'POST',
+        headers,
         body: JSON.stringify({ observacion: observacionResolucion }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'No se pudo resolver la discrepancia.');
+      if (!response.ok) {
+        const errorMsg = data.message || 'No se pudo resolver la discrepancia.';
+        // Si el caso ya fue resuelto por otro usuario o no se encuentra (409 o 404), removerlo de la lista inmediatamente
+        if (response.status === 409 || response.status === 404 || errorMsg.toLowerCase().includes('ya fue resuelto')) {
+          setDiscrepancias((prev) => prev.filter((d) => d.id !== item.id));
+        }
+        setErrorDiscrepancia({ id: item.id, mensaje: errorMsg });
+        throw new Error(errorMsg);
+      }
       setMensaje(data.mensaje || (accion === 'aprobar' ? 'Discrepancia aprobada e imputada.' : 'Discrepancia rechazada; se notificó al administrativo.'));
-      setObservacionResolucion(''); await cargar();
-    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo resolver la discrepancia.'); }
-    finally { setCargando(false); }
+      setObservacionResolucion('');
+      setErrorDiscrepancia(null);
+      await cargar();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'No se pudo resolver la discrepancia.';
+      if (msg.toLowerCase().includes('ya fue resuelto')) {
+        setDiscrepancias((prev) => prev.filter((d) => d.id !== item.id));
+      }
+      await cargar();
+      setErrorDiscrepancia({ id: item.id, mensaje: msg });
+    } finally {
+      setCargando(false);
+    }
   };
 
   const verComprobante = async (item: Discrepancia) => {
     const response = await fetch(`${API_BASE}/conciliacion/discrepancias/${item.id}/comprobante`, { headers: { Authorization: `Bearer ${session.token}` } });
-    if (!response.ok) { setError('No se pudo abrir el comprobante.'); return; }
+    if (!response.ok) { setErrorDiscrepancia({ id: item.id, mensaje: 'No se pudo abrir el comprobante.' }); return; }
     const url = URL.createObjectURL(await response.blob());
     const link = document.createElement('a'); link.href = url; link.download = item.comprobante_nombre || 'comprobante'; link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  };
-
-  const descartarNotificacion = async (id?: string) => {
-    setNotificaciones((prev) => (id ? prev.filter((item) => item.id !== id) : []));
-    try {
-      const endpoint = id ? `${API_BASE}/conciliacion/notificaciones/${id}/leer` : `${API_BASE}/conciliacion/notificaciones/leer-todas`;
-      await fetch(endpoint, { method: 'POST', headers: { Authorization: `Bearer ${session.token}` } });
-    } catch {
-      // Silenciar error de red puntual; la UI ya descartó el aviso en la sesión actual
-    }
   };
 
   const paso1Completo = movimientosElegidos.length > 0;
@@ -599,15 +650,6 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
   return (
     <div className="space-y-5">
       {/* Banner de Feedback Global */}
-      {error && (
-        <div role="alert" className="p-3.5 rounded-lg text-sm flex items-start gap-3 shadow-xs bg-red-50 text-red-900 border border-red-300">
-          <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
-          <div className="flex-1 font-medium">{error}</div>
-          <button type="button" onClick={() => setError('')} className="text-slate-400 hover:text-slate-600 p-0.5" aria-label="Cerrar error">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
       {mensaje && (
         <div role="status" className="p-3.5 rounded-lg text-sm flex items-start gap-3 shadow-xs bg-emerald-50 text-emerald-900 border border-emerald-300">
           <CheckCircle2 className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
@@ -630,19 +672,22 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
               </button>
             </div>
           )}
-          {notificaciones.map((item) => (
-            <div key={item.id} role="status" className="rounded-lg border border-blue-200 bg-blue-50 px-3.5 py-2.5 text-xs font-medium text-blue-900 flex items-center justify-between gap-2">
-              <span>{item.mensaje}</span>
-              <button
-                type="button"
-                onClick={() => void descartarNotificacion(item.id)}
-                className="text-blue-500 hover:text-blue-800 p-0.5 shrink-0 cursor-pointer"
-                aria-label="Cerrar notificación"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          ))}
+          {notificaciones.map((item) => {
+            const mensajeLimpio = item.mensaje.replace(/:\s*rechazad[oa]/i, '').trim();
+            return (
+              <div key={item.id} role="status" className="rounded-lg border border-blue-200 bg-blue-50 px-3.5 py-2.5 text-xs font-medium text-blue-900 flex items-center justify-between gap-2">
+                <span>{mensajeLimpio}</span>
+                <button
+                  type="button"
+                  onClick={() => void descartarNotificacion(item.id)}
+                  className="text-blue-500 hover:text-blue-800 p-0.5 shrink-0 cursor-pointer"
+                  aria-label="Cerrar notificación"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -945,6 +990,23 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
               </div>
             </div>
           </div>
+
+          {error && (
+            <div role="alert" className="p-3 rounded-md bg-red-50 border border-red-300 text-red-900 text-xs font-medium flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+                <span>{error}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setError('')}
+                className="text-slate-400 hover:text-slate-600 p-0.5 shrink-0 cursor-pointer"
+                aria-label="Cerrar mensaje de error"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </section>
       )}
 
@@ -1038,7 +1100,7 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
           <div className="pt-3 border-t border-slate-200 flex items-center justify-between">
             <button
               type="button"
-              onClick={() => setPasoActual(1)}
+              onClick={() => cambiarPaso(1)}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs sm:text-sm font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors cursor-pointer"
             >
               <ArrowLeft className="w-4 h-4" />
@@ -1059,6 +1121,23 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
+
+          {error && (
+            <div role="alert" className="p-3 rounded-md bg-red-50 border border-red-300 text-red-900 text-xs font-medium flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+                <span>{error}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setError('')}
+                className="text-slate-400 hover:text-slate-600 p-0.5 shrink-0 cursor-pointer"
+                aria-label="Cerrar mensaje de error"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </section>
       )}
 
@@ -1099,9 +1178,9 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
             </div>
 
             {diferencia !== 0n && (
-              <label className="block text-xs text-slate-700 bg-white p-3.5 rounded-md border border-amber-300 space-y-2">
+              <div className="text-xs text-slate-700 bg-white p-3.5 rounded-md border border-amber-300 space-y-2.5">
                 <span className="font-bold text-slate-900 block">Justificación de diferencia (obligatoria)</span>
-                <select required value={motivo} onChange={(event) => setMotivo(event.target.value)} className="mt-1 w-full rounded border border-slate-300 p-2 bg-white">
+                <select required value={motivo} onChange={(event) => setMotivo(event.target.value)} className="w-full rounded border border-slate-300 p-2 bg-white">
                   <option value="">Seleccionar motivo</option>
                   <option value="retenciones_impositivas">Retenciones impositivas</option>
                   <option value="descuento_comercial">Descuento comercial</option>
@@ -1109,9 +1188,52 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
                   <option value="comision_bancaria">Comisión bancaria</option>
                   <option value="otro">Otro</option>
                 </select>
-                <textarea value={nota} onChange={(event) => setNota(event.target.value)} rows={2} maxLength={500} className="mt-1 w-full rounded border border-slate-300 p-2" placeholder="Explicá la diferencia encontrada" />
-                <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(event) => setComprobante(event.target.files?.[0] || null)} className="mt-2 block w-full" />
-              </label>
+                <textarea value={nota} onChange={(event) => setNota(event.target.value)} rows={2} maxLength={500} className="w-full rounded border border-slate-300 p-2" placeholder="Explicá la diferencia encontrada" />
+                
+                <div className="space-y-1">
+                  <span className="block text-slate-600 font-medium">Comprobante de respaldo (PDF o imagen)</span>
+                  {comprobante ? (
+                    <div className="flex items-center justify-between p-2.5 rounded-md border border-emerald-300 bg-emerald-50 text-xs text-emerald-950 animate-in fade-in">
+                      <div className="flex items-center gap-2 truncate">
+                        <FileText className="w-4 h-4 text-emerald-700 shrink-0" />
+                        <span className="font-semibold truncate">{comprobante.name}</span>
+                        <span className="text-emerald-700 text-[11px] shrink-0 font-normal">
+                          ({(comprobante.size / 1024).toFixed(0)} KB)
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        <label className="text-blue-700 hover:text-blue-900 font-semibold cursor-pointer underline text-xs">
+                          Cambiar
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                            onChange={(event) => {
+                              if (event.target.files?.[0]) setComprobante(event.target.files[0]);
+                            }}
+                            className="sr-only"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setComprobante(null)}
+                          className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
+                          title="Quitar comprobante"
+                          aria-label="Quitar comprobante"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                      onChange={(event) => setComprobante(event.target.files?.[0] || null)}
+                      className="block w-full text-xs text-slate-700 file:mr-2 file:py-1 file:px-2.5 file:rounded file:border file:border-slate-300 file:text-xs file:font-medium file:bg-slate-50 hover:file:bg-slate-100 cursor-pointer"
+                    />
+                  )}
+                </div>
+              </div>
             )}
           </div>
 
@@ -1150,7 +1272,7 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
           <div className="pt-3 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <button
               type="button"
-              onClick={() => setPasoActual(2)}
+              onClick={() => cambiarPaso(2)}
               disabled={cargando}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs sm:text-sm font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors cursor-pointer self-start sm:self-auto"
             >
@@ -1167,11 +1289,28 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
               {cargando ? 'Procesando…' : diferencia !== 0n ? 'Enviar justificación' : 'Conciliar selección'}
             </button>
           </div>
+
+          {error && (
+            <div role="alert" className="p-3 rounded-md bg-red-50 border border-red-300 text-red-900 text-xs font-medium flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+                <span>{error}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setError('')}
+                className="text-slate-400 hover:text-slate-600 p-0.5 shrink-0 cursor-pointer"
+                aria-label="Cerrar mensaje de error"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </section>
       )}
 
-      {/* Bandeja de discrepancias (Solo se despliega cuando existen casos pendientes para mantener el diseño limpio) */}
-      {discrepancias.length > 0 && (
+      {/* Bandeja de discrepancias (Solo se despliega cuando existen casos pendientes o un mensaje de resolución reciente) */}
+      {(discrepancias.length > 0 || Boolean(errorDiscrepancia)) && (
         <section className="bg-white border border-amber-200 rounded-lg p-4 shadow-xs space-y-2.5">
           <h3 className="text-xs font-bold uppercase tracking-wide text-amber-900 flex items-center gap-1.5">
             <AlertTriangle className="w-4 h-4 text-amber-600" />
@@ -1214,7 +1353,7 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
                     type="button"
                     disabled={cargando || (!esAdminSistema && item.creada_por === session.id.replace(/^usr_/, ''))}
                     onClick={() => void resolver(item, 'aprobar')}
-                    className="rounded bg-emerald-700 px-2.5 py-1 font-semibold text-white disabled:opacity-50"
+                    className="rounded bg-emerald-700 px-2.5 py-1 font-semibold text-white disabled:opacity-50 cursor-pointer"
                   >
                     Aprobar
                   </button>
@@ -1222,14 +1361,46 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
                     type="button"
                     disabled={cargando || (!esAdminSistema && !observacionResolucion.trim())}
                     onClick={() => void resolver(item, 'rechazar')}
-                    className="rounded bg-red-700 px-2.5 py-1 font-semibold text-white disabled:opacity-50"
+                    className="rounded bg-red-700 px-2.5 py-1 font-semibold text-white disabled:opacity-50 cursor-pointer"
                   >
                     Rechazar
                   </button>
                 </div>
+                {errorDiscrepancia?.id === item.id && (
+                  <div role="alert" className="mt-2 p-2.5 rounded bg-red-100 border border-red-300 text-red-900 text-xs font-medium flex items-start justify-between gap-2 animate-in fade-in">
+                    <div className="flex items-start gap-1.5">
+                      <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+                      <span>{errorDiscrepancia.mensaje}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setErrorDiscrepancia(null)}
+                      className="text-slate-400 hover:text-slate-600 p-0.5 shrink-0 cursor-pointer"
+                      aria-label="Cerrar aviso de error"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
               );
             })}
+            {errorDiscrepancia && !discrepancias.some((d) => d.id === errorDiscrepancia.id) && (
+              <div role="alert" className="p-2.5 rounded bg-red-100 border border-red-300 text-red-900 text-xs font-medium flex items-start justify-between gap-2 animate-in fade-in">
+                <div className="flex items-start gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+                  <span>{errorDiscrepancia.mensaje}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setErrorDiscrepancia(null)}
+                  className="text-slate-400 hover:text-slate-600 p-0.5 shrink-0 cursor-pointer"
+                  aria-label="Cerrar aviso de error"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
           </div>
         </section>
       )}

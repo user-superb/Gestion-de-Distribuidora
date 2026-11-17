@@ -1994,10 +1994,15 @@ export const conciliacionService = {
         `UPDATE discrepancia_notificacion SET leida_en = now() WHERE discrepancia_id = $1 AND leida_en IS NULL`,
         [id]
       );
-      if (!aprobar) await client.query(
-        `INSERT INTO discrepancia_notificacion (discrepancia_id, usuario_id, mensaje)
-         VALUES ($1, $2, $3)`, [id, dc.creada_por, `La discrepancia fue rechazada: ${observacionFinal}`]
-      );
+      if (!aprobar) {
+        const obsTrim = typeof observacionFinal === 'string' ? observacionFinal.trim() : '';
+        const esGenerico = !obsTrim || ['rechazado', 'rechazo', 'rechazada'].includes(obsTrim.toLowerCase());
+        const mensajeNotif = esGenerico ? 'La discrepancia fue rechazada' : `La discrepancia fue rechazada: ${obsTrim}`;
+        await client.query(
+          `INSERT INTO discrepancia_notificacion (discrepancia_id, usuario_id, mensaje)
+           VALUES ($1, $2, $3)`, [id, dc.creada_por, mensajeNotif]
+        );
+      }
       return { id, estado };
     });
   },
