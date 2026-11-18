@@ -702,6 +702,234 @@ function validarComprobanteAdjunto(archivo: ArchivoImportacion | null): ArchivoI
   return archivo;
 }
 
+function parsearArrayIdsTexto(valor: unknown): string[] {
+  if (Array.isArray(valor)) {
+    return valor.map((v) => String(v).trim()).filter((v) => /^[1-9]\d*$/.test(v));
+  }
+  return String(valor || '')
+    .replace(/[{}\[\]\s]/g, '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter((v) => /^[1-9]\d*$/.test(v));
+}
+
+async function enriquecerHistorialConDiscrepancias(
+  mapa: Map<string, any>,
+  sucursalFiltro: string,
+  params: unknown[]
+) {
+  let discRes: { rows: any[] };
+  try {
+    discRes = await db.query(
+      `SELECT dc.id::text AS id,
+              dc.movimiento_id::text AS movimiento_id,
+              dc.movimiento_ids::text AS movimiento_ids,
+              dc.remito_ids::text AS remito_ids,
+              dc.importe_movimiento::text AS importe_movimiento,
+              dc.importe_seleccionado::text AS importe_seleccionado,
+              dc.diferencia_centavos::text AS diferencia_centavos,
+              dc.nota,
+              dc.motivo_codigo,
+              dc.estado,
+              dc.creada_en,
+              dc.resuelta_en,
+              dc.observacion_resolucion,
+              COALESCE(ur.nombre, ur.usuario, uc.nombre, uc.usuario, 'Administrativo') AS resuelta_por_nombre,
+              dcomp.nombre_archivo AS comprobante_nombre
+       FROM discrepancia_conciliacion dc
+       LEFT JOIN usuario ur ON ur.id = dc.resuelta_por
+       LEFT JOIN usuario uc ON uc.id = dc.creada_por
+       LEFT JOIN discrepancia_comprobante dcomp ON dcomp.discrepancia_id = dc.id
+       WHERE dc.estado IN ('aprobada', 'resuelta')
+       ORDER BY COALESCE(dc.resuelta_en, dc.creada_en) DESC, dc.id DESC`
+    );
+  } catch (err: any) {
+    const msg = String(err?.message || '');
+    if (
+      msg.includes('discrepancia_conciliacion') ||
+      msg.includes('discrepancia_comprobante') ||
+      msg.includes('movimiento_ids')
+    ) {
+      return;
+    }
+    throw err;
+  }
+
+  if (!discRes.rows.length) return;
+
+  const discIds: string[] = [];
+  const allMovIds = new Set<string>();
+  const allRemIds = new Set<string>();
+  const discrepanciasParsed = discRes.rows.map((row: any) => {
+    const movIdsParsed = parsearArrayIdsTexto(row.movimiento_ids);
+    const movIds = movIdsParsed.length > 0
+      ? movIdsParsed
+      : (row.movimiento_id && /^[1-9]\d*$/.test(String(row.movimiento_id)) ? [String(row.movimiento_id)] : []);
+    const remIds = parsearArrayIdsTexto(row.remito_ids);
+    discIds.push(String(row.id));
+    for (const mId of movIds) allMovIds.add(mId);
+    for (const rId of remIds) allRemIds.add(rId);
+    return { row, movIds, remIds };
+  });
+
+  const ajustesPorDiscrepancia = new Map<string, Array<{
+    tipo: 'reduccion_saldo' | 'saldo_favor';
+    remitoId: string | null;
+    comercioId: string | null;
+    importeCentavos: string;
+  }>>();
+  if (discIds.length > 0) {
+    try {
+      const ajustesRes = await db.query(
+        `SELECT discrepancia_id::text AS discrepancia_id,
+                remito_id::text AS remito_id,
+                comercio_id::text AS comercio_id,
+                tipo,
+                importe_centavos::text AS importe_centavos
+         FROM discrepancia_ajuste
+         WHERE discrepancia_id IN (${discIds.join(', ')})
+         ORDER BY id ASC`
+      );
+      for (const aj of ajustesRes.rows) {
+        const dId = String(aj.discrepancia_id);
+        if (!ajustesPorDiscrepancia.has(dId)) ajustesPorDiscrepancia.set(dId, []);
+        ajustesPorDiscrepancia.get(dId)!.push({
+          tipo: aj.tipo,
+          remitoId: aj.remito_id ? String(aj.remito_id) : null,
+          comercioId: aj.comercio_id ? String(aj.comercio_id) : null,
+          importeCentavos: String(aj.importe_centavos),
+        });
+      }
+    } catch (err: any) {
+      if (!String(err?.message || '').includes('discrepancia_ajuste')) throw err;
+    }
+  }
+
+  const missingMovIds = [...allMovIds].filter((id) => !mapa.has(id));
+  const extraMovimientos = new Map<string, any>();
+  if (missingMovIds.length > 0) {
+    const movRes = await db.query(
+      `SELECT mb.id::text AS id, mb.fecha_hora, mb.ordenante, mb.ordenante_cuit,
+              mb.concepto, mb.referencia_externa,
+              COALESCE(mb.origen, 'Extracto Bancario') AS origen,
+              mb.importe_centavos::text AS importe_centavos,
+              mb.estado, mb.cuenta_id::text AS cuenta_id, cr.alias AS cuenta,
+              cr.sucursal_id::text AS sucursal_id, s.nombre AS sucursal,
+              mbc.nombre_archivo AS comprobante_nombre
+       FROM movimiento_bancario mb
+       JOIN cuenta_recepcion cr ON cr.id = mb.cuenta_id
+       LEFT JOIN sucursal s ON s.id = cr.sucursal_id
+       LEFT JOIN movimiento_bancario_comprobante mbc ON mbc.movimiento_id = mb.id
+       WHERE mb.id IN (${missingMovIds.join(', ')})
+         AND mb.estado IN ('imputado', 'parcial')
+         ${sucursalFiltro}`,
+      params
+    );
+    for (const row of movRes.rows) {
+      extraMovimientos.set(String(row.id), row);
+    }
+  }
+
+  const remitoInfoMap = new Map<string, {
+    id: string;
+    numero: string;
+    importeCentavos: string;
+    comercio: string;
+    comercioCuit: string | null;
+  }>();
+  if (allRemIds.size > 0) {
+    const remRes = await db.query(
+      `SELECT r.id::text AS id, r.numero, r.importe_centavos::text AS importe_centavos,
+              COALESCE(c.nombre_fantasia, c.razon_social) AS comercio,
+              c.cuit AS comercio_cuit
+       FROM remito r
+       JOIN comercio c ON c.id = r.comercio_id
+       WHERE r.id IN (${[...allRemIds].join(', ')})`
+    );
+    for (const rem of remRes.rows) {
+      remitoInfoMap.set(String(rem.id), {
+        id: String(rem.id),
+        numero: String(rem.numero),
+        importeCentavos: String(rem.importe_centavos),
+        comercio: String(rem.comercio),
+        comercioCuit: rem.comercio_cuit ? String(rem.comercio_cuit) : null,
+      });
+    }
+  }
+
+  for (const { row, movIds, remIds } of discrepanciasParsed) {
+    const movsAccesibles = movIds.filter((id) => mapa.has(id) || extraMovimientos.has(id));
+    if (!movsAccesibles.length) continue;
+
+    const fechaResolucion = row.resuelta_en || row.creada_en;
+    const discrepanciaInfo = {
+      id: String(row.id),
+      movimientoIds: movIds,
+      remitoIds: remIds,
+      motivoCodigo: row.motivo_codigo || null,
+      nota: row.nota || '',
+      observacionResolucion: row.observacion_resolucion || null,
+      diferenciaCentavos: String(row.diferencia_centavos),
+      importeMovimiento: String(row.importe_movimiento),
+      importeSeleccionado: String(row.importe_seleccionado),
+      resueltaEn: row.resuelta_en ? new Date(row.resuelta_en).toISOString() : null,
+      resueltaPor: row.resuelta_por_nombre || null,
+      comprobanteNombre: row.comprobante_nombre || null,
+      ajustes: ajustesPorDiscrepancia.get(String(row.id)) || [],
+    };
+
+    for (const movId of movsAccesibles) {
+      if (!mapa.has(movId)) {
+        const extra = extraMovimientos.get(movId)!;
+        mapa.set(movId, {
+          id: extra.id,
+          fecha_hora: extra.fecha_hora,
+          ordenante: extra.ordenante,
+          ordenante_cuit: extra.ordenante_cuit,
+          concepto: extra.concepto,
+          referencia_externa: extra.referencia_externa,
+          origen: extra.origen,
+          importe_centavos: extra.importe_centavos,
+          estado: extra.estado,
+          cuenta_id: extra.cuenta_id,
+          cuenta: extra.cuenta,
+          sucursal_id: extra.sucursal_id,
+          sucursal: extra.sucursal,
+          comprobante_nombre: extra.comprobante_nombre,
+          imputado_en: fechaResolucion,
+          imputaciones: [],
+        });
+      }
+      const mov = mapa.get(movId)!;
+      if (!mov.discrepancia) {
+        mov.discrepancia = discrepanciaInfo;
+      }
+
+      const remitosYaPresentes = new Set(mov.imputaciones.map((imp: any) => String(imp.remitoId)));
+      for (const remId of remIds) {
+        if (remitosYaPresentes.has(remId)) continue;
+        const remInfo = remitoInfoMap.get(remId);
+        if (!remInfo) continue;
+        mov.imputaciones.push({
+          id: `disc-${row.id}-mov-${movId}-rem-${remId}`,
+          remitoId: remInfo.id,
+          remitoNumero: remInfo.numero,
+          remitoImporteCentavos: remInfo.importeCentavos,
+          comercio: remInfo.comercio,
+          comercioCuit: remInfo.comercioCuit,
+          importeCentavos: '0',
+          imputadoEn: fechaResolucion,
+          imputadoPor: row.resuelta_por_nombre || 'Administrativo',
+          esExcedenteDiscrepancia: true,
+        });
+      }
+      if (fechaResolucion && (!mov.imputado_en || new Date(fechaResolucion) > new Date(mov.imputado_en))) {
+        mov.imputado_en = fechaResolucion;
+      }
+    }
+  }
+}
+
 export const conciliacionService = {
   async getComerciosParaConciliacion() {
     const res = await db.query(
@@ -1581,8 +1809,9 @@ export const conciliacionService = {
              mbc.nombre_archivo AS comprobante_nombre,
              imp.id::text AS imputacion_id, imp.importe_centavos::text AS imputado_centavos,
              imp.imputado_en, imp.imputado_por::text AS imputado_por,
-             COALESCE(u.nombre, u.email, 'Administrativo') AS imputador_nombre,
+             COALESCE(u.nombre, u.usuario, 'Administrativo') AS imputador_nombre,
              r.id::text AS remito_id, r.numero AS remito_numero,
+             r.importe_centavos::text AS remito_importe_centavos,
              COALESCE(c.nombre_fantasia, c.razon_social) AS comercio,
              c.cuit AS comercio_cuit
       FROM movimiento_bancario mb
@@ -1627,6 +1856,7 @@ export const conciliacionService = {
         id: row.imputacion_id,
         remitoId: row.remito_id,
         remitoNumero: row.remito_numero,
+        remitoImporteCentavos: row.remito_importe_centavos,
         comercio: row.comercio,
         comercioCuit: row.comercio_cuit,
         importeCentavos: row.imputado_centavos,
@@ -1638,7 +1868,13 @@ export const conciliacionService = {
       }
     }
 
-    let items = Array.from(mapa.values());
+    await enriquecerHistorialConDiscrepancias(mapa, sucursalFiltro, params);
+
+    let items = Array.from(mapa.values()).sort((a, b) => {
+      const timeDiff = new Date(b.imputado_en || b.fecha_hora).getTime() - new Date(a.imputado_en || a.fecha_hora).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return Number(b.id) - Number(a.id);
+    });
 
     if (filters.sucursalId) {
       items = items.filter((m) => m.sucursal_id === filters.sucursalId);
@@ -1665,6 +1901,8 @@ export const conciliacionService = {
         (m.concepto && m.concepto.toLowerCase().includes(q)) ||
         (m.referencia_externa && m.referencia_externa.toLowerCase().includes(q)) ||
         (m.cuenta && m.cuenta.toLowerCase().includes(q)) ||
+        (m.discrepancia?.nota && m.discrepancia.nota.toLowerCase().includes(q)) ||
+        (m.discrepancia?.observacionResolucion && m.discrepancia.observacionResolucion.toLowerCase().includes(q)) ||
         m.imputaciones.some((imp: any) =>
           imp.remitoNumero.toLowerCase().includes(q) ||
           imp.comercio.toLowerCase().includes(q)
@@ -1920,7 +2158,17 @@ export const conciliacionService = {
            WHERE activo = true AND rol = 'Gerente'`, [discrepanciaId]
         );
       }
-      await client.query('UPDATE discrepancia_conciliacion SET estado = $1 WHERE id = $2', [estado, discrepanciaId]);
+      if (estado === 'aprobada') {
+        await client.query(
+          `UPDATE discrepancia_conciliacion
+           SET estado = $1, resuelta_por = $2, resuelta_en = now(),
+               observacion_resolucion = 'Aprobada automáticamente dentro de tolerancia'
+           WHERE id = $3`,
+          [estado, usuarioId, discrepanciaId]
+        );
+      } else {
+        await client.query('UPDATE discrepancia_conciliacion SET estado = $1 WHERE id = $2', [estado, discrepanciaId]);
+      }
       if (estado === 'aprobada') {
         await client.query(
           `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion) VALUES ('discrepancia_conciliacion', $1, 'aprobada', $2, $3::jsonb, $4)`,
@@ -1975,7 +2223,11 @@ export const conciliacionService = {
           return { id, estado: 'escalada', mensaje: 'El límite de autorización no alcanza; se escaló a Gerencia.' };
         }
       }
-      const movimientoIds = (dc.movimiento_ids || [dc.movimiento_id]).map(String);
+      const movimientoIds = (
+        Array.isArray(dc.movimiento_ids) && dc.movimiento_ids.length > 0
+          ? dc.movimiento_ids
+          : [dc.movimiento_id]
+      ).map(String);
       const remitoIds = dc.remito_ids.map(String);
       if (aprobar) {
         const result = await validarSeleccion(client, movimientoIds, remitoIds);

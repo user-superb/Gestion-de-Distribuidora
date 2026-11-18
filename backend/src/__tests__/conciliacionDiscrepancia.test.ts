@@ -501,4 +501,56 @@ describe('Conciliación 1 a N y exclusión de movimientos con discrepancias', ()
       { remito_id: '2', saldo_centavos: '0', estado_pago: 'saldado' },
     ]);
   });
+
+  it('registra, aprueba y expone en el historial N movimientos asignados a 1 único remito (tanto faltante como sobrante)', async () => {
+    await pool.query(`
+      INSERT INTO remito (id, numero, comercio_id, sucursal_id, importe_centavos, estado) VALUES
+        (8, 'R-0008', 1, 1, 100000, 'entregado'),
+        (9, 'R-0009', 1, 1, 80000, 'entregado');
+      INSERT INTO movimiento_bancario (id, cuenta_id, ordenante, ordenante_cuit, referencia_externa, importe_centavos, estado) VALUES
+        (10, 1, 'Almacen Sur SRL', '20111222339', 'REF-N1-A', 40000, 'sin_imputar'),
+        (11, 1, 'Almacen Sur SRL', '20111222339', 'REF-N1-B', 50000, 'sin_imputar'),
+        (12, 1, 'Almacen Sur SRL', '20111222339', 'REF-N1-C', 80000, 'sin_imputar'),
+        (13, 1, 'Almacen Sur SRL', '20111222339', 'REF-N1-D', 15000, 'sin_imputar');
+    `);
+
+    // 1) N=2 movimientos (40k + 50k = 90k) → 1 remito (100k): faltante aprobado de 10k
+    const discFaltante = await conciliacionService.registrarDiscrepancia(
+      [10, 11],
+      [8],
+      'Descuento acordado con 2 transferencias',
+      'descuento_comercial',
+      { originalname: 'desc.pdf', mimetype: 'application/pdf', size: 8, buffer: Buffer.from('%PDF-1.7') },
+      1
+    );
+    const aprobFaltante = await conciliacionService.resolverDiscrepancia(discFaltante.id, 2, true, 'Aprobado 2x1 faltante');
+    assert.equal(aprobFaltante.estado, 'aprobada');
+
+    // 2) N=2 movimientos (80k + 15k = 95k) → 1 remito (80k): sobrante aprobado de 15k donde mov 13 tiene $0 imputado directo
+    const discSobrante = await conciliacionService.registrarDiscrepancia(
+      [12, 13],
+      [9],
+      'Dos transferencias exceden el remito',
+      'otro',
+      { originalname: 'sob.pdf', mimetype: 'application/pdf', size: 8, buffer: Buffer.from('%PDF-1.7') },
+      1
+    );
+    const aprobSobrante = await conciliacionService.resolverDiscrepancia(discSobrante.id, 2, true, 'Aprobado 2x1 sobrante');
+    assert.equal(aprobSobrante.estado, 'aprobada');
+
+    const historial = await conciliacionService.getHistorialConciliaciones({}, { id: 'usr_1', role: 'Administrativo' });
+
+    const grupoFaltante = historial.filter((m) => m.discrepancia?.id === discFaltante.id);
+    assert.equal(grupoFaltante.length, 2);
+    assert.deepEqual(grupoFaltante.map((m) => m.id).sort(), ['10', '11']);
+    assert.equal(grupoFaltante.every((m) => m.imputaciones.some((i: any) => i.remitoNumero === 'R-0008')), true);
+
+    const grupoSobrante = historial.filter((m) => m.discrepancia?.id === discSobrante.id);
+    assert.equal(grupoSobrante.length, 2);
+    assert.deepEqual(grupoSobrante.map((m) => m.id).sort(), ['12', '13']);
+    const mov13 = grupoSobrante.find((m) => m.id === '13')!;
+    assert.equal(mov13.imputaciones[0].remitoNumero, 'R-0009');
+    assert.equal(mov13.imputaciones[0].importeCentavos, '0');
+    assert.equal(mov13.imputaciones[0].esExcedenteDiscrepancia, true);
+  });
 });

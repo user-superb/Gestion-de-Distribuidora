@@ -1,8 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Landmark, GitCompareArrows, ClockAlert, RefreshCw, History, Download, Search, CheckCircle2 } from 'lucide-react';
+import { Landmark, GitCompareArrows, ClockAlert, RefreshCw, History, Download, Search, CheckCircle2, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import { UserSession } from '../../types/auth';
 import { API_BASE } from '../../config/api';
 import { ConciliadorMovimientos } from './ConciliadorMovimientos';
+import {
+  agruparHistorialConciliaciones,
+  DiscrepanciaHistorial,
+  MovimientoConciliado,
+} from '../../utils/conciliacionHistorial';
 
 interface Sugerencia {
   tipo: 'exacta' | 'parcial';
@@ -31,35 +36,13 @@ interface MovimientoHuerfano {
   antiguedad_horas: number;
 }
 
-interface ImputacionHistorial {
-  id: string;
-  remitoId: string;
-  remitoNumero: string;
-  comercio: string;
-  comercioCuit: string;
-  importeCentavos: string;
-  imputadoEn: string;
-  imputadoPor: string;
-}
-
-interface MovimientoConciliado {
-  id: string;
-  fecha_hora: string;
-  ordenante: string | null;
-  ordenante_cuit: string | null;
-  concepto: string | null;
-  referencia_externa: string | null;
-  origen: string;
-  importe_centavos: string;
-  estado: string;
-  cuenta_id: string;
-  cuenta: string;
-  sucursal_id: string;
-  sucursal: string;
-  comprobante_nombre: string | null;
-  imputado_en: string;
-  imputaciones: ImputacionHistorial[];
-}
+const MOTIVO_DISCREPANCIA_LABELS: Record<string, string> = {
+  retenciones_impositivas: 'Retenciones impositivas',
+  descuento_comercial: 'Descuento comercial',
+  diferencia_cambio: 'Diferencia de cambio',
+  comision_bancaria: 'Comisión bancaria',
+  otro: 'Otro motivo',
+};
 
 type Vista = 'conciliar' | 'sugerencias' | 'huerfanos' | 'historial';
 
@@ -375,11 +358,11 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
   const [items, setItems] = useState<MovimientoConciliado[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [sucursal, setSucursal] = useState('');
   const [cuenta, setCuenta] = useState('');
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
   const [busqueda, setBusqueda] = useState('');
+  const [colapsadas, setColapsadas] = useState<Set<string>>(() => new Set());
   const [descargandoId, setDescargandoId] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
@@ -387,7 +370,6 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
     setError('');
     try {
       const params = new URLSearchParams();
-      if (sucursal) params.set('sucursalId', sucursal);
       if (cuenta && cuenta !== 'todas') params.set('cuentaId', cuenta);
       if (desde) params.set('desde', desde);
       if (hasta) params.set('hasta', hasta);
@@ -403,16 +385,16 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
     } finally {
       setLoading(false);
     }
-  }, [session.token, sucursal, cuenta, desde, hasta, busqueda]);
+  }, [session.token, cuenta, desde, hasta, busqueda]);
 
   useEffect(() => {
     void cargar();
   }, [cargar]);
 
-  const descargarComprobante = async (mov: MovimientoConciliado) => {
-    setDescargandoId(mov.id);
+  const descargarArchivo = async (urlEndpoint: string, nombreArchivo: string, claveCarga: string) => {
+    setDescargandoId(claveCarga);
     try {
-      const response = await fetch(`${API_BASE}/conciliacion/movimientos/${mov.id}/comprobante`, {
+      const response = await fetch(urlEndpoint, {
         headers: { Authorization: `Bearer ${session.token}` },
       });
       if (!response.ok) throw new Error('No se pudo descargar el comprobante.');
@@ -420,7 +402,7 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = mov.comprobante_nombre || `comprobante-mov-${mov.id}`;
+      link.download = nombreArchivo;
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (err: any) {
@@ -430,14 +412,57 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
     }
   };
 
-  const sucursales = useMemo(
-    () => [...new Map(items.map((item) => [item.sucursal_id, item.sucursal])).entries()],
-    [items]
-  );
+  const descargarComprobante = (mov: MovimientoConciliado) =>
+    descargarArchivo(
+      `${API_BASE}/conciliacion/movimientos/${mov.id}/comprobante`,
+      mov.comprobante_nombre || `comprobante-mov-${mov.id}`,
+      `mov-${mov.id}`
+    );
+
+  const descargarComprobanteDiscrepancia = (disc: DiscrepanciaHistorial) =>
+    descargarArchivo(
+      `${API_BASE}/conciliacion/discrepancias/${disc.id}/comprobante`,
+      disc.comprobanteNombre || `comprobante-discrepancia-${disc.id}`,
+      `disc-${disc.id}`
+    );
+
+  const grupos = useMemo(() => agruparHistorialConciliaciones(items), [items]);
+  const clavesVisibles = useMemo(() => grupos.map((g) => g.key), [grupos]);
+  const todasColapsadas = clavesVisibles.length > 0 && clavesVisibles.every((k) => colapsadas.has(k));
+
+  const toggleTarjeta = (key: string) => {
+    setColapsadas((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleTodas = () => {
+    setColapsadas((prev) => {
+      if (clavesVisibles.every((k) => prev.has(k))) return new Set();
+      return new Set(clavesVisibles);
+    });
+  };
+
   const cuentas = useMemo(
     () => [...new Map(items.map((item) => [item.cuenta_id, item.cuenta])).entries()],
     [items]
   );
+
+  const badgeOrigen = (origen: string) => {
+    const origenEsManual = origen.includes('Manual');
+    const origenEsQr = origen.includes('QR');
+    const origenEsMovil = origen.includes('Móvil') || origen.includes('Movil');
+    return origenEsQr
+      ? 'bg-purple-100 text-purple-800 border border-purple-200'
+      : origenEsMovil
+      ? 'bg-teal-100 text-teal-800 border border-teal-200'
+      : origenEsManual
+      ? 'bg-blue-100 text-blue-800 border border-blue-200'
+      : 'bg-slate-100 text-slate-700 border border-slate-200';
+  };
 
   return (
     <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 sm:p-5 shadow-xs">
@@ -447,23 +472,35 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
           <div>
             <h2 className="text-base font-bold text-slate-900">Historial de conciliaciones</h2>
             <p className="text-xs text-slate-500">
-              Movimientos bancarios imputados y remitos saldados.
+              Movimientos bancarios imputados a la izquierda y remitos saldados a la derecha.
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => void cargar()}
-          disabled={loading}
-          className="inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white hover:bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 disabled:opacity-50 cursor-pointer shadow-2xs"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          <span>Actualizar</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {clavesVisibles.length > 0 && (
+            <button
+              type="button"
+              onClick={toggleTodas}
+              className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white hover:bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-700 cursor-pointer shadow-2xs"
+            >
+              {todasColapsadas ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+              <span>{todasColapsadas ? 'Expandir todo' : 'Minimizar todo'}</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void cargar()}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white hover:bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 disabled:opacity-50 cursor-pointer shadow-2xs"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Actualizar</span>
+          </button>
+        </div>
       </header>
 
       {/* Barra de Filtros */}
-      <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-6 bg-slate-50 p-3 rounded-md border border-slate-200/80 text-xs">
+      <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-5 bg-slate-50 p-3 rounded-md border border-slate-200/80 text-xs">
         <div className="lg:col-span-2">
           <label className="text-slate-600 font-medium block mb-1">Buscar</label>
           <div className="relative">
@@ -476,21 +513,6 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
               className="w-full pl-8 pr-2.5 py-1.5 border border-slate-300 rounded bg-white text-slate-800 placeholder:text-slate-400"
             />
           </div>
-        </div>
-        <div>
-          <label className="text-slate-600 font-medium block mb-1">Sucursal</label>
-          <select
-            value={sucursal}
-            onChange={(e) => setSucursal(e.target.value)}
-            className="w-full border border-slate-300 rounded bg-white px-2 py-1.5 text-slate-800"
-          >
-            <option value="">Todas</option>
-            {sucursales.map(([id, name]) => (
-              <option key={id} value={id}>
-                {name}
-              </option>
-            ))}
-          </select>
         </div>
         <div>
           <label className="text-slate-600 font-medium block mb-1">Cuenta</label>
@@ -544,106 +566,279 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
         </div>
       ) : (
         <div className="space-y-3">
-          {items.map((mov) => {
-            const origenEsManual = mov.origen.includes('Manual');
-            const origenEsQr = mov.origen.includes('QR');
-            const origenEsMovil = mov.origen.includes('Móvil') || mov.origen.includes('Movil');
+          {grupos.map((grupo) => {
+            const disc = grupo.discrepancia;
+            const diferenciaNegativa = disc?.diferenciaCentavos.startsWith('-');
+            const diferenciaAbsoluta = disc
+              ? (diferenciaNegativa ? disc.diferenciaCentavos.slice(1) : disc.diferenciaCentavos)
+              : '0';
+            const colapsada = colapsadas.has(grupo.key);
 
             return (
               <article
-                key={mov.id}
+                key={grupo.key}
                 className="border border-slate-200 rounded-lg p-3.5 sm:p-4 hover:border-slate-300 transition-all bg-white shadow-2xs space-y-3"
               >
-                {/* Cabecera del Movimiento */}
-                <div className="flex flex-wrap items-start justify-between gap-2.5 pb-2.5 border-b border-slate-100">
-                  <div className="min-w-0 flex-1">
+                {/* Cabecera de la Operación (clickeable para minimizar/expandir) */}
+                <div
+                  onClick={(e) => {
+                    if (!(e.target as HTMLElement).closest('button')) toggleTarjeta(grupo.key);
+                  }}
+                  className={`flex flex-wrap items-start justify-between gap-2.5 cursor-pointer select-none ${
+                    colapsada ? '' : 'pb-2.5 border-b border-slate-100'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => toggleTarjeta(grupo.key)}
+                        aria-expanded={!colapsada}
+                        aria-label={colapsada ? 'Expandir detalle de conciliación' : 'Minimizar detalle de conciliación'}
+                        className="p-0.5 -ml-1 rounded text-slate-500 hover:text-slate-800 hover:bg-slate-100 cursor-pointer shrink-0"
+                      >
+                        {colapsada ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </button>
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
                         <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                         <span>Imputado</span>
                       </span>
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                          origenEsQr
-                            ? 'bg-purple-100 text-purple-800 border border-purple-200'
-                            : origenEsMovil
-                            ? 'bg-teal-100 text-teal-800 border border-teal-200'
-                            : origenEsManual
-                            ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                            : 'bg-slate-100 text-slate-700 border border-slate-200'
-                        }`}
-                      >
-                        {mov.origen}
-                      </span>
-                      <span className="text-xs font-bold text-slate-800">
-                        {mov.ordenante || 'Ordenante no informado'}
-                      </span>
-                      {mov.ordenante_cuit && (
-                        <span className="text-[11px] text-slate-500">CUIT: {mov.ordenante_cuit}</span>
+                      {disc && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-200">
+                          <AlertTriangle className="w-3 h-3 text-amber-600" />
+                          <span>
+                            Discrepancia aprobada · {diferenciaNegativa ? 'Faltante' : 'Sobrante'} {formatoARS(diferenciaAbsoluta)}
+                          </span>
+                        </span>
                       )}
+                      {(grupo.movimientos.length > 1 || grupo.remitos.length > 1) && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200">
+                          {grupo.movimientos.length} mov. → {grupo.remitos.length} rem.
+                        </span>
+                      )}
+                      <span className="text-xs font-bold text-slate-800">{grupo.comercioPrincipal}</span>
                     </div>
 
-                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
-                      <span>Cuenta: <strong className="text-slate-700">{mov.cuenta}</strong> ({mov.sucursal})</span>
-                      {mov.referencia_externa && (
-                        <span>Ref / Op: <strong className="font-mono text-slate-700">{mov.referencia_externa}</strong></span>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500 pl-6">
+                      <span>
+                        Cuenta: <strong className="text-slate-700">{grupo.cuentas.join(', ')}</strong>
+                        {grupo.sucursales.length > 0 && ` (${grupo.sucursales.join(', ')})`}
+                      </span>
+                      <span>Imputado: {new Date(grupo.imputadoEn).toLocaleString('es-AR')}</span>
+                      {colapsada && (
+                        <span>
+                          Remitos: <strong className="font-mono text-slate-700">{grupo.remitos.map((r) => r.remitoNumero).join(', ')}</strong>
+                        </span>
                       )}
-                      <span>Acreditado: {new Date(mov.fecha_hora).toLocaleDateString('es-AR')}</span>
-                      <span>Imputado: {new Date(mov.imputado_en).toLocaleString('es-AR')}</span>
                     </div>
                   </div>
 
-                  <div className="flex flex-col items-end gap-1.5 shrink-0">
-                    <span className="text-xs text-slate-500">Monto total</span>
-                    <strong className="font-mono text-base text-slate-900">
-                      {formatoARS(mov.importe_centavos)}
-                    </strong>
-                    {mov.comprobante_nombre && (
+                  <div className="flex items-center gap-4 shrink-0 text-right">
+                    <div>
+                      <span className="text-[11px] text-slate-500 block">Total movimientos</span>
+                      <strong className="font-mono text-sm sm:text-base text-slate-900">
+                        {formatoARS(grupo.totalMovimientosCentavos)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[11px] text-slate-500 block">Total imputado</span>
+                      <strong className="font-mono text-sm sm:text-base text-emerald-700">
+                        {formatoARS(grupo.totalImputadoCentavos)}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Dos columnas: Movimientos a la izquierda · Remitos a la derecha */}
+                {!colapsada && (
+                <>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  {/* Columna Izquierda: Movimientos Bancarios (mismo formato de tarjeta + desglose que la columna derecha) */}
+                  <div className="space-y-1.5">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
+                      Movimientos bancarios ({grupo.movimientos.length}):
+                    </span>
+                    <div className="p-2.5 rounded-md bg-slate-50 border border-slate-200/80 text-xs space-y-1.5">
+                      {(() => {
+                        const origenesUnicos = [...new Set(grupo.movimientos.map((m) => m.origen))];
+                        const movUnico = grupo.movimientos.length === 1 ? grupo.movimientos[0] : null;
+                        const ordenantePrincipal = grupo.movimientos[0]?.ordenante || grupo.comercioPrincipal;
+
+                        return (
+                          <>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {origenesUnicos.map((origen) => (
+                                    <span
+                                      key={origen}
+                                      className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${badgeOrigen(origen)}`}
+                                    >
+                                      {origen}
+                                    </span>
+                                  ))}
+                                  <span className="font-semibold text-slate-700 truncate" title={ordenantePrincipal}>
+                                    {ordenantePrincipal}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-slate-500 mt-0.5 flex flex-wrap items-center gap-x-2">
+                                  {movUnico ? (
+                                    <>
+                                      {movUnico.referencia_externa && (
+                                        <span>Ref: <strong className="font-mono text-slate-700">{movUnico.referencia_externa}</strong></span>
+                                      )}
+                                      <span>Acred.: {new Date(movUnico.fecha_hora).toLocaleDateString('es-AR')}</span>
+                                      {movUnico.comprobante_nombre && (
+                                        <button
+                                          type="button"
+                                          onClick={() => void descargarComprobante(movUnico)}
+                                          disabled={descargandoId === `mov-${movUnico.id}`}
+                                          className="inline-flex items-center gap-1 font-semibold text-blue-700 hover:text-blue-900 hover:underline cursor-pointer"
+                                          title={movUnico.comprobante_nombre}
+                                        >
+                                          <Download className="w-3 h-3" />
+                                          <span>{descargandoId === `mov-${movUnico.id}` ? 'Descargando…' : 'Comprobante'}</span>
+                                        </button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <span>{grupo.movimientos.length} movimientos acreditados · {grupo.cuentas.join(', ')}</span>
+                                  )}
+                                </div>
+                              </div>
+                              <strong className="font-mono text-xs text-slate-900 shrink-0">
+                                {formatoARS(grupo.totalMovimientosCentavos)}
+                              </strong>
+                            </div>
+
+                            {grupo.movimientos.length > 1 && (
+                              <div className="border-t border-slate-200/70 pt-1.5 space-y-0.5 text-[11px] text-slate-600">
+                                {grupo.movimientos.map((mov) => (
+                                  <div key={mov.id} className="flex items-center justify-between gap-2">
+                                    <span className="truncate flex items-center gap-1.5">
+                                      <span className="truncate">
+                                        Mov. #{mov.id}
+                                        {mov.referencia_externa ? ` (${mov.referencia_externa})` : ''} · {new Date(mov.fecha_hora).toLocaleDateString('es-AR')}
+                                      </span>
+                                      {mov.comprobante_nombre && (
+                                        <button
+                                          type="button"
+                                          onClick={() => void descargarComprobante(mov)}
+                                          disabled={descargandoId === `mov-${mov.id}`}
+                                          className="inline-flex items-center gap-0.5 font-semibold text-blue-700 hover:text-blue-900 hover:underline cursor-pointer shrink-0"
+                                          title={mov.comprobante_nombre}
+                                        >
+                                          <Download className="w-3 h-3" />
+                                          <span>{descargandoId === `mov-${mov.id}` ? '…' : 'Comp.'}</span>
+                                        </button>
+                                      )}
+                                    </span>
+                                    <span className="font-mono shrink-0">
+                                      {mov.tieneExcedente && mov.totalImputadoCentavos === '0'
+                                        ? `Excedente · ${formatoARS(mov.importe_centavos)}`
+                                        : formatoARS(mov.importe_centavos)}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Columna Derecha: Remitos Saldados */}
+                  <div className="space-y-1.5">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
+                      Remitos saldados ({grupo.remitos.length}):
+                    </span>
+                    <div className="space-y-2">
+                      {grupo.remitos.map((rem) => (
+                        <div
+                          key={rem.remitoId}
+                          className="p-2.5 rounded-md bg-slate-50 border border-slate-200/80 text-xs space-y-1.5"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono font-bold text-slate-900 bg-white px-1.5 py-0.5 rounded border border-slate-200 text-[11px]">
+                                  {rem.remitoNumero}
+                                </span>
+                                <span className="font-semibold text-slate-700 truncate" title={rem.comercio}>
+                                  {rem.comercio}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-slate-500 mt-0.5">
+                                Por: {rem.imputadoPor}
+                                {rem.remitoImporteCentavos && rem.remitoImporteCentavos !== rem.totalImputadoCentavos && (
+                                  <span> · Total remito: {formatoARS(rem.remitoImporteCentavos)}</span>
+                                )}
+                              </div>
+                            </div>
+                            <strong className="font-mono text-xs text-emerald-700 shrink-0">
+                              {formatoARS(rem.totalImputadoCentavos)}
+                            </strong>
+                          </div>
+
+                          {rem.detalleMovimientos.length > 1 && (
+                            <div className="border-t border-slate-200/70 pt-1.5 space-y-0.5 text-[11px] text-slate-600">
+                              {rem.detalleMovimientos.map((det) => (
+                                <div key={`${rem.remitoId}-${det.movimientoId}`} className="flex items-center justify-between gap-2">
+                                  <span className="truncate">
+                                    Mov. #{det.movimientoId}
+                                    {det.referenciaExterna ? ` (${det.referenciaExterna})` : ''}
+                                  </span>
+                                  <span className="font-mono shrink-0">
+                                    {det.esExcedenteDiscrepancia && det.importeCentavos === '0'
+                                      ? 'Excedente a favor ($ 0,00 imputado)'
+                                      : formatoARS(det.importeCentavos)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Detalle de Discrepancia Aprobada */}
+                {disc && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50/70 p-2.5 text-xs text-amber-950 flex flex-wrap items-start justify-between gap-2">
+                    <div className="space-y-0.5 min-w-0 flex-1">
+                      <div className="font-semibold">
+                        Motivo: {MOTIVO_DISCREPANCIA_LABELS[disc.motivoCodigo || ''] || disc.motivoCodigo || 'Justificación registrada'}
+                        {disc.nota ? ` — ${disc.nota}` : ''}
+                      </div>
+                      <div className="text-[11px] text-amber-900 flex flex-wrap gap-x-3 gap-y-0.5">
+                        {disc.resueltaPor && <span>Aprobado por: <strong>{disc.resueltaPor}</strong></span>}
+                        {disc.observacionResolucion && <span>Obs.: {disc.observacionResolucion}</span>}
+                        {disc.ajustes.map((aj, idx) => (
+                          <span key={idx}>
+                            Ajuste ({aj.tipo === 'reduccion_saldo' ? 'Reducción de saldo' : 'Saldo a favor'}):{' '}
+                            <strong>{formatoARS(aj.importeCentavos)}</strong>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    {disc.comprobanteNombre && (
                       <button
                         type="button"
-                        onClick={() => void descargarComprobante(mov)}
-                        disabled={descargandoId === mov.id}
-                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 hover:text-blue-900 hover:underline cursor-pointer"
-                        title={mov.comprobante_nombre}
+                        onClick={() => void descargarComprobanteDiscrepancia(disc)}
+                        disabled={descargandoId === `disc-${disc.id}`}
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 hover:text-blue-900 hover:underline cursor-pointer shrink-0"
+                        title={disc.comprobanteNombre}
                       >
                         <Download className="w-3 h-3" />
-                        <span>{descargandoId === mov.id ? 'Descargando…' : 'Comprobante'}</span>
+                        <span>{descargandoId === `disc-${disc.id}` ? 'Descargando…' : 'Comprobante discrepancia'}</span>
                       </button>
                     )}
                   </div>
-                </div>
-
-                {/* Desglose de Remitos Imputados */}
-                <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">
-                    Remitos saldados ({mov.imputaciones.length}):
-                  </span>
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {mov.imputaciones.map((imp) => (
-                      <div
-                        key={imp.id}
-                        className="flex items-center justify-between gap-2 p-2 rounded-md bg-slate-50 border border-slate-200/80 text-xs"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-mono font-bold text-slate-900 bg-white px-1.5 py-0.5 rounded border border-slate-200 text-[11px]">
-                              {imp.remitoNumero}
-                            </span>
-                            <span className="font-semibold text-slate-700 truncate" title={imp.comercio}>
-                              {imp.comercio}
-                            </span>
-                          </div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">
-                            Por: {imp.imputadoPor}
-                          </div>
-                        </div>
-                        <strong className="font-mono text-xs text-emerald-700 shrink-0">
-                          {formatoARS(imp.importeCentavos)}
-                        </strong>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                )}
+                </>
+                )}
               </article>
             );
           })}

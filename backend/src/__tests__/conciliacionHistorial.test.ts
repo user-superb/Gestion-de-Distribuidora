@@ -188,4 +188,83 @@ describe('Historial de Conciliaciones', () => {
     assert.equal(res.statusCode, 400);
     assert.equal(res.body.error, 'INVALID_FILTER');
   });
+
+  it('muestra todos los N movimientos para un único remito cuando hay discrepancia aprobada (faltante y sobrante)', async () => {
+    await pool.query(`
+      CREATE TABLE discrepancia_conciliacion (
+        id serial PRIMARY KEY,
+        movimiento_id bigint NOT NULL,
+        movimiento_ids bigint[] NOT NULL DEFAULT '{}',
+        remito_ids bigint[] NOT NULL,
+        importe_movimiento bigint NOT NULL,
+        importe_seleccionado bigint NOT NULL,
+        diferencia_centavos bigint NOT NULL,
+        nota text NOT NULL,
+        motivo_codigo text,
+        estado text NOT NULL DEFAULT 'pendiente',
+        creada_por bigint NOT NULL,
+        creada_en timestamp DEFAULT now(),
+        resuelta_por bigint,
+        resuelta_en timestamp,
+        observacion_resolucion text
+      );
+      CREATE TABLE discrepancia_comprobante (
+        discrepancia_id bigint PRIMARY KEY,
+        nombre_archivo text NOT NULL,
+        tipo_mime text NOT NULL,
+        contenido bytea NOT NULL,
+        tamano_bytes bigint NOT NULL
+      );
+      CREATE TABLE discrepancia_ajuste (
+        id serial PRIMARY KEY,
+        discrepancia_id bigint NOT NULL,
+        remito_id bigint,
+        comercio_id bigint,
+        tipo text NOT NULL,
+        importe_centavos bigint NOT NULL
+      );
+    `);
+
+    // Caso 1: 2 movimientos → 1 único remito con sobrante donde M2 ya cubre el 100% y M3 queda sin imputación directa
+    await pool.query(`
+      INSERT INTO remito (id, numero, comercio_id, sucursal_id, importe_centavos, estado)
+        VALUES (2, 'R-0002-2001', 1, 1, 100000, 'entregado');
+      INSERT INTO movimiento_bancario (id, cuenta_id, ordenante, ordenante_cuit, referencia_externa, importe_centavos, origen, estado) VALUES
+        (2, 1, 'Mayorista El Sol S.R.L.', '20123456789', 'REF-SOB-1', 100000, 'Extracto Bancario', 'imputado'),
+        (3, 1, 'Mayorista El Sol S.R.L.', '20123456789', 'REF-SOB-2', 25000, 'Extracto Bancario', 'imputado');
+      INSERT INTO imputacion (id, movimiento_bancario_id, remito_id, importe_centavos, imputado_por)
+        VALUES (2, 2, 2, 100000, 1);
+      INSERT INTO discrepancia_conciliacion
+        (id, movimiento_id, movimiento_ids, remito_ids, importe_movimiento, importe_seleccionado, diferencia_centavos, nota, motivo_codigo, estado, creada_por, resuelta_por, resuelta_en, observacion_resolucion)
+        VALUES (10, 2, ARRAY[2, 3], ARRAY[2], 125000, 100000, 25000, 'Pago anticipado con saldo a favor', 'otro', 'aprobada', 2, 1, now(), 'Aprobado por admin');
+      INSERT INTO discrepancia_comprobante (discrepancia_id, nombre_archivo, tipo_mime, contenido, tamano_bytes)
+        VALUES (10, 'respaldo-sobrante.pdf', 'application/pdf', '1234'::bytea, 4);
+      INSERT INTO discrepancia_ajuste (id, discrepancia_id, remito_id, comercio_id, tipo, importe_centavos)
+        VALUES (1, 10, NULL, 1, 'saldo_favor', 25000);
+    `);
+
+    const session = { id: 'usr_2', role: 'Administrativo' };
+    const historial = await conciliacionService.getHistorialConciliaciones({ busqueda: 'R-0002-2001' }, session);
+
+    assert.equal(historial.length, 2);
+    const movIds = historial.map((m) => m.id).sort();
+    assert.deepEqual(movIds, ['2', '3']);
+
+    const mov3 = historial.find((m) => m.id === '3')!;
+    assert.equal(mov3.referencia_externa, 'REF-SOB-2');
+    assert.equal(mov3.imputaciones.length, 1);
+    assert.equal(mov3.imputaciones[0].remitoId, '2');
+    assert.equal(mov3.imputaciones[0].remitoNumero, 'R-0002-2001');
+    assert.equal(mov3.imputaciones[0].importeCentavos, '0');
+    assert.equal(mov3.imputaciones[0].esExcedenteDiscrepancia, true);
+
+    for (const mov of historial) {
+      assert.equal(mov.discrepancia?.id, '10');
+      assert.deepEqual(mov.discrepancia?.movimientoIds, ['2', '3']);
+      assert.deepEqual(mov.discrepancia?.remitoIds, ['2']);
+      assert.equal(mov.discrepancia?.comprobanteNombre, 'respaldo-sobrante.pdf');
+      assert.equal(mov.discrepancia?.ajustes.length, 1);
+      assert.equal(mov.discrepancia?.ajustes[0].tipo, 'saldo_favor');
+    }
+  });
 });
