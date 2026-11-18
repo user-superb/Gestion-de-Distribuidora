@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { calcularImporteVisitaLocal, importeRestante, PagoEnCarga, validarCobro } from '../dominio/cobro';
 import { centavosATexto, formatearPesos, parsearPesos } from '../dominio/dinero';
-import { armarEntrega, armarEntregaLote, armarRechazo, MOTIVOS_RECHAZO_PREESTABLECIDOS, MOTIVO_COMERCIO_CERRADO, motivosRechazoPreestablecidos, puedeConfirmarse } from '../dominio/entrega';
+import { armarEntrega, armarEntregaLote, armarRechazo, MOTIVOS_RECHAZO_PREESTABLECIDOS, MOTIVO_COMERCIO_CERRADO, motivosRechazoPreestablecidos, puedeConfirmarse, UBICACION_POR_DEFECTO } from '../dominio/entrega';
 import {
   esRemitoRechazado,
   esRemitoResuelto,
@@ -68,10 +68,9 @@ describe('HU #27 · Cobro QR', () => {
     assert.equal(validarCobro([fila('qr', '57500,50')], TOTAL, true).puedeConfirmar, true);
   });
 
-  it('sin conexión el QR queda deshabilitado', () => {
+  it('sin conexión también permite registrar el cobro por QR para sincronizar luego', () => {
     const resultado = validarCobro([fila('qr', '57500,50')], TOTAL, false);
-    assert.equal(resultado.puedeConfirmar, false);
-    assert.match(resultado.errores.join(' '), /QR necesita conexión/);
+    assert.equal(resultado.puedeConfirmar, true);
   });
 });
 
@@ -88,10 +87,14 @@ describe('HU #28 · Cobro transferencia total', () => {
 });
 
 describe('HU #29 · Cobro combinado', () => {
-  it('ESCENARIO 1 y 2: la suma exacta de varios medios se puede confirmar (sin conexión, sin QR)', () => {
+  it('ESCENARIO 1 y 2: la suma exacta de varios medios se puede confirmar con o sin conexión (incluyendo QR)', () => {
     const pagos = [fila('efectivo', '40000'), fila('transferencia', '17500,50', 'OP-9')];
     assert.equal(validarCobro(pagos, TOTAL, true).puedeConfirmar, true);
     assert.equal(validarCobro(pagos, TOTAL, false).puedeConfirmar, true);
+
+    const pagosConQr = [fila('efectivo', '40000'), fila('qr', '17500,50')];
+    assert.equal(validarCobro(pagosConQr, TOTAL, true).puedeConfirmar, true);
+    assert.equal(validarCobro(pagosConQr, TOTAL, false).puedeConfirmar, true);
   });
 
   it('ESCENARIO 3: si la suma no coincide bloquea la confirmación y muestra la diferencia', () => {
@@ -135,14 +138,18 @@ describe('HU #29 · Cobro combinado', () => {
 describe('HU #22 · Confirmación de entrega de remitos', () => {
   const remito = (id: string, estado: string): Remito => ({ id, numero: `R-${id}`, marca: 'Lácteos', importeCentavos: 1000, estado });
 
-  it('REGLA 1: la confirmación lleva la hora del celular y el GPS; sin ubicación no se arma', () => {
+  it('REGLA 1: la confirmación lleva la hora del celular y el GPS (o coordenadas de respaldo si está sin conexión/GPS)', () => {
     const ahora = new Date('2026-10-19T08:00:00.000Z');
     assert.deepEqual(armarEntrega({ latitud: -34.9, longitud: -57.9, precisionMetros: 10 }, ahora), {
       timestamp: '2026-10-19T08:00:00.000Z',
       latitud: -34.9,
       longitud: -57.9,
     });
-    assert.equal(armarEntrega(null, ahora), null);
+    assert.deepEqual(armarEntrega(null, ahora), {
+      timestamp: '2026-10-19T08:00:00.000Z',
+      latitud: UBICACION_POR_DEFECTO.latitud,
+      longitud: UBICACION_POR_DEFECTO.longitud,
+    });
   });
 
   it('solo se confirman los remitos que no están en un estado final', () => {
@@ -221,8 +228,12 @@ describe('HU #23 · Confirmación de entrega multimarca', () => {
     assert.equal(lote.entregas[1].cuerpo.latitud, -34.92);
   });
 
-  it('sin GPS armarEntregaLote devuelve null', () => {
-    assert.equal(armarEntregaLote([remito('1')], null, ahora), null);
+  it('sin GPS armarEntregaLote permite confirmar usando coordenadas de respaldo para operar offline', () => {
+    const lote = armarEntregaLote([remito('1')], null, ahora);
+    assert.ok(lote);
+    assert.equal(lote.cuerpoGeneral.latitud, UBICACION_POR_DEFECTO.latitud);
+    assert.equal(lote.cuerpoGeneral.longitud, UBICACION_POR_DEFECTO.longitud);
+    assert.equal(lote.entregas.length, 1);
   });
 
   it('si no hay remitos pendientes armarEntregaLote devuelve null', () => {

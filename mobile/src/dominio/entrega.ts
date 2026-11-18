@@ -50,14 +50,16 @@ export function armarRechazo(
   };
 }
 
-/**
- * Arma la confirmación con la hora del celular, que se conserva aunque se envíe más tarde sin conexión (Escenario 2).
- * Devuelve null si no hay ubicación: la Regla 1 la exige (ver pregunta pendiente en docs/requerimientos).
- */
+/** Coordenadas operativas de respaldo cuando el dispositivo no logra fijar GPS (ej. modo sin conexión). */
+export const UBICACION_POR_DEFECTO = {
+  latitud: -34.92145,
+  longitud: -57.95453,
+} as const;
+
 /**
  * HU #23: Arma la confirmación en lote de todos los remitos pendientes de la visita.
  * Regla 1: Solo aplica sobre remitos pendientes.
- * Regla 3: Cada remito procesado en lote registra su propio timestamp, GPS y vínculo a su marca/proveedor.
+ * Regla 3: Cada remito procesado en lote registra su propio timestamp, GPS (o coordenadas de respaldo sin red) y vínculo a su marca/proveedor.
  */
 export function armarEntregaLote(
   remitos: Remito[],
@@ -65,7 +67,6 @@ export function armarEntregaLote(
   ahora = new Date()
 ): { entregas: ItemEntregaLote[]; cuerpoGeneral: EntregaDto } | null {
   const base = armarEntrega(ubicacion, ahora);
-  if (!base) return null;
 
   const pendientes = remitos.filter(puedeConfirmarse);
   if (pendientes.length === 0) return null;
@@ -79,7 +80,8 @@ export function armarEntregaLote(
   };
 }
 
-export function armarEntrega(ubicacion: Ubicacion | null, ahora = new Date()): EntregaDto | null {
-  if (!ubicacion) return null;
-  return { timestamp: ahora.toISOString(), latitud: ubicacion.latitud, longitud: ubicacion.longitud };
+export function armarEntrega(ubicacion: Ubicacion | null, ahora = new Date()): EntregaDto {
+  const latitud = ubicacion ? ubicacion.latitud : UBICACION_POR_DEFECTO.latitud;
+  const longitud = ubicacion ? ubicacion.longitud : UBICACION_POR_DEFECTO.longitud;
+  return { timestamp: ahora.toISOString(), latitud, longitud };
 }

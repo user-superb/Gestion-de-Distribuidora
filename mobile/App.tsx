@@ -51,6 +51,7 @@ export default function App() {
 
   // Supuesto S5: la sesión venció. Los cobros sin enviar quedan guardados y salen después del nuevo login.
   const onSesionVencida = useCallback(() => {
+    void colaOperaciones.limpiarSincronizados();
     fijarSesionActual(null);
     guardarSesion(null);
     setSesion(null);
@@ -76,6 +77,7 @@ export default function App() {
     const pendientes = (await colaOperaciones.listar()).filter((item) => item.estado === 'pendiente').length;
     const cerrar = async () => {
       if (sesion) await cerrarSesion(sesion.token);
+      await colaOperaciones.limpiarSincronizados();
       await borrarHoja();
       fijarSesionActual(null);
       await guardarSesion(null);

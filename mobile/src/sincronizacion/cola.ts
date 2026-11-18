@@ -4,7 +4,7 @@
 // Se envían en el orden en que se registraron, así la entrega llega antes que el cobro.
 // Reenviar es seguro: el cobro lleva claves de idempotencia y la entrega de un remito ya entregado no se pisa.
 import { ErrorApi } from '../errores';
-import type { CobroDto, EntregaDto, ItemEntregaLote, RechazoDto } from '../tipos';
+import type { CobroDto, EntregaDto, HojaDeRuta, ItemEntregaLote, RechazoDto } from '../tipos';
 
 export type EstadoEnCola = 'pendiente' | 'sincronizado' | 'rechazado';
 
@@ -157,5 +157,62 @@ export class ColaOperaciones {
       }
     }
     return mapa;
+  }
+
+  /**
+   * Elimina de la cola local las operaciones ya sincronizadas (o rechazadas),
+   * conservando únicamente las pendientes de envío offline (por ejemplo, al cerrar sesión).
+   */
+  async limpiarSincronizados(): Promise<void> {
+    const pendientes = (await this.listar()).filter((item) => item.estado === 'pendiente');
+    await this.guardar(pendientes);
+  }
+
+  /**
+   * Depura operaciones con estado 'sincronizado' que quedaron de una base de datos anterior
+   * (por ejemplo, tras un reinicio de BD o demo_movil_reset donde los IDs se reutilizan pero
+   * en el servidor las visitas y remitos vuelven a figurar pendientes).
+   */
+  async depurarContraServidor(hojaServidor: HojaDeRuta | null): Promise<void> {
+    const cola = await this.listar();
+    if (!cola.some((item) => item.estado === 'sincronizado')) return;
+
+    if (!hojaServidor) {
+      await this.guardar(cola.filter((item) => item.estado !== 'sincronizado'));
+      return;
+    }
+
+    const visitasPorId = new Map<string, { cobrada: boolean }>();
+    const remitosPorId = new Map<string, string>();
+    for (const v of hojaServidor.visitas || []) {
+      visitasPorId.set(String(v.id), { cobrada: !!v.cobrada });
+      for (const r of v.remitos || []) {
+        remitosPorId.set(String(r.id), r.estado);
+      }
+    }
+
+    const esRemitoPendienteEnServidor = (remitoId: string): boolean => {
+      const estadoServidor = remitosPorId.get(String(remitoId));
+      return !estadoServidor || estadoServidor === 'pendiente' || estadoServidor === 'en_ruta';
+    };
+
+    const filtrada = cola.filter((item) => {
+      if (item.estado !== 'sincronizado') return true;
+      if (item.tipo === 'cobro') {
+        const v = visitasPorId.get(String(item.visitaId));
+        return !!v && v.cobrada;
+      }
+      if (item.tipo === 'entrega' || item.tipo === 'rechazo') {
+        return !esRemitoPendienteEnServidor(item.remitoId);
+      }
+      if (item.tipo === 'entrega_lote') {
+        return item.entregas.every((e) => !esRemitoPendienteEnServidor(e.remitoId));
+      }
+      return true;
+    });
+
+    if (filtrada.length !== cola.length) {
+      await this.guardar(filtrada);
+    }
   }
 }

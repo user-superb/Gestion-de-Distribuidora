@@ -148,7 +148,7 @@ export function LoginPantalla({ aviso, onIngreso }: { aviso?: string | null; onI
             </Text>
             <TextInput
               style={[estilos.input, { fontSize: 14, paddingVertical: 8, paddingHorizontal: 10 }]}
-              placeholder="http://192.168.0.8:3001/api"
+              placeholder="https://h4s91txd-3001.brs.devtunnels.ms/api"
               autoCapitalize="none"
               autoCorrect={false}
               value={inputUrl}

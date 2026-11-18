@@ -1,6 +1,7 @@
 export interface DiscrepanciaAjusteHistorial {
   tipo: 'reduccion_saldo' | 'saldo_favor';
   remitoId: string | null;
+  remitoNumero?: string | null;
   comercioId: string | null;
   importeCentavos: string;
 }
@@ -26,12 +27,14 @@ export interface ImputacionHistorial {
   remitoId: string;
   remitoNumero: string;
   remitoImporteCentavos?: string | null;
+  cobradoEfectivoCentavos?: string;
   comercio: string;
   comercioCuit: string | null;
   importeCentavos: string;
   imputadoEn: string;
   imputadoPor: string;
   esExcedenteDiscrepancia?: boolean;
+  esAjusteDiscrepancia?: boolean;
 }
 
 export interface MovimientoConciliado {
@@ -56,6 +59,7 @@ export interface MovimientoConciliado {
 
 export interface MovimientoEnGrupo extends MovimientoConciliado {
   totalImputadoCentavos: string;
+  excedenteCentavos: string;
   tieneExcedente: boolean;
 }
 
@@ -63,9 +67,11 @@ export interface RemitoConsolidadoHistorial {
   remitoId: string;
   remitoNumero: string;
   remitoImporteCentavos: string | null;
+  cobradoEfectivoCentavos?: string;
   comercio: string;
   comercioCuit: string | null;
   totalImputadoCentavos: string;
+  ajusteReduccionCentavos: string;
   imputadoPor: string;
   imputadoEn: string;
   detalleMovimientos: Array<{
@@ -84,6 +90,7 @@ export interface GrupoHistorialConciliacion {
   discrepancia?: DiscrepanciaHistorial;
   totalMovimientosCentavos: string;
   totalImputadoCentavos: string;
+  totalRemitosCentavos: string;
   imputadoEn: string;
   sucursales: string[];
   cuentas: string[];
@@ -137,12 +144,28 @@ export function agruparHistorialConciliaciones(items: MovimientoConciliado[]): G
       return diff !== 0 ? diff : Number(a.id) - Number(b.id);
     });
 
+    const discrepancia = movsOrdenados.find((m) => m.discrepancia)?.discrepancia;
+    const ajustesPorRemito = new Map<string, bigint>();
+    if (discrepancia) {
+      for (const aj of discrepancia.ajustes) {
+        if (aj.tipo === 'reduccion_saldo' && aj.remitoId) {
+          ajustesPorRemito.set(
+            aj.remitoId,
+            (ajustesPorRemito.get(aj.remitoId) || 0n) + BigInt(aj.importeCentavos || '0')
+          );
+        }
+      }
+    }
+
     const movimientos: MovimientoEnGrupo[] = movsOrdenados.map((mov) => {
       const totalImp = mov.imputaciones.reduce((acc, imp) => acc + BigInt(imp.importeCentavos || '0'), 0n);
-      const tieneExcedente = mov.imputaciones.some((imp) => imp.esExcedenteDiscrepancia) || totalImp === 0n;
+      const importeMov = BigInt(mov.importe_centavos || '0');
+      const excedente = importeMov > totalImp ? importeMov - totalImp : 0n;
+      const tieneExcedente = mov.imputaciones.some((imp) => imp.esExcedenteDiscrepancia) || excedente > 0n;
       return {
         ...mov,
         totalImputadoCentavos: totalImp.toString(),
+        excedenteCentavos: excedente.toString(),
         tieneExcedente,
       };
     });
@@ -151,6 +174,7 @@ export function agruparHistorialConciliaciones(items: MovimientoConciliado[]): G
       remitoId: string;
       remitoNumero: string;
       remitoImporteCentavos: string | null;
+      cobradoEfectivoCentavos: string;
       comercio: string;
       comercioCuit: string | null;
       totalImputado: bigint;
@@ -166,6 +190,7 @@ export function agruparHistorialConciliaciones(items: MovimientoConciliado[]): G
             remitoId: imp.remitoId,
             remitoNumero: imp.remitoNumero,
             remitoImporteCentavos: imp.remitoImporteCentavos ?? null,
+            cobradoEfectivoCentavos: imp.cobradoEfectivoCentavos || '0',
             comercio: imp.comercio,
             comercioCuit: imp.comercioCuit ?? null,
             totalImputado: 0n,
@@ -175,36 +200,50 @@ export function agruparHistorialConciliaciones(items: MovimientoConciliado[]): G
           });
         }
         const entry = remitosMap.get(imp.remitoId)!;
-        entry.totalImputado += BigInt(imp.importeCentavos || '0');
+        if (imp.cobradoEfectivoCentavos && imp.cobradoEfectivoCentavos !== '0') {
+          entry.cobradoEfectivoCentavos = imp.cobradoEfectivoCentavos;
+        }
+        const montoImp = BigInt(imp.importeCentavos || '0');
+        entry.totalImputado += montoImp;
         if (new Date(imp.imputadoEn) > new Date(entry.imputadoEn)) {
           entry.imputadoEn = imp.imputadoEn;
           entry.imputadoPor = imp.imputadoPor;
         }
-        entry.detalleMovimientos.push({
-          movimientoId: mov.id,
-          ordenante: mov.ordenante,
-          referenciaExterna: mov.referencia_externa,
-          importeCentavos: imp.importeCentavos,
-          esExcedenteDiscrepancia: Boolean(imp.esExcedenteDiscrepancia),
-        });
+        if (montoImp > 0n || imp.esExcedenteDiscrepancia) {
+          entry.detalleMovimientos.push({
+            movimientoId: mov.id,
+            ordenante: mov.ordenante,
+            referenciaExterna: mov.referencia_externa,
+            importeCentavos: imp.importeCentavos,
+            esExcedenteDiscrepancia: Boolean(imp.esExcedenteDiscrepancia),
+          });
+        }
       }
     }
 
-    const remitos: RemitoConsolidadoHistorial[] = Array.from(remitosMap.values()).map((r) => ({
-      remitoId: r.remitoId,
-      remitoNumero: r.remitoNumero,
-      remitoImporteCentavos: r.remitoImporteCentavos,
-      comercio: r.comercio,
-      comercioCuit: r.comercioCuit,
-      totalImputadoCentavos: r.totalImputado.toString(),
-      imputadoPor: r.imputadoPor,
-      imputadoEn: r.imputadoEn,
-      detalleMovimientos: r.detalleMovimientos,
-    }));
+    const remitos: RemitoConsolidadoHistorial[] = Array.from(remitosMap.values())
+      .map((r) => ({
+        remitoId: r.remitoId,
+        remitoNumero: r.remitoNumero,
+        remitoImporteCentavos: r.remitoImporteCentavos,
+        cobradoEfectivoCentavos: r.cobradoEfectivoCentavos,
+        comercio: r.comercio,
+        comercioCuit: r.comercioCuit,
+        totalImputadoCentavos: r.totalImputado.toString(),
+        ajusteReduccionCentavos: (ajustesPorRemito.get(r.remitoId) || 0n).toString(),
+        imputadoPor: r.imputadoPor,
+        imputadoEn: r.imputadoEn,
+        detalleMovimientos: r.detalleMovimientos,
+      }))
+      .sort((a, b) => Number(a.remitoId) - Number(b.remitoId));
 
-    const discrepancia = movimientos.find((m) => m.discrepancia)?.discrepancia;
     const totalMovimientos = movimientos.reduce((acc, m) => acc + BigInt(m.importe_centavos || '0'), 0n);
     const totalImputado = remitos.reduce((acc, r) => acc + BigInt(r.totalImputadoCentavos || '0'), 0n);
+    const totalRemitos = remitos.every((r) => r.remitoImporteCentavos !== null)
+      ? remitos.reduce((acc, r) => acc + BigInt(r.remitoImporteCentavos || '0'), 0n)
+      : discrepancia
+      ? BigInt(discrepancia.importeSeleccionado || totalImputado)
+      : totalImputado;
     const imputadoEn = movimientos.reduce((latest, m) => (
       new Date(m.imputado_en) > new Date(latest) ? m.imputado_en : latest
     ), movimientos[0].imputado_en);
@@ -223,6 +262,7 @@ export function agruparHistorialConciliaciones(items: MovimientoConciliado[]): G
       discrepancia,
       totalMovimientosCentavos: totalMovimientos.toString(),
       totalImputadoCentavos: totalImputado.toString(),
+      totalRemitosCentavos: totalRemitos.toString(),
       imputadoEn,
       sucursales,
       cuentas,

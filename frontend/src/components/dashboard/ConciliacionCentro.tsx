@@ -22,6 +22,8 @@ interface Sugerencia {
   numero: string;
   razon_social: string;
   saldo_centavos: string;
+  remito_importe_centavos?: string;
+  cobrado_efectivo_centavos?: string;
 }
 
 interface MovimientoHuerfano {
@@ -268,7 +270,13 @@ const SugerenciasImputacion: React.FC<{
                   <span className={`rounded px-2 py-0.5 text-[10px] font-semibold uppercase ${item.tipo === 'exacta' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'}`}>{item.tipo === 'exacta' ? 'Coincidencia exacta' : 'Coincidencia parcial'}</span>
                   <span className="text-xs font-semibold text-slate-800">{item.ordenante || 'Ordenante sin informar'} → {item.numero} · {item.razon_social}</span>
                 </div>
-                <p className="mt-1 text-xs text-slate-500">Movimiento {formatoARS(item.importe_disponible_centavos)} · Saldo {formatoARS(item.saldo_centavos)} · {new Date(item.fecha_hora).toLocaleDateString('es-AR')} · {item.cuenta}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Movimiento {formatoARS(item.importe_disponible_centavos)} · Saldo {formatoARS(item.saldo_centavos)}
+                  {item.cobrado_efectivo_centavos && Number(item.cobrado_efectivo_centavos) > 0
+                    ? ` · Total remito ${formatoARS(item.remito_importe_centavos || item.saldo_centavos)} (Efectivo ${formatoARS(item.cobrado_efectivo_centavos)})`
+                    : ''}
+                  {' '}· {new Date(item.fecha_hora).toLocaleDateString('es-AR')} · {item.cuenta}
+                </p>
                 <p className="mt-1 text-xs text-slate-600">{item.motivo}</p>
               </div>
               {item.tipo === 'exacta' ? (
@@ -713,33 +721,50 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
 
                             {grupo.movimientos.length > 1 && (
                               <div className="border-t border-slate-200/70 pt-1.5 space-y-0.5 text-[11px] text-slate-600">
-                                {grupo.movimientos.map((mov) => (
-                                  <div key={mov.id} className="flex items-center justify-between gap-2">
-                                    <span className="truncate flex items-center gap-1.5">
-                                      <span className="truncate">
-                                        Mov. #{mov.id}
-                                        {mov.referencia_externa ? ` (${mov.referencia_externa})` : ''} · {new Date(mov.fecha_hora).toLocaleDateString('es-AR')}
+                                {grupo.movimientos.map((mov) => {
+                                  const origenCorto = mov.origen.includes('Manual')
+                                    ? 'Manual'
+                                    : mov.origen.includes('QR')
+                                    ? 'QR'
+                                    : mov.origen.includes('Móvil') || mov.origen.includes('Movil')
+                                    ? 'Móvil'
+                                    : 'Extracto';
+                                  const montoTexto =
+                                    mov.totalImputadoCentavos === '0' && mov.tieneExcedente
+                                      ? `Excedente · ${formatoARS(mov.importe_centavos)}`
+                                      : BigInt(mov.excedenteCentavos) > 0n
+                                      ? `Aplic. ${formatoARS(mov.totalImputadoCentavos)} / ${formatoARS(mov.importe_centavos)}`
+                                      : formatoARS(mov.importe_centavos);
+
+                                  return (
+                                    <div key={mov.id} className="flex items-center justify-between gap-2">
+                                      <span className="truncate flex items-center gap-1.5">
+                                        {origenesUnicos.length > 1 && (
+                                          <span className={`px-1 py-0 rounded text-[9px] font-bold uppercase shrink-0 ${badgeOrigen(mov.origen)}`}>
+                                            {origenCorto}
+                                          </span>
+                                        )}
+                                        <span className="truncate">
+                                          Mov. #{mov.id}
+                                          {mov.referencia_externa ? ` (${mov.referencia_externa})` : ''} · {new Date(mov.fecha_hora).toLocaleDateString('es-AR')}
+                                        </span>
+                                        {mov.comprobante_nombre && (
+                                          <button
+                                            type="button"
+                                            onClick={() => void descargarComprobante(mov)}
+                                            disabled={descargandoId === `mov-${mov.id}`}
+                                            className="inline-flex items-center gap-0.5 font-semibold text-blue-700 hover:text-blue-900 hover:underline cursor-pointer shrink-0"
+                                            title={mov.comprobante_nombre}
+                                          >
+                                            <Download className="w-3 h-3" />
+                                            <span>{descargandoId === `mov-${mov.id}` ? '…' : 'Comp.'}</span>
+                                          </button>
+                                        )}
                                       </span>
-                                      {mov.comprobante_nombre && (
-                                        <button
-                                          type="button"
-                                          onClick={() => void descargarComprobante(mov)}
-                                          disabled={descargandoId === `mov-${mov.id}`}
-                                          className="inline-flex items-center gap-0.5 font-semibold text-blue-700 hover:text-blue-900 hover:underline cursor-pointer shrink-0"
-                                          title={mov.comprobante_nombre}
-                                        >
-                                          <Download className="w-3 h-3" />
-                                          <span>{descargandoId === `mov-${mov.id}` ? '…' : 'Comp.'}</span>
-                                        </button>
-                                      )}
-                                    </span>
-                                    <span className="font-mono shrink-0">
-                                      {mov.tieneExcedente && mov.totalImputadoCentavos === '0'
-                                        ? `Excedente · ${formatoARS(mov.importe_centavos)}`
-                                        : formatoARS(mov.importe_centavos)}
-                                    </span>
-                                  </div>
-                                ))}
+                                      <span className="font-mono shrink-0">{montoTexto}</span>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             )}
                           </>
@@ -748,58 +773,115 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
                     </div>
                   </div>
 
-                  {/* Columna Derecha: Remitos Saldados */}
+                  {/* Columna Derecha: Remitos Saldados (mismo formato de tarjeta única + desglose que la columna izquierda) */}
                   <div className="space-y-1.5">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
                       Remitos saldados ({grupo.remitos.length}):
                     </span>
-                    <div className="space-y-2">
-                      {grupo.remitos.map((rem) => (
-                        <div
-                          key={rem.remitoId}
-                          className="p-2.5 rounded-md bg-slate-50 border border-slate-200/80 text-xs space-y-1.5"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-mono font-bold text-slate-900 bg-white px-1.5 py-0.5 rounded border border-slate-200 text-[11px]">
-                                  {rem.remitoNumero}
-                                </span>
-                                <span className="font-semibold text-slate-700 truncate" title={rem.comercio}>
-                                  {rem.comercio}
-                                </span>
-                              </div>
-                              <div className="text-[10px] text-slate-500 mt-0.5">
-                                Por: {rem.imputadoPor}
-                                {rem.remitoImporteCentavos && rem.remitoImporteCentavos !== rem.totalImputadoCentavos && (
-                                  <span> · Total remito: {formatoARS(rem.remitoImporteCentavos)}</span>
-                                )}
-                              </div>
-                            </div>
-                            <strong className="font-mono text-xs text-emerald-700 shrink-0">
-                              {formatoARS(rem.totalImputadoCentavos)}
-                            </strong>
-                          </div>
+                    <div className="p-2.5 rounded-md bg-slate-50 border border-slate-200/80 text-xs space-y-1.5">
+                      {(() => {
+                        const remUnico = grupo.remitos.length === 1 ? grupo.remitos[0] : null;
+                        const imputadoresUnicos = [...new Set(grupo.remitos.map((r) => r.imputadoPor).filter(Boolean))];
 
-                          {rem.detalleMovimientos.length > 1 && (
+                        if (remUnico) {
+                          return (
+                            <>
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-mono font-bold text-slate-900 bg-white px-1.5 py-0.5 rounded border border-slate-200 text-[11px]">
+                                      {remUnico.remitoNumero}
+                                    </span>
+                                    <span className="font-semibold text-slate-700 truncate" title={remUnico.comercio}>
+                                      {remUnico.comercio}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-500 mt-0.5">
+                                    Por: {remUnico.imputadoPor}
+                                    {remUnico.remitoImporteCentavos && remUnico.remitoImporteCentavos !== remUnico.totalImputadoCentavos && (
+                                      <span> · Total remito: {formatoARS(remUnico.remitoImporteCentavos)}</span>
+                                    )}
+                                    {remUnico.cobradoEfectivoCentavos && remUnico.cobradoEfectivoCentavos !== '0' && (
+                                      <span> · Efectivo en entrega: {formatoARS(remUnico.cobradoEfectivoCentavos)}</span>
+                                    )}
+                                    {remUnico.ajusteReduccionCentavos !== '0' && (
+                                      <span> · Ajuste: -{formatoARS(remUnico.ajusteReduccionCentavos)}</span>
+                                    )}
+                                  </div>
+                                </div>
+                                <strong className="font-mono text-xs text-emerald-700 shrink-0">
+                                  {formatoARS(remUnico.totalImputadoCentavos)}
+                                </strong>
+                              </div>
+
+                              {remUnico.detalleMovimientos.length > 1 && (
+                                <div className="border-t border-slate-200/70 pt-1.5 space-y-0.5 text-[11px] text-slate-600">
+                                  {remUnico.detalleMovimientos.map((det) => (
+                                    <div key={`${remUnico.remitoId}-${det.movimientoId}`} className="flex items-center justify-between gap-2">
+                                      <span className="truncate">
+                                        Mov. #{det.movimientoId}
+                                        {det.referenciaExterna ? ` (${det.referenciaExterna})` : ''}
+                                      </span>
+                                      <span className="font-mono shrink-0">
+                                        {det.esExcedenteDiscrepancia && det.importeCentavos === '0'
+                                          ? 'Excedente a favor ($ 0,00 imputado)'
+                                          : formatoARS(det.importeCentavos)}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </>
+                          );
+                        }
+
+                        return (
+                          <>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-white text-slate-800 border border-slate-200">
+                                    {grupo.remitos.length} remitos
+                                  </span>
+                                  <span className="font-semibold text-slate-700 truncate" title={grupo.comercioPrincipal}>
+                                    {grupo.comercioPrincipal}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-slate-500 mt-0.5">
+                                  Por: {imputadoresUnicos.join(', ')}
+                                  {grupo.totalRemitosCentavos !== grupo.totalImputadoCentavos && (
+                                    <span> · Total documentos: {formatoARS(grupo.totalRemitosCentavos)}</span>
+                                  )}
+                                </div>
+                              </div>
+                              <strong className="font-mono text-xs text-emerald-700 shrink-0">
+                                {formatoARS(grupo.totalImputadoCentavos)}
+                              </strong>
+                            </div>
+
                             <div className="border-t border-slate-200/70 pt-1.5 space-y-0.5 text-[11px] text-slate-600">
-                              {rem.detalleMovimientos.map((det) => (
-                                <div key={`${rem.remitoId}-${det.movimientoId}`} className="flex items-center justify-between gap-2">
-                                  <span className="truncate">
-                                    Mov. #{det.movimientoId}
-                                    {det.referenciaExterna ? ` (${det.referenciaExterna})` : ''}
+                              {grupo.remitos.map((rem) => (
+                                <div key={rem.remitoId} className="flex items-center justify-between gap-2">
+                                  <span className="truncate flex items-center gap-1.5">
+                                    <span className="font-mono font-bold text-slate-800">{rem.remitoNumero}</span>
+                                    {rem.remitoImporteCentavos && rem.remitoImporteCentavos !== rem.totalImputadoCentavos && (
+                                      <span className="text-slate-500">(Total {formatoARS(rem.remitoImporteCentavos)})</span>
+                                    )}
+                                    {rem.cobradoEfectivoCentavos && rem.cobradoEfectivoCentavos !== '0' && (
+                                      <span className="text-emerald-700">· Efectivo en entrega: {formatoARS(rem.cobradoEfectivoCentavos)}</span>
+                                    )}
                                   </span>
                                   <span className="font-mono shrink-0">
-                                    {det.esExcedenteDiscrepancia && det.importeCentavos === '0'
-                                      ? 'Excedente a favor ($ 0,00 imputado)'
-                                      : formatoARS(det.importeCentavos)}
+                                    {rem.ajusteReduccionCentavos !== '0'
+                                      ? `Ajuste -${formatoARS(rem.ajusteReduccionCentavos)} · ${formatoARS(rem.totalImputadoCentavos)}`
+                                      : formatoARS(rem.totalImputadoCentavos)}
                                   </span>
                                 </div>
                               ))}
                             </div>
-                          )}
-                        </div>
-                      ))}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -817,7 +899,8 @@ const HistorialConciliaciones: React.FC<{ session: UserSession }> = ({ session }
                         {disc.observacionResolucion && <span>Obs.: {disc.observacionResolucion}</span>}
                         {disc.ajustes.map((aj, idx) => (
                           <span key={idx}>
-                            Ajuste ({aj.tipo === 'reduccion_saldo' ? 'Reducción de saldo' : 'Saldo a favor'}):{' '}
+                            Ajuste ({aj.tipo === 'reduccion_saldo' ? 'Reducción de saldo' : 'Saldo a favor'}
+                            {aj.remitoNumero ? ` · ${aj.remitoNumero}` : ''}):{' '}
                             <strong>{formatoARS(aj.importeCentavos)}</strong>
                           </span>
                         ))}

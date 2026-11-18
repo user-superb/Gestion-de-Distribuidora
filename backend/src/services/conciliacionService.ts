@@ -1,5 +1,6 @@
 import { PoolClient } from 'pg';
 import { db } from '../db.js';
+import { asegurarImputacionesEfectivo } from './cobroService.js';
 
 export function esRolGlobal(rol?: string | null): boolean {
   if (!rol) return false;
@@ -834,16 +835,24 @@ async function enriquecerHistorialConDiscrepancias(
     id: string;
     numero: string;
     importeCentavos: string;
+    cobradoEfectivoCentavos: string;
     comercio: string;
     comercioCuit: string | null;
   }>();
   if (allRemIds.size > 0) {
     const remRes = await db.query(
       `SELECT r.id::text AS id, r.numero, r.importe_centavos::text AS importe_centavos,
+              COALESCE(ef.cobrado_efectivo_centavos, 0)::text AS cobrado_efectivo_centavos,
               COALESCE(c.nombre_fantasia, c.razon_social) AS comercio,
               c.cuit AS comercio_cuit
        FROM remito r
        JOIN comercio c ON c.id = r.comercio_id
+       LEFT JOIN (
+         SELECT remito_id, SUM(importe_centavos) AS cobrado_efectivo_centavos
+         FROM imputacion
+         WHERE movimiento_bancario_id IS NULL
+         GROUP BY remito_id
+       ) ef ON ef.remito_id = r.id
        WHERE r.id IN (${[...allRemIds].join(', ')})`
     );
     for (const rem of remRes.rows) {
@@ -851,6 +860,7 @@ async function enriquecerHistorialConDiscrepancias(
         id: String(rem.id),
         numero: String(rem.numero),
         importeCentavos: String(rem.importe_centavos),
+        cobradoEfectivoCentavos: String(rem.cobrado_efectivo_centavos || '0'),
         comercio: String(rem.comercio),
         comercioCuit: rem.comercio_cuit ? String(rem.comercio_cuit) : null,
       });
@@ -862,6 +872,11 @@ async function enriquecerHistorialConDiscrepancias(
     if (!movsAccesibles.length) continue;
 
     const fechaResolucion = row.resuelta_en || row.creada_en;
+    const esSobrante = BigInt(row.diferencia_centavos || 0) > 0n;
+    const ajustes = (ajustesPorDiscrepancia.get(String(row.id)) || []).map((aj) => ({
+      ...aj,
+      remitoNumero: aj.remitoId ? remitoInfoMap.get(aj.remitoId)?.numero || null : null,
+    }));
     const discrepanciaInfo = {
       id: String(row.id),
       movimientoIds: movIds,
@@ -875,9 +890,10 @@ async function enriquecerHistorialConDiscrepancias(
       resueltaEn: row.resuelta_en ? new Date(row.resuelta_en).toISOString() : null,
       resueltaPor: row.resuelta_por_nombre || null,
       comprobanteNombre: row.comprobante_nombre || null,
-      ajustes: ajustesPorDiscrepancia.get(String(row.id)) || [],
+      ajustes,
     };
 
+    const remitosConImputacionEnGrupo = new Set<string>();
     for (const movId of movsAccesibles) {
       if (!mapa.has(movId)) {
         const extra = extraMovimientos.get(movId)!;
@@ -904,10 +920,20 @@ async function enriquecerHistorialConDiscrepancias(
       if (!mov.discrepancia) {
         mov.discrepancia = discrepanciaInfo;
       }
+      for (const imp of mov.imputaciones) {
+        remitosConImputacionEnGrupo.add(String(imp.remitoId));
+      }
+      if (fechaResolucion && (!mov.imputado_en || new Date(fechaResolucion) > new Date(mov.imputado_en))) {
+        mov.imputado_en = fechaResolucion;
+      }
+    }
 
-      const remitosYaPresentes = new Set(mov.imputaciones.map((imp: any) => String(imp.remitoId)));
+    // Si algún movimiento quedó sin imputación directa (ej. sobrante cubierto por movimientos previos),
+    // lo vinculamos a los remitos del caso para que figure junto al resto en el historial.
+    for (const movId of movsAccesibles) {
+      const mov = mapa.get(movId)!;
+      if (mov.imputaciones.length > 0) continue;
       for (const remId of remIds) {
-        if (remitosYaPresentes.has(remId)) continue;
         const remInfo = remitoInfoMap.get(remId);
         if (!remInfo) continue;
         mov.imputaciones.push({
@@ -915,17 +941,40 @@ async function enriquecerHistorialConDiscrepancias(
           remitoId: remInfo.id,
           remitoNumero: remInfo.numero,
           remitoImporteCentavos: remInfo.importeCentavos,
+          cobradoEfectivoCentavos: remInfo.cobradoEfectivoCentavos,
           comercio: remInfo.comercio,
           comercioCuit: remInfo.comercioCuit,
           importeCentavos: '0',
           imputadoEn: fechaResolucion,
           imputadoPor: row.resuelta_por_nombre || 'Administrativo',
-          esExcedenteDiscrepancia: true,
+          esExcedenteDiscrepancia: esSobrante,
+          esAjusteDiscrepancia: !esSobrante,
         });
       }
-      if (fechaResolucion && (!mov.imputado_en || new Date(fechaResolucion) > new Date(mov.imputado_en))) {
-        mov.imputado_en = fechaResolucion;
-      }
+    }
+
+    // Si algún remito del faltante se saldó 100% por ajuste (sin imputación directa de dinero),
+    // lo incluimos en el primer movimiento del grupo para mostrarlo en la columna de remitos.
+    const movPrincipal = mapa.get(movsAccesibles[0])!;
+    const remitosEnPrincipal = new Set(movPrincipal.imputaciones.map((imp: any) => String(imp.remitoId)));
+    for (const remId of remIds) {
+      if (remitosConImputacionEnGrupo.has(remId) || remitosEnPrincipal.has(remId)) continue;
+      const remInfo = remitoInfoMap.get(remId);
+      if (!remInfo) continue;
+      movPrincipal.imputaciones.push({
+        id: `disc-${row.id}-ajuste-rem-${remId}`,
+        remitoId: remInfo.id,
+        remitoNumero: remInfo.numero,
+        remitoImporteCentavos: remInfo.importeCentavos,
+        cobradoEfectivoCentavos: remInfo.cobradoEfectivoCentavos,
+        comercio: remInfo.comercio,
+        comercioCuit: remInfo.comercioCuit,
+        importeCentavos: '0',
+        imputadoEn: fechaResolucion,
+        imputadoPor: row.resuelta_por_nombre || 'Administrativo',
+        esExcedenteDiscrepancia: false,
+        esAjusteDiscrepancia: true,
+      });
     }
   }
 }
@@ -1644,6 +1693,7 @@ export const conciliacionService = {
   },
 
   async getSugerencias(userSession?: { id?: string; role?: string }) {
+    await asegurarImputacionesEfectivo();
     const rol = userSession?.role;
     const esGlobal = esRolGlobal(rol);
     const paramsMov: unknown[] = [];
@@ -1681,11 +1731,19 @@ export const conciliacionService = {
       db.query(
         `SELECT r.id::text AS remito_id, r.numero, r.sucursal_id::text AS sucursal_id,
                 c.razon_social, c.cuit, rs.saldo_centavos::text AS saldo_centavos,
+                r.importe_centavos::text AS remito_importe_centavos,
+                COALESCE(ef.cobrado_efectivo_centavos, 0)::text AS cobrado_efectivo_centavos,
                 COALESCE(r.entregado_en, v.registrada_en) AS fecha_entrega
          FROM remito r
          JOIN comercio c ON c.id = r.comercio_id
          JOIN remito_saldo rs ON rs.remito_id = r.id
          LEFT JOIN visita v ON v.id = r.visita_id
+         LEFT JOIN (
+           SELECT remito_id, SUM(importe_centavos) AS cobrado_efectivo_centavos
+           FROM imputacion
+           WHERE movimiento_bancario_id IS NULL
+           GROUP BY remito_id
+         ) ef ON ef.remito_id = r.id
          WHERE r.estado = 'entregado' AND rs.saldo_centavos > 0
            ${remSucursalFiltro}
          ORDER BY r.entregado_en DESC NULLS LAST, r.id DESC`,
@@ -1786,6 +1844,7 @@ export const conciliacionService = {
     filters: { sucursalId?: string; cuentaId?: string; desde?: string; hasta?: string; busqueda?: string } = {},
     userSession?: { id?: string; role?: string }
   ) {
+    await asegurarImputacionesEfectivo();
     const params: unknown[] = [];
     let sucursalFiltro = '';
     const rol = userSession?.role;
@@ -1812,6 +1871,7 @@ export const conciliacionService = {
              COALESCE(u.nombre, u.usuario, 'Administrativo') AS imputador_nombre,
              r.id::text AS remito_id, r.numero AS remito_numero,
              r.importe_centavos::text AS remito_importe_centavos,
+             COALESCE(ef.cobrado_efectivo_centavos, 0)::text AS remito_cobrado_efectivo_centavos,
              COALESCE(c.nombre_fantasia, c.razon_social) AS comercio,
              c.cuit AS comercio_cuit
       FROM movimiento_bancario mb
@@ -1821,6 +1881,12 @@ export const conciliacionService = {
       JOIN imputacion imp ON imp.movimiento_bancario_id = mb.id
       JOIN remito r ON r.id = imp.remito_id
       JOIN comercio c ON c.id = r.comercio_id
+      LEFT JOIN (
+        SELECT remito_id, SUM(importe_centavos) AS cobrado_efectivo_centavos
+        FROM imputacion
+        WHERE movimiento_bancario_id IS NULL
+        GROUP BY remito_id
+      ) ef ON ef.remito_id = r.id
       LEFT JOIN usuario u ON u.id = imp.imputado_por
       WHERE mb.estado IN ('imputado', 'parcial')
         ${sucursalFiltro}
@@ -1857,6 +1923,7 @@ export const conciliacionService = {
         remitoId: row.remito_id,
         remitoNumero: row.remito_numero,
         remitoImporteCentavos: row.remito_importe_centavos,
+        cobradoEfectivoCentavos: String(row.remito_cobrado_efectivo_centavos || '0'),
         comercio: row.comercio,
         comercioCuit: row.comercio_cuit,
         importeCentavos: row.imputado_centavos,
@@ -1914,6 +1981,7 @@ export const conciliacionService = {
   },
 
   async getRemitosPendientes(userSession?: { id?: string; role?: string }) {
+    await asegurarImputacionesEfectivo();
     const rol = userSession?.role;
     const esGlobal = esRolGlobal(rol);
     const params: unknown[] = [];
@@ -1934,6 +2002,7 @@ export const conciliacionService = {
                 c.id::text AS comercio_id, c.razon_social,
                 m.nombre AS marca, rs.importe_centavos::text AS importe_centavos,
                 rs.saldo_centavos::text AS saldo_centavos,
+                COALESCE(ef.cobrado_efectivo_centavos, 0)::text AS cobrado_efectivo_centavos,
                 s.id::text AS sucursal_id, s.nombre AS sucursal
          FROM remito r
          JOIN comercio c ON c.id = r.comercio_id
@@ -1941,6 +2010,12 @@ export const conciliacionService = {
          JOIN sucursal s ON s.id = r.sucursal_id
          LEFT JOIN visita v ON v.id = r.visita_id
          JOIN remito_saldo rs ON rs.remito_id = r.id
+         LEFT JOIN (
+           SELECT remito_id, SUM(importe_centavos) AS cobrado_efectivo_centavos
+           FROM imputacion
+           WHERE movimiento_bancario_id IS NULL
+           GROUP BY remito_id
+         ) ef ON ef.remito_id = r.id
          WHERE rs.saldo_centavos > 0
            AND r.estado = 'entregado'
            ${sucursalFiltro}
@@ -2011,6 +2086,7 @@ export const conciliacionService = {
   async conciliar(movimientoIdsValue: unknown, remitoIdsValue: unknown, usuarioId: number, aceptarSugerencia = false) {
     const movimientoIds = parsearIds(movimientoIdsValue, 'movimiento');
     const remitoIds = parsearIds(remitoIdsValue, 'remito');
+    await asegurarImputacionesEfectivo();
     return enTransaccion(async (client) => {
       const result = await validarSeleccion(client, movimientoIds, remitoIds);
       if (aceptarSugerencia && (movimientoIds.length !== 1 || remitoIds.length !== 1 || result.diferencia !== 0n ||
@@ -2113,6 +2189,7 @@ export const conciliacionService = {
       firma[0] === 0xff && firma[1] === 0xd8 && firma[2] === 0xff;
     if (!formatoValido) throw new ConciliacionError('El contenido del comprobante no coincide con su formato.', 400);
 
+    await asegurarImputacionesEfectivo();
     return enTransaccion(async (client) => {
       const result = await validarSeleccion(client, movimientoIds, remitoIds);
       if (result.diferencia === 0n) {

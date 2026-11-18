@@ -33,7 +33,6 @@ interface Props {
 }
 
 const MEDIOS: MedioPago[] = ['efectivo', 'transferencia', 'qr'];
-const SIN_GPS = 'No se pudo obtener la ubicación GPS, y la entrega la exige. Activá la ubicación y volvé a intentar.';
 
 /** Colores de la paleta para el estado que informa el dominio. */
 function colorEstado(info: InfoEstadoRemito): string {
@@ -128,7 +127,7 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
     setIntentoCobro(false);
   }, [visita.id]);
 
-  // HU #22 / #23: confirma los remitos elegidos, con hora y GPS. Se guarda primero en el celular.
+  // HU #22 / #23: confirma los remitos elegidos, con hora y GPS (o respaldo offline). Se guarda primero en el celular.
   async function confirmarEntrega() {
     const plan = planificarEntrega(seleccionados, porEntregar);
     if (plan === 'nada') return;
@@ -136,14 +135,10 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
     setErrorEntrega(null);
     setAvisoEntrega(null);
     try {
-      const ubicacion = await obtenerUbicacion();
-      if (!ubicacion) {
-        setErrorEntrega(SIN_GPS);
-        return;
-      }
+      const ubicacion = await obtenerUbicacion().catch(() => null);
       if (plan === 'lote') {
         const lote = armarEntregaLote(porEntregar, ubicacion);
-        if (!lote) return setErrorEntrega(SIN_GPS);
+        if (!lote) return;
         await colaOperaciones.encolar({
           tipo: 'entrega_lote',
           visitaId: visita.id,
@@ -152,7 +147,6 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
         });
       } else {
         const entrega = armarEntrega(ubicacion);
-        if (!entrega) return setErrorEntrega(SIN_GPS);
         for (const remito of seleccionados) {
           await colaOperaciones.encolar({
             tipo: 'entrega',
@@ -170,7 +164,11 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
       const colaActualizada = await colaOperaciones.estadoPorClave();
       if (esVisitaTerminada(visita, colaActualizada)) {
         const nombre = comercio.nombreFantasia || comercio.razonSocial;
-        onListo(`Parada entregada y finalizada: ${nombre}`);
+        onListo(
+          enLinea
+            ? `Parada entregada y finalizada: ${nombre}`
+            : `Entrega guardada en el celular (${nombre}). Se enviará al recuperar la conexión.`
+        );
       } else {
         setAvisoEntrega(
           `${seleccionados.length} remito(s) entregado(s). Ahora debés registrar el cobro para completar la parada.`
@@ -481,7 +479,6 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
                 );
               })}
             </View>
-            {!enLinea ? <Text style={estilos.textoSuave}>El cobro por QR necesita conexión.</Text> : null}
 
             {(intentoCobro || pagos.length > 0) && porEntregar.length > 0 ? (
               <Aviso tono="info">Primero confirmá la visita antes de confirmar el cobro.</Aviso>

@@ -10,9 +10,12 @@ export async function obtenerUbicacion(): Promise<Ubicacion | null> {
     const permiso = await Location.requestForegroundPermissionsAsync();
     if (permiso.status !== 'granted') return null;
 
-    const actual = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    const actual = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
     const vencida = new Promise<null>((resolve) => setTimeout(() => resolve(null), ESPERA_MAXIMA_MS));
-    const posicion = (await Promise.race([actual, vencida])) ?? (await Location.getLastKnownPositionAsync({ maxAge: 5 * 60 * 1000 }));
+    const posicion =
+      (await Promise.race([actual, vencida])) ??
+      (await Location.getLastKnownPositionAsync({ maxAge: 5 * 60 * 1000 }).catch(() => null)) ??
+      (await Location.getLastKnownPositionAsync().catch(() => null));
     if (!posicion) return null;
 
     return {

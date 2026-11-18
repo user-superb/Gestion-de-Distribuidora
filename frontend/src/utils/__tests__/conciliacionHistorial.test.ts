@@ -145,4 +145,115 @@ describe('agruparHistorialConciliaciones', () => {
     expect(grupos[1].movimientos).toHaveLength(1);
     expect(grupos[1].remitos).toHaveLength(2);
   });
+
+  it('calcula excedente parcial en movimientos y ajuste de reducción por remito en faltantes 1→M', () => {
+    const movParcial = crearMovimiento({
+      id: '20',
+      importe_centavos: '15700000',
+      imputaciones: [
+        {
+          id: 'imp-20',
+          remitoId: '50',
+          remitoNumero: 'R-0050',
+          remitoImporteCentavos: '10000000',
+          comercio: 'Comercio C',
+          comercioCuit: null,
+          importeCentavos: '10000000',
+          imputadoEn: '2026-11-18T12:00:00.000Z',
+          imputadoPor: 'Admin',
+        },
+      ],
+    });
+
+    const discFaltante = {
+      id: '30',
+      movimientoIds: ['21'],
+      remitoIds: ['51', '52'],
+      motivoCodigo: 'descuento_comercial',
+      nota: 'Faltante 1->2',
+      observacionResolucion: 'Aprobado',
+      diferenciaCentavos: '-5700000',
+      importeMovimiento: '5000000',
+      importeSeleccionado: '10700000',
+      resueltaEn: '2026-11-18T13:00:00.000Z',
+      resueltaPor: 'Gerente',
+      comprobanteNombre: null,
+      ajustes: [
+        { tipo: 'reduccion_saldo' as const, remitoId: '51', remitoNumero: 'R-0051', comercioId: null, importeCentavos: '5000000' },
+        { tipo: 'reduccion_saldo' as const, remitoId: '52', remitoNumero: 'R-0052', comercioId: null, importeCentavos: '700000' },
+      ],
+    };
+
+    const movFaltante = crearMovimiento({
+      id: '21',
+      importe_centavos: '5000000',
+      imputado_en: '2026-11-18T13:00:00.000Z',
+      discrepancia: discFaltante,
+      imputaciones: [
+        {
+          id: 'imp-21',
+          remitoId: '51',
+          remitoNumero: 'R-0051',
+          remitoImporteCentavos: '10000000',
+          comercio: 'Comercio D',
+          comercioCuit: null,
+          importeCentavos: '5000000',
+          imputadoEn: '2026-11-18T13:00:00.000Z',
+          imputadoPor: 'Gerente',
+        },
+        {
+          id: 'disc-30-ajuste-rem-52',
+          remitoId: '52',
+          remitoNumero: 'R-0052',
+          remitoImporteCentavos: '700000',
+          comercio: 'Comercio D',
+          comercioCuit: null,
+          importeCentavos: '0',
+          imputadoEn: '2026-11-18T13:00:00.000Z',
+          imputadoPor: 'Gerente',
+          esExcedenteDiscrepancia: false,
+          esAjusteDiscrepancia: true,
+        },
+      ],
+    });
+
+    const grupos = agruparHistorialConciliaciones([movParcial, movFaltante]);
+    expect(grupos).toHaveLength(2);
+    expect(grupos[0].remitos[0].ajusteReduccionCentavos).toBe('5000000');
+    expect(grupos[0].remitos[1].ajusteReduccionCentavos).toBe('700000');
+    expect(grupos[0].remitos[1].detalleMovimientos).toHaveLength(0);
+    expect(grupos[0].totalRemitosCentavos).toBe('10700000');
+
+    expect(grupos[1].movimientos[0].totalImputadoCentavos).toBe('10000000');
+    expect(grupos[1].movimientos[0].excedenteCentavos).toBe('5700000');
+    expect(grupos[1].movimientos[0].tieneExcedente).toBe(true);
+  });
+
+  it('conserva el monto cobrado en efectivo por remito en pagos combinados', () => {
+    const movQr = crearMovimiento({
+      id: '30',
+      origen: 'QR - Móvil',
+      importe_centavos: '2000000',
+      imputaciones: [
+        {
+          id: 'imp-30',
+          remitoId: '77',
+          remitoNumero: 'R-0077',
+          remitoImporteCentavos: '3000000',
+          cobradoEfectivoCentavos: '1000000',
+          comercio: 'Autoservicio Luna',
+          comercioCuit: null,
+          importeCentavos: '2000000',
+          imputadoEn: '2026-11-18T14:00:00.000Z',
+          imputadoPor: 'Admin',
+        },
+      ],
+    });
+
+    const grupos = agruparHistorialConciliaciones([movQr]);
+    expect(grupos).toHaveLength(1);
+    expect(grupos[0].remitos[0].cobradoEfectivoCentavos).toBe('1000000');
+    expect(grupos[0].remitos[0].totalImputadoCentavos).toBe('2000000');
+    expect(grupos[0].remitos[0].remitoImporteCentavos).toBe('3000000');
+  });
 });

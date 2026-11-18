@@ -138,8 +138,6 @@ FROM (VALUES
   ('Lácteos del Sur', 'Autoservicio Luna', 'R-0001-45121', 6200000::bigint),
   ('Alimentos Río de la Plata', 'Autoservicio Luna', 'R-0003-11200', 11000000::bigint),
   ('Bebidas Nacionales', 'Distribuidora Los Andes', 'R-0002-89315', 9400000::bigint),
-  ('Lácteos del Sur', 'Mayorista El Sol S.R.L.', 'R-HU38-EXACTA', 15000000::bigint),
-  ('Lácteos del Sur', 'Autoservicio Luna', 'R-HU38-PARCIAL', 15000000::bigint),
   ('Lácteos del Sur', 'Mayorista El Sol S.R.L.', 'R-0004-90001', 12500000::bigint),
   ('Bebidas Nacionales', 'Mayorista El Sol S.R.L.', 'R-0004-90002', 8400000::bigint),
   ('Lácteos del Sur', 'Autoservicio Luna', 'R-0004-90003', 4500000::bigint),
@@ -181,7 +179,7 @@ ON CONFLICT (marca_id, numero) DO UPDATE SET visita_id = EXCLUDED.visita_id;
 
 -- Remitos entregados de ejemplo para la bandeja de cobranza y conciliación exacta.
 UPDATE remito SET estado = 'entregado', entregado_en = now() - interval '12 days'
-WHERE numero IN ('R-0001-45120', 'R-0002-89310', 'R-0001-45122', 'R-0002-89311', 'R-HU38-EXACTA', 'R-HU38-PARCIAL');
+WHERE numero IN ('R-0001-45120', 'R-0002-89310', 'R-0001-45122', 'R-0002-89311');
 
 -- 7. Movimientos bancarios de ejemplo para probar E5-04
 INSERT INTO cuenta_recepcion (sucursal_id, nombre_fantasia, alias, cbu, banco, cuit_titular, moneda, activa)
@@ -223,14 +221,12 @@ SET fecha_hora = now()
 WHERE referencia_externa LIKE 'DEMO-E5-04-%'
   AND estado = 'sin_imputar';
 
--- 8. Casos de ejemplo para sugerencias exactas/parciales y movimientos huérfanos
+-- 8. Caso de ejemplo para movimientos huérfanos (HU #40)
 INSERT INTO movimiento_bancario (cuenta_id, fecha_hora, ordenante, referencia_externa, importe_centavos)
 SELECT cr.id, demo.fecha_hora, demo.ordenante, demo.referencia, demo.importe_centavos
 FROM cuenta_recepcion cr
 JOIN sucursal s ON s.id = cr.sucursal_id
 CROSS JOIN (VALUES
-  ('Mayorista El Sol S.R.L.', 'DEMO-HU38-EXACTA', 15000000::bigint, now() - interval '11 days'),
-  ('Autoservicio Luna',      'DEMO-HU38-PARCIAL', 14200000::bigint, now() - interval '11 days'),
   ('Ordenante sin identificar', 'DEMO-HU40-HUERFANO', 8300000::bigint, now() - interval '4 days')
 ) AS demo(ordenante, referencia, importe_centavos, fecha_hora)
 WHERE s.nombre = 'Sucursal Central - La Plata'

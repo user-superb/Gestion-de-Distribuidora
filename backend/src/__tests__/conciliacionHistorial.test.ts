@@ -266,5 +266,34 @@ describe('Historial de Conciliaciones', () => {
       assert.equal(mov.discrepancia?.ajustes.length, 1);
       assert.equal(mov.discrepancia?.ajustes[0].tipo, 'saldo_favor');
     }
+
+    // Caso 2: 1 movimiento → 2 remitos con faltante donde el 2° remito se saldó 100% por ajuste (sin imputación directa)
+    await pool.query(`
+      INSERT INTO remito (id, numero, comercio_id, sucursal_id, importe_centavos, estado) VALUES
+        (3, 'R-0003-3001', 1, 1, 100000, 'entregado'),
+        (4, 'R-0003-3002', 1, 1, 7000, 'entregado');
+      INSERT INTO movimiento_bancario (id, cuenta_id, ordenante, ordenante_cuit, referencia_externa, importe_centavos, origen, estado)
+        VALUES (4, 1, 'Mayorista El Sol S.R.L.', '20123456789', 'REF-FAL-1', 50000, 'Extracto Bancario', 'imputado');
+      INSERT INTO imputacion (id, movimiento_bancario_id, remito_id, importe_centavos, imputado_por)
+        VALUES (3, 4, 3, 50000, 1);
+      INSERT INTO discrepancia_conciliacion
+        (id, movimiento_id, movimiento_ids, remito_ids, importe_movimiento, importe_seleccionado, diferencia_centavos, nota, motivo_codigo, estado, creada_por, resuelta_por, resuelta_en, observacion_resolucion)
+        VALUES (11, 4, ARRAY[4], ARRAY[3, 4], 50000, 107000, -57000, 'Descuento comercial', 'descuento_comercial', 'aprobada', 2, 1, now(), 'Aprobado');
+      INSERT INTO discrepancia_ajuste (id, discrepancia_id, remito_id, comercio_id, tipo, importe_centavos) VALUES
+        (2, 11, 3, NULL, 'reduccion_saldo', 50000),
+        (3, 11, 4, NULL, 'reduccion_saldo', 7000);
+    `);
+
+    const historialFaltante = await conciliacionService.getHistorialConciliaciones({ busqueda: 'R-0003-3002' }, session);
+    assert.equal(historialFaltante.length, 1);
+    const mov4 = historialFaltante[0];
+    assert.equal(mov4.id, '4');
+    assert.equal(mov4.imputaciones.length, 2);
+    const impRem4 = mov4.imputaciones.find((i: any) => i.remitoId === '4')!;
+    assert.equal(impRem4.importeCentavos, '0');
+    assert.equal(impRem4.esExcedenteDiscrepancia, false);
+    assert.equal(impRem4.esAjusteDiscrepancia, true);
+    assert.equal(mov4.discrepancia?.ajustes[0].remitoNumero, 'R-0003-3001');
+    assert.equal(mov4.discrepancia?.ajustes[1].remitoNumero, 'R-0003-3002');
   });
 });

@@ -87,7 +87,9 @@ interface RemitoPendiente {
   marca: string;
   sucursal: string;
   fecha_entrega: string | null;
+  importe_centavos?: string;
   saldo_centavos: string;
+  cobrado_efectivo_centavos?: string;
 }
 
 interface Discrepancia {
@@ -756,21 +758,19 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
           PASO 1: SELECCIONAR O INGRESAR MOVIMIENTOS BANCARIOS
       ========================================================================= */}
       {pasoActual === 1 && (
-        <section aria-labelledby="titulo-conciliacion-paso-1" className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        <section aria-labelledby="titulo-conciliacion-paso-1" className="space-y-2.5">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-start">
             {/* Columna Izquierda: Movimientos pendientes de la cuenta (7 cols) */}
-            <div className="lg:col-span-7 bg-white border border-slate-200 rounded-lg p-4 shadow-xs space-y-3.5">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <Landmark className="w-5 h-5 text-blue-600 shrink-0" />
-                  <div>
-                    <h2 id="titulo-conciliacion-paso-1" className="text-base font-bold text-slate-800">
-                      Movimientos pendientes ({movimientosVisibles.length})
-                    </h2>
-                    <span className="text-xs text-slate-500">
-                      Seleccioná los ingresos acreditados que vas a imputar
-                    </span>
-                  </div>
+            <div className="lg:col-span-7 bg-white border border-slate-200 rounded-lg p-3.5 shadow-xs space-y-2.5">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2 flex-wrap gap-2">
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <h2 id="titulo-conciliacion-paso-1" className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                    <Landmark className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span>Movimientos pendientes ({movimientosVisibles.length})</span>
+                  </h2>
+                  <span className="text-[11px] text-slate-500">
+                    Seleccioná los ingresos acreditados que vas a imputar
+                  </span>
                 </div>
                 <button
                   type="button"
@@ -778,7 +778,7 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
                     setModalIngresosAbierto(true);
                     if (panelCargaActiva === 'ninguno') setPanelCargaActiva('extracto');
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-marca-naranja hover:bg-marca-naranja-hover text-white rounded-md transition-colors shadow-xs cursor-pointer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-marca-naranja hover:bg-marca-naranja-hover text-white rounded transition-colors shadow-xs cursor-pointer"
                   title="Importar extracto bancario o cargar una transferencia / cobro QR manual"
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -787,8 +787,8 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
               </div>
 
               {/* Filtros limpios de Cuenta y Fecha */}
-              <div className="flex flex-wrap items-center justify-between gap-2.5 bg-slate-50 p-2.5 rounded-md border border-slate-200/80 text-xs">
-                <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-2.5 py-1.5 rounded border border-slate-200/80 text-xs">
+                <div className="flex flex-wrap items-center gap-2.5">
                   <label className="text-slate-600 font-medium flex items-center gap-1.5">
                     <span>Cuenta:</span>
                     <select
@@ -798,7 +798,7 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
                         setMovimientosSeleccionados(new Set());
                         setRemitosSeleccionados(new Set());
                       }}
-                      className="border border-slate-300 bg-white rounded px-2.5 py-1 text-xs text-slate-800 font-medium"
+                      className="border border-slate-300 bg-white rounded px-2 py-0.5 text-xs text-slate-800 font-medium"
                     >
                       <option value="todas">Todas las cuentas</option>
                       {cuentas.map(([id, alias]) => (
@@ -815,7 +815,7 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
                       type="date"
                       value={fecha}
                       onChange={(event) => setFecha(event.target.value)}
-                      className="border border-slate-300 bg-white rounded px-2.5 py-1 text-xs text-slate-800 font-medium"
+                      className="border border-slate-300 bg-white rounded px-2 py-0.5 text-xs text-slate-800 font-medium"
                     />
                   </label>
                 </div>
@@ -824,7 +824,7 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
                   type="button"
                   onClick={() => void cargar(fecha)}
                   disabled={cargando}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-600 hover:text-slate-900 bg-white border border-slate-300 rounded hover:bg-slate-100 transition-colors cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-slate-600 hover:text-slate-900 bg-white border border-slate-300 rounded hover:bg-slate-100 transition-colors cursor-pointer disabled:opacity-50"
                   title="Actualizar movimientos"
                 >
                   <RefreshCw className={`w-3 h-3 ${cargando ? 'animate-spin' : ''}`} />
@@ -833,14 +833,14 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
               </div>
 
               {/* Lista de Movimientos */}
-              <div className="max-h-[420px] overflow-y-auto pr-1 space-y-2">
+              <div className="max-h-80 overflow-y-auto pr-1 space-y-1.5">
                 {movimientosVisibles.length === 0 ? (
-                  <div className="border-2 border-dashed border-slate-200 rounded-md p-6 text-center space-y-2 bg-slate-50/50">
-                    <Landmark className="w-8 h-8 text-slate-400 mx-auto" />
-                    <div className="text-sm font-bold text-slate-800">
+                  <div className="border-2 border-dashed border-slate-200 rounded-md p-4 text-center space-y-1.5 bg-slate-50/50">
+                    <Landmark className="w-6 h-6 text-slate-400 mx-auto" />
+                    <div className="text-xs font-bold text-slate-800">
                       No hay movimientos pendientes para esta fecha y cuenta
                     </div>
-                    <p className="text-xs text-slate-500 max-w-md mx-auto">
+                    <p className="text-[11px] text-slate-500 max-w-md mx-auto">
                       Podés cambiar la fecha de consulta o utilizar el botón <strong>&quot;Ingresar movimientos&quot;</strong> para importar un extracto o registrar una acreditación manual.
                     </p>
                   </div>
@@ -850,55 +850,51 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
                     return (
                       <label
                         key={item.id}
-                        className={`flex cursor-pointer items-center justify-between gap-3 p-3 border rounded-md text-xs transition-all ${
+                        className={`flex cursor-pointer items-center justify-between gap-2 px-2.5 py-1.5 border rounded text-xs transition-all ${
                           isSelected
                             ? 'bg-blue-50/90 border-blue-400 ring-1 ring-blue-400/30'
                             : 'bg-white border-slate-200 hover:border-slate-300'
                         }`}
                       >
-                        <span className="flex min-w-0 items-center gap-2.5">
+                        <span className="flex min-w-0 items-center gap-2 truncate">
                           <input
                             type="checkbox"
                             checked={isSelected}
                             onChange={() => toggleSeleccion(item.id, movimientosSeleccionados, setMovimientosSeleccionados)}
-                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 shrink-0"
+                            className="w-3.5 h-3.5 rounded text-blue-600 focus:ring-blue-500 shrink-0"
                           />
-                          <span className="min-w-0 space-y-0.5">
-                            <span className="flex flex-wrap items-center gap-1.5">
-                              <span className="truncate font-bold text-slate-900 text-sm">
-                                {item.ordenante || 'Ordenante no informado'}
-                              </span>
-                              {item.origen && item.origen !== 'Extracto Bancario' && (
-                                <span
-                                  className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                                    item.origen.includes('QR')
-                                      ? 'bg-purple-100 text-purple-800 border border-purple-200'
-                                      : item.origen.includes('Móvil') || item.origen.includes('Movil')
-                                      ? 'bg-teal-100 text-teal-800 border border-teal-200'
-                                      : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
-                                  }`}
-                                >
-                                  {item.origen}
-                                </span>
-                              )}
-                            </span>
-                            <span className="block text-slate-500">
-                              {new Date(item.fecha_hora).toLocaleString('es-AR')} · {item.cuenta}
-                              {item.referencia_externa ? ` · Ref: ${item.referencia_externa}` : ''}
-                            </span>
-                            {item.comprobante_nombre && (
-                              <button
-                                type="button"
-                                onClick={(e) => void verComprobanteMovimiento(item, e)}
-                                className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-medium text-indigo-700 hover:underline"
-                              >
-                                <FileText className="h-3 w-3" />
-                                <span>Ver comprobante ({item.comprobante_nombre})</span>
-                              </button>
-                            )}
+                          <span className="font-bold text-slate-900 shrink-0">
+                            {item.ordenante || 'Ordenante no informado'}
                           </span>
+                          {item.origen && item.origen !== 'Extracto Bancario' && (
+                            <span
+                              className={`inline-flex shrink-0 items-center rounded px-1.5 py-0 text-[10px] font-bold ${
+                                item.origen.includes('QR')
+                                  ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                                  : item.origen.includes('Móvil') || item.origen.includes('Movil')
+                                  ? 'bg-teal-100 text-teal-800 border border-teal-200'
+                                  : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                              }`}
+                            >
+                              {item.origen}
+                            </span>
+                          )}
+                          <span className="text-[11px] text-slate-500 truncate">
+                            · {new Date(item.fecha_hora).toLocaleString('es-AR')} · {item.cuenta}
+                            {item.referencia_externa ? ` · Ref: ${item.referencia_externa}` : ''}
+                          </span>
+                          {item.comprobante_nombre && (
+                            <button
+                              type="button"
+                              onClick={(e) => void verComprobanteMovimiento(item, e)}
+                              className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-indigo-700 hover:underline"
+                            >
+                              <FileText className="h-3 w-3" />
+                              <span>Comprobante</span>
+                            </button>
+                          )}
                         </span>
-                        <strong className="whitespace-nowrap font-mono text-sm text-slate-900">
+                        <strong className="whitespace-nowrap font-mono text-xs text-slate-900 shrink-0">
                           {formatoARS(item.importe_centavos)}
                         </strong>
                       </label>
@@ -909,45 +905,42 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
             </div>
 
             {/* Columna Derecha: Movimientos seleccionados para conciliar (5 cols) */}
-            <div className="lg:col-span-5 bg-white border border-slate-200 rounded-lg p-4 shadow-xs space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                  <div>
-                    <h2 className="text-base font-bold text-slate-800">
-                      Ingresos seleccionados ({movimientosElegidos.length})
-                    </h2>
-                    <span className="text-xs text-slate-500">
-                      Créditos listos para aplicar a remitos
-                    </span>
-                  </div>
+            <div className="lg:col-span-5 bg-white border border-slate-200 rounded-lg p-3.5 shadow-xs space-y-2.5">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <h2 className="text-sm font-bold text-slate-800">
+                    Ingresos seleccionados ({movimientosElegidos.length})
+                  </h2>
                 </div>
-                <span className="text-xs px-2 py-0.5 rounded font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                <span className="text-[11px] px-2 py-0.5 rounded font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300">
                   Paso 1
                 </span>
               </div>
 
               {movimientosElegidos.length === 0 ? (
-                <div className="border-2 border-dashed border-slate-200 rounded-md p-6 text-center space-y-2 bg-slate-50/50">
-                  <Landmark className="w-8 h-8 text-slate-400 mx-auto" />
-                  <div className="text-sm font-semibold text-slate-700">
+                <div className="border-2 border-dashed border-slate-200 rounded-md p-4 text-center space-y-1.5 bg-slate-50/50">
+                  <Landmark className="w-6 h-6 text-slate-400 mx-auto" />
+                  <div className="text-xs font-semibold text-slate-700">
                     Ningún movimiento seleccionado
                   </div>
-                  <p className="text-xs text-slate-500 leading-relaxed max-w-sm mx-auto">
+                  <p className="text-[11px] text-slate-500 leading-relaxed max-w-sm mx-auto">
                     Marcá uno o más movimientos en la columna izquierda para avanzar al <strong>Paso 2</strong> y vincularlos con los remitos pendientes de cobro.
                   </p>
                 </div>
               ) : (
-                <div className="space-y-2.5">
-                  <div className="max-h-[320px] overflow-y-auto pr-1 space-y-2">
+                <div className="space-y-2">
+                  <div className="max-h-64 overflow-y-auto pr-1 space-y-1.5">
                     {movimientosElegidos.map((m) => (
-                      <div key={m.id} className="border border-slate-200 bg-slate-50/60 rounded-md p-2.5 flex items-center justify-between gap-2 text-xs">
-                        <div className="min-w-0">
-                          <div className="font-bold text-slate-900 truncate">{m.ordenante || 'Ordenante no informado'}</div>
-                          <div className="text-[11px] text-slate-500 truncate">{m.cuenta} {m.referencia_externa ? `· ${m.referencia_externa}` : ''}</div>
+                      <div key={m.id} className="border border-slate-200 bg-slate-50/60 rounded px-2.5 py-1.5 flex items-center justify-between gap-2 text-xs">
+                        <div className="flex min-w-0 items-center gap-1.5 truncate">
+                          <span className="font-bold text-slate-900 truncate">{m.ordenante || 'Ordenante no informado'}</span>
+                          <span className="text-[11px] text-slate-500 truncate">
+                            · {m.referencia_externa || m.cuenta}
+                          </span>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <strong className="font-mono text-slate-900">{formatoARS(m.importe_centavos)}</strong>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <strong className="font-mono text-xs text-slate-900">{formatoARS(m.importe_centavos)}</strong>
                           <button
                             type="button"
                             onClick={() => toggleSeleccion(m.id, movimientosSeleccionados, setMovimientosSeleccionados)}
@@ -961,15 +954,15 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
                     ))}
                   </div>
 
-                  <div className="p-3 rounded-md bg-blue-50/80 border border-blue-200 flex items-center justify-between text-xs">
+                  <div className="px-2.5 py-1.5 rounded bg-blue-50/80 border border-blue-200 flex items-center justify-between text-xs">
                     <span className="font-semibold text-blue-950">Total crédito disponible:</span>
-                    <strong className="font-mono text-sm text-blue-950">{formatoARS(importe)}</strong>
+                    <strong className="font-mono text-xs text-blue-950">{formatoARS(importe)}</strong>
                   </div>
                 </div>
               )}
 
               <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                <span className="text-xs text-slate-500">
+                <span className="text-[11px] text-slate-500">
                   {movimientosElegidos.length > 0
                     ? `${movimientosElegidos.length} movimiento(s) elegido(s)`
                     : 'Mínimo 1 movimiento requerido'}
@@ -978,21 +971,21 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
                   type="button"
                   onClick={() => cambiarPaso(2)}
                   disabled={!paso1Completo}
-                  className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-bold rounded-md shadow-xs transition-colors ${
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-md shadow-xs transition-colors ${
                     paso1Completo
                       ? 'bg-marca-azul hover:bg-blue-800 text-white cursor-pointer'
                       : 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-75'
                   }`}
                 >
                   <span>Continuar a vincular remitos</span>
-                  <ArrowRight className="w-4 h-4" />
+                  <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
           </div>
 
           {error && (
-            <div role="alert" className="p-3 rounded-md bg-red-50 border border-red-300 text-red-900 text-xs font-medium flex items-start justify-between gap-2">
+            <div role="alert" className="p-2.5 rounded-md bg-red-50 border border-red-300 text-red-900 text-xs font-medium flex items-start justify-between gap-2">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
                 <span>{error}</span>
@@ -1014,20 +1007,83 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
           PASO 2: VINCULAR REMITOS PENDIENTES DE COBRO
       ========================================================================= */}
       {pasoActual === 2 && (
-        <section aria-labelledby="titulo-conciliacion-paso-2" className="bg-white border border-slate-200 rounded-lg p-5 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-2">
-            <div>
-              <h2 id="titulo-conciliacion-paso-2" className="text-base font-bold text-slate-800 flex items-center gap-2">
-                <FileText className="w-5 h-5 text-blue-600" />
+        <div className="space-y-2.5">
+          {/* Resumen de Movimientos Seleccionados en el Paso 1 */}
+          <section
+            aria-label="Movimientos seleccionados para imputar"
+            className="bg-white border border-blue-200 rounded-lg px-3.5 py-2.5 shadow-xs space-y-2"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-1.5">
+              <div className="flex items-center gap-1.5">
+                <Landmark className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <h2 className="text-xs font-bold text-slate-800">
+                  Movimientos seleccionados ({movimientosElegidos.length})
+                </h2>
+              </div>
+              <div className="flex items-center gap-2.5 text-[11px]">
+                <span className="px-2 py-0.5 rounded bg-blue-50 border border-blue-200 text-blue-950 font-semibold">
+                  Total crédito disponible: <strong className="font-mono">{formatoARS(importe)}</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => cambiarPaso(1)}
+                  className="text-blue-700 hover:text-blue-900 font-semibold hover:underline cursor-pointer"
+                >
+                  Cambiar selección
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-1.5 sm:grid-cols-2 max-h-28 overflow-y-auto pr-1">
+              {movimientosElegidos.map((m) => (
+                <div
+                  key={m.id}
+                  className="border border-slate-200 bg-slate-50/70 rounded px-2.5 py-1.5 flex items-center justify-between gap-2 text-xs"
+                >
+                  <div className="flex min-w-0 items-center gap-1.5 truncate">
+                    <span className="font-bold text-slate-900 truncate">
+                      {m.ordenante || 'Ordenante no informado'}
+                    </span>
+                    {m.origen && m.origen !== 'Extracto Bancario' && (
+                      <span
+                        className={`inline-flex shrink-0 items-center rounded px-1.5 py-0 text-[10px] font-bold ${
+                          m.origen.includes('QR')
+                            ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                            : m.origen.includes('Móvil') || m.origen.includes('Movil')
+                            ? 'bg-teal-100 text-teal-800 border border-teal-200'
+                            : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                        }`}
+                      >
+                        {m.origen}
+                      </span>
+                    )}
+                    <span className="text-[11px] text-slate-500 truncate">
+                      · {new Date(m.fecha_hora).toLocaleDateString('es-AR')}
+                      {m.referencia_externa ? ` · ${m.referencia_externa}` : ` · ${m.cuenta}`}
+                    </span>
+                  </div>
+                  <strong className="font-mono text-xs text-slate-900 shrink-0">
+                    {formatoARS(m.importe_centavos)}
+                  </strong>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section aria-labelledby="titulo-conciliacion-paso-2" className="bg-white border border-slate-200 rounded-lg p-3.5 shadow-xs space-y-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-2 gap-2">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <h2 id="titulo-conciliacion-paso-2" className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                <FileText className="w-4 h-4 text-blue-600" />
                 <span>Remitos pendientes de cobro ({remitosVisibles.length})</span>
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-[11px] text-slate-500">
                 Seleccioná los comprobantes de entrega que se cancelan con los movimientos elegidos.
               </p>
             </div>
 
             {/* Píldora de comparación en vivo */}
-            <div className="flex flex-wrap items-center gap-2 text-xs bg-slate-50 border border-slate-200 rounded-md px-3 py-1.5">
+            <div className="flex flex-wrap items-center gap-2 text-xs bg-slate-50 border border-slate-200 rounded px-2.5 py-1">
               <span>Crédito: <strong className="font-mono text-slate-900">{formatoARS(importe)}</strong></span>
               <span className="text-slate-300">|</span>
               <span>Remitos: <strong className="font-mono text-slate-900">{formatoARS(suma)}</strong></span>
@@ -1043,51 +1099,56 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
           </div>
 
           {/* Barra de Filtros Compacta */}
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5 bg-slate-50 p-2.5 rounded-md border border-slate-200/80">
+          <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-5 bg-slate-50 p-1.5 rounded border border-slate-200/80">
             <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
               <input
                 aria-label="Buscar remito o cliente"
                 value={filtroRemitos.texto}
                 onChange={(event) => setFiltroRemitos({ ...filtroRemitos, texto: event.target.value })}
                 placeholder="Buscar remito, cliente o marca..."
-                className="w-full pl-8 pr-2 py-1.5 rounded border border-slate-300 bg-white text-xs text-slate-800"
+                className="w-full pl-7 pr-2 py-1 rounded border border-slate-300 bg-white text-xs text-slate-800"
               />
             </div>
-            <select aria-label="Filtrar por cliente" value={filtroRemitos.comercio} onChange={(event) => setFiltroRemitos({ ...filtroRemitos, comercio: event.target.value })} className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-800"><option value="">Todos los clientes</option>{[...new Set(remitos.map((item) => item.razon_social))].sort().map((item) => <option key={item}>{item}</option>)}</select>
-            <select aria-label="Filtrar por sucursal" value={filtroRemitos.sucursal} onChange={(event) => setFiltroRemitos({ ...filtroRemitos, sucursal: event.target.value })} className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-800"><option value="">Todas las sucursales</option>{[...new Set(remitos.map((item) => item.sucursal))].sort().map((item) => <option key={item}>{item}</option>)}</select>
-            <select aria-label="Filtrar por marca" value={filtroRemitos.marca} onChange={(event) => setFiltroRemitos({ ...filtroRemitos, marca: event.target.value })} className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-800"><option value="">Todas las marcas</option>{[...new Set(remitos.map((item) => item.marca))].sort().map((item) => <option key={item}>{item}</option>)}</select>
-            <select aria-label="Filtrar por antigüedad" value={filtroRemitos.antiguedad} onChange={(event) => setFiltroRemitos({ ...filtroRemitos, antiguedad: event.target.value })} className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-800"><option value="">Cualquier antigüedad</option><option value="0-30">Hasta 30 días</option><option value="31-60">31 a 60 días</option><option value="61-90">61 a 90 días</option><option value="90+">Más de 90 días</option></select>
+            <select aria-label="Filtrar por cliente" value={filtroRemitos.comercio} onChange={(event) => setFiltroRemitos({ ...filtroRemitos, comercio: event.target.value })} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800"><option value="">Todos los clientes</option>{[...new Set(remitos.map((item) => item.razon_social))].sort().map((item) => <option key={item}>{item}</option>)}</select>
+            <select aria-label="Filtrar por sucursal" value={filtroRemitos.sucursal} onChange={(event) => setFiltroRemitos({ ...filtroRemitos, sucursal: event.target.value })} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800"><option value="">Todas las sucursales</option>{[...new Set(remitos.map((item) => item.sucursal))].sort().map((item) => <option key={item}>{item}</option>)}</select>
+            <select aria-label="Filtrar por marca" value={filtroRemitos.marca} onChange={(event) => setFiltroRemitos({ ...filtroRemitos, marca: event.target.value })} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800"><option value="">Todas las marcas</option>{[...new Set(remitos.map((item) => item.marca))].sort().map((item) => <option key={item}>{item}</option>)}</select>
+            <select aria-label="Filtrar por antigüedad" value={filtroRemitos.antiguedad} onChange={(event) => setFiltroRemitos({ ...filtroRemitos, antiguedad: event.target.value })} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800"><option value="">Cualquier antigüedad</option><option value="0-30">Hasta 30 días</option><option value="31-60">31 a 60 días</option><option value="61-90">61 a 90 días</option><option value="90+">Más de 90 días</option></select>
           </div>
 
           {/* Lista de Remitos */}
-          <div className="max-h-80 overflow-y-auto rounded-md border border-slate-200 divide-y divide-slate-100">
+          <div className="max-h-72 overflow-y-auto rounded border border-slate-200 divide-y divide-slate-100">
             {remitosVisibles.length === 0 ? (
-              <p className="p-6 text-center text-xs text-slate-500">No se registran remitos pendientes de cobro con estos filtros.</p>
+              <p className="p-4 text-center text-xs text-slate-500">No se registran remitos pendientes de cobro con estos filtros.</p>
             ) : (
               remitosVisibles.map((item) => {
                 const isSelected = remitosSeleccionados.has(item.id);
                 return (
                   <label
                     key={item.id}
-                    className={`flex cursor-pointer items-center justify-between gap-3 p-3 text-xs transition-colors ${
+                    className={`flex cursor-pointer items-center justify-between gap-2 px-2.5 py-1.5 text-xs transition-colors ${
                       isSelected ? 'bg-blue-50/90 border-l-4 border-marca-naranja' : 'hover:bg-slate-50'
                     }`}
                   >
-                    <span className="flex min-w-0 items-center gap-2.5">
+                    <span className="flex min-w-0 items-center gap-2 truncate">
                       <input
                         type="checkbox"
                         aria-label={`Seleccionar remito ${item.numero}`}
                         checked={isSelected}
                         onChange={() => toggleSeleccion(item.id, remitosSeleccionados, setRemitosSeleccionados)}
-                        className="w-4 h-4 rounded text-marca-naranja focus:ring-marca-naranja shrink-0"
+                        className="w-3.5 h-3.5 rounded text-marca-naranja focus:ring-marca-naranja shrink-0"
                       />
-                      <span className="min-w-0">
-                        <span className="block truncate font-bold text-slate-900">{item.numero} · {item.razon_social}</span>
-                        <span className="text-slate-500">{item.marca} · {item.sucursal} · Entregado: {item.fecha_entrega ? new Date(item.fecha_entrega).toLocaleDateString('es-AR') : 'Sin fecha'}</span>
+                      <span className="font-bold text-slate-900 shrink-0">{item.numero} · {item.razon_social}</span>
+                      <span className="text-[11px] text-slate-500 truncate">
+                        · {item.marca} · {item.sucursal} · Entregado: {item.fecha_entrega ? new Date(item.fecha_entrega).toLocaleDateString('es-AR') : 'Sin fecha'}
                       </span>
                     </span>
-                    <span className="flex shrink-0 flex-col items-end gap-1">
+                    <span className="flex shrink-0 items-center gap-2">
+                      {item.cobrado_efectivo_centavos && BigInt(item.cobrado_efectivo_centavos) > 0n && (
+                        <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 whitespace-nowrap">
+                          Total {formatoARS(item.importe_centavos || item.saldo_centavos)} · Efectivo -{formatoARS(item.cobrado_efectivo_centavos)}
+                        </span>
+                      )}
                       <strong className="whitespace-nowrap font-mono text-slate-900">Saldo {formatoARS(item.saldo_centavos)}</strong>
                     </span>
                   </label>
@@ -1097,13 +1158,13 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
           </div>
 
           {/* Navegación del Paso 2 */}
-          <div className="pt-3 border-t border-slate-200 flex items-center justify-between">
+          <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
             <button
               type="button"
               onClick={() => cambiarPaso(1)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs sm:text-sm font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors cursor-pointer"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-3.5 h-3.5" />
               <span>Volver a movimientos</span>
             </button>
 
@@ -1111,19 +1172,19 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
               type="button"
               onClick={() => cambiarPaso(3)}
               disabled={!paso2Completo}
-              className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-bold rounded-md shadow-xs transition-colors ${
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-md shadow-xs transition-colors ${
                 paso2Completo
                   ? 'bg-marca-azul hover:bg-blue-800 text-white cursor-pointer'
                   : 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-75'
               }`}
             >
               <span>Continuar a confirmación</span>
-              <ArrowRight className="w-4 h-4" />
+              <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
 
           {error && (
-            <div role="alert" className="p-3 rounded-md bg-red-50 border border-red-300 text-red-900 text-xs font-medium flex items-start justify-between gap-2">
+            <div role="alert" className="p-2.5 rounded-md bg-red-50 border border-red-300 text-red-900 text-xs font-medium flex items-start justify-between gap-2">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
                 <span>{error}</span>
@@ -1138,7 +1199,8 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
               </button>
             </div>
           )}
-        </section>
+          </section>
+        </div>
       )}
 
       {/* =========================================================================
@@ -1258,12 +1320,24 @@ export const ConciliadorMovimientos: React.FC<ConciliadorMovimientosProps> = ({
                 Remitos incluidos ({remitosElegidos.length})
               </div>
               <div className="divide-y divide-slate-100 max-h-44 overflow-y-auto">
-                {remitosElegidos.map((r) => (
-                  <div key={r.id} className="p-2.5 flex items-center justify-between gap-2">
-                    <span className="truncate text-slate-800">{r.numero} · <span className="text-slate-500">{r.razon_social}</span></span>
-                    <strong className="font-mono text-slate-900 shrink-0">{formatoARS(r.saldo_centavos)}</strong>
-                  </div>
-                ))}
+                {remitosElegidos.map((r) => {
+                  const cobradoEfectivo = r.cobrado_efectivo_centavos && BigInt(r.cobrado_efectivo_centavos) > 0n
+                    ? r.cobrado_efectivo_centavos
+                    : null;
+                  return (
+                    <div key={r.id} className="p-2.5 flex items-center justify-between gap-2">
+                      <div className="min-w-0 truncate">
+                        <span className="text-slate-800">{r.numero} · <span className="text-slate-500">{r.razon_social}</span></span>
+                        {cobradoEfectivo && (
+                          <span className="block text-[11px] text-emerald-700 truncate">
+                            Total {formatoARS(r.importe_centavos || r.saldo_centavos)} · Efectivo -{formatoARS(cobradoEfectivo)}
+                          </span>
+                        )}
+                      </div>
+                      <strong className="font-mono text-slate-900 shrink-0">{formatoARS(r.saldo_centavos)}</strong>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

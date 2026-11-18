@@ -359,6 +359,115 @@ async function registrarMovimientoBancarioParaCobro(
   }
 }
 
+/**
+ * Imputa automáticamente un cobro en efectivo a los remitos cobrables de la visita (orden FIFO).
+ * Descuenta el saldo del remito en `remito_saldo` para que Conciliación bancaria solo exija el resto
+ * (por ejemplo, en pagos combinados Efectivo + QR/Transferencia).
+ */
+async function imputarCobroEfectivoARemitos(
+  client: { query: typeof db.query },
+  visitaId: string,
+  cobroId: string,
+  importeCentavos: number,
+  usuarioId: number
+) {
+  let restante = BigInt(importeCentavos);
+  if (restante <= 0n) return;
+
+  try {
+    const remitosRes = await client.query(
+      `SELECT r.id::text AS id,
+              r.importe_centavos::text AS importe_centavos,
+              COALESCE(SUM(i.importe_centavos), 0)::text AS ya_imputado
+       FROM remito r
+       LEFT JOIN imputacion i ON i.remito_id = r.id
+       WHERE r.visita_id::text = $1
+         AND r.estado NOT IN ('no_entregado', 'devuelto', 'anulado')
+       GROUP BY r.id, r.importe_centavos
+       ORDER BY r.id ASC`,
+      [visitaId]
+    );
+
+    for (const row of remitosRes.rows) {
+      if (restante <= 0n) break;
+      const disponible = BigInt(row.importe_centavos || '0') - BigInt(row.ya_imputado || '0');
+      if (disponible <= 0n) continue;
+      const aImputar = restante < disponible ? restante : disponible;
+
+      const existenteRes = await client.query(
+        `SELECT id::text AS id FROM imputacion WHERE cobro_id::text = $1 AND remito_id::text = $2 LIMIT 1`,
+        [cobroId, row.id]
+      );
+      if (existenteRes.rows.length > 0) continue;
+
+      const ins = await client.query(
+        `INSERT INTO imputacion (cobro_id, remito_id, importe_centavos, imputado_por)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id::text AS id`,
+        [cobroId, row.id, aImputar.toString(), usuarioId]
+      );
+      const impId = ins.rows[0]?.id;
+      if (impId) {
+        await client.query(
+          `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
+           VALUES ('imputacion', $1, 'alta', $2, $3::jsonb, $4)`,
+          [
+            impId,
+            usuarioId,
+            JSON.stringify({
+              cobroId,
+              visitaId,
+              remitoId: row.id,
+              medioPago: 'efectivo',
+              importeCentavos: aImputar.toString(),
+            }),
+            'Imputación automática por cobro en efectivo en punto de entrega',
+          ]
+        );
+      }
+      restante -= aImputar;
+    }
+  } catch (err: any) {
+    console.warn('⚠️ No se pudo imputar automáticamente el cobro en efectivo:', err.message);
+  }
+}
+
+/**
+ * Retro-imputa cobros en efectivo existentes que aún no tengan filas en `imputacion`
+ * (por ejemplo, generados antes de este cambio o cargados por scripts SQL de demo).
+ */
+export async function asegurarImputacionesEfectivo(): Promise<void> {
+  try {
+    const pendientesRes = await db.query(
+      `SELECT c.id::text AS cobro_id,
+              c.visita_id::text AS visita_id,
+              c.importe_centavos::text AS importe_centavos,
+              COALESCE(SUM(i.importe_centavos), 0)::text AS ya_imputado,
+              c.registrado_por::text AS registrado_por
+       FROM cobro c
+       LEFT JOIN imputacion i ON i.cobro_id = c.id
+       WHERE c.medio_pago = 'efectivo'
+         AND c.estado <> 'rechazado'
+       GROUP BY c.id, c.visita_id, c.importe_centavos, c.registrado_por
+       ORDER BY c.id ASC`
+    );
+
+    for (const row of pendientesRes.rows) {
+      const pendiente = BigInt(row.importe_centavos || '0') - BigInt(row.ya_imputado || '0');
+      if (pendiente <= 0n) continue;
+      await imputarCobroEfectivoARemitos(
+        db,
+        String(row.visita_id),
+        String(row.cobro_id),
+        Number(pendiente),
+        Number(row.registrado_por) || 1
+      );
+    }
+  } catch {
+    // Ignorar en tests aislados donde no exista la tabla cobro o la columna cobro_id en imputacion
+  }
+}
+
 export const cobroService = {
   /** Hoja de ruta publicada del transportista para una fecha, con todo lo necesario para trabajar sin conexión. */
   async getHojaDelDia(transportistaId: number, fecha: string) {
@@ -537,6 +646,14 @@ export const cobroService = {
               dto.registradoEn,
               transportistaId
             );
+          } else if (pago.medioPago === 'efectivo') {
+            await imputarCobroEfectivoARemitos(
+              client,
+              visitaId,
+              cobro.id,
+              pago.importeCentavos,
+              transportistaId
+            );
           }
         }
 
@@ -569,4 +686,6 @@ export const cobroService = {
       throw error;
     }
   },
+
+  asegurarImputacionesEfectivo,
 };

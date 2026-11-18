@@ -327,4 +327,63 @@ describe('Cola de operaciones sin conexión', () => {
       assert.deepEqual(enviados.map((op) => op.tipo), ['rechazo', 'cobro']);
     });
   });
+
+  describe('Depuración tras reinicio de base de datos o cierre de sesión', () => {
+    it('depurarContraServidor elimina operaciones sincronizadas si el servidor reporta los remitos y visitas nuevamente pendientes', async () => {
+      await cola.encolar(entrega('13'));
+      await cola.encolar(rechazo('14', 'Mercadería dañada'));
+      await cola.encolar(cobro('1', 'clave-1'));
+      await cola.sincronizar();
+
+      assert.equal((await cola.listar()).length, 3);
+
+      // Se reinició la BD: la hoja en el servidor vuelve a traer visita 1 sin cobrar y remitos 13 y 14 en_ruta
+      await cola.depurarContraServidor({
+        id: '1',
+        fechaReparto: '2026-11-18',
+        patente: 'AB123CD',
+        estado: 'en_curso',
+        sucursal: 'Central',
+        visitas: [
+          {
+            id: '1',
+            orden: 1,
+            estado: 'pendiente',
+            cobrada: false,
+            comercio: {
+              razonSocial: 'Mayorista El Sol S.R.L.',
+              nombreFantasia: null,
+              domicilio: 'Av. Yrigoyen 4500',
+              localidad: 'Lanús',
+              ventanaDesde: null,
+              ventanaHasta: null,
+              telefono: null,
+            },
+            remitos: [
+              { id: '13', numero: 'M-01', marca: 'Lácteos', importeCentavos: 4500000, estado: 'en_ruta' },
+              { id: '14', numero: 'M-02', marca: 'Bebidas', importeCentavos: 1250050, estado: 'en_ruta' },
+            ],
+            importe: { totalCentavos: 5750050, subtotalesPorMarca: [], remitosExcluidos: [], sinCobroEnDestino: false },
+          },
+        ],
+      });
+
+      assert.equal((await cola.listar()).length, 0);
+      assert.equal((await cola.estadoPorClave()).size, 0);
+    });
+
+    it('limpiarSincronizados elimina las operaciones ya sincronizadas pero conserva las pendientes offline', async () => {
+      await cola.encolar(entrega('13'));
+      await cola.sincronizar();
+
+      respuesta = async () => { throw new ErrorRed(); };
+      await cola.encolar(cobro('2', 'clave-pendiente'));
+
+      await cola.limpiarSincronizados();
+      const restantes = await cola.listar();
+      assert.equal(restantes.length, 1);
+      assert.equal(restantes[0].tipo, 'cobro');
+      assert.equal(restantes[0].estado, 'pendiente');
+    });
+  });
 });

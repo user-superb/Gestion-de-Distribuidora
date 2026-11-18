@@ -73,10 +73,15 @@ export function useJornada(
       }
 
       if (enLinea) {
+        let hojaVigenteServidor: HojaGuardada['hoja'] | null = null;
+        let consultaServidorExitosa = false;
+
         // 1. Validar la sesión con el servidor, reportar latido de conexión y refrescar la hoja de ruta
         try {
           const hojaServidor = await obtenerHojaDeRuta(sesion.token);
+          consultaServidorExitosa = true;
           if (hojaServidor && esHojaOperativaVigente(hojaServidor)) {
+            hojaVigenteServidor = hojaServidor;
             detectarParadasAnexadas(hojaServidor.id, hojaServidor.visitas || []);
             setGuardada(await guardarHoja(hojaServidor));
             setError(null);
@@ -94,6 +99,7 @@ export function useJornada(
           }
           if (e instanceof ErrorApi && e.status === 404) {
             // Escenario 2: Ausencia de rutas asignadas para la fecha
+            consultaServidorExitosa = true;
             await borrarHoja();
             setGuardada(null);
             setError(null);
@@ -110,6 +116,18 @@ export function useJornada(
           if (sincronizacion.sesionVencida) {
             onSesionVencida();
             return;
+          }
+          if (sincronizacion.sincronizados > 0) {
+            const hojaActualizada = await obtenerHojaDeRuta(sesion.token).catch(() => null);
+            if (hojaActualizada && esHojaOperativaVigente(hojaActualizada)) {
+              hojaVigenteServidor = hojaActualizada;
+              setGuardada(await guardarHoja(hojaActualizada));
+            }
+          }
+          // 3. Si la consulta al servidor fue exitosa y no quedan operaciones pendientes de envío,
+          //    depurar registros 'sincronizado' obsoletos (por ejemplo, tras un reinicio de base de datos).
+          if (consultaServidorExitosa && sincronizacion.pendientes === 0) {
+            await colaOperaciones.depurarContraServidor(hojaVigenteServidor);
           }
         } catch {
           // Errores de sincronización de cola se reintentan en el siguiente ciclo

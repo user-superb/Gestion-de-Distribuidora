@@ -8,6 +8,7 @@ import { newDb } from 'pg-mem';
 import { db } from '../db.js';
 import { authService } from '../services/authService.js';
 import { calcularImporteVisita, cobroService, CobroError, rangoDiaArgentina } from '../services/cobroService.js';
+import { conciliacionService } from '../services/conciliacionService.js';
 import { movilRouter } from '../routes/movilRoutes.js';
 
 const CHOFER = 2;
@@ -101,9 +102,9 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
         precision_metros numeric(7,1), gps_disponible boolean, cobrada_en timestamptz
       );
       CREATE TABLE remito (
-        id serial PRIMARY KEY, marca_id bigint NOT NULL, comercio_id bigint NOT NULL, numero text NOT NULL,
-        importe_centavos bigint NOT NULL, estado text NOT NULL DEFAULT 'pendiente', visita_id bigint,
-        motivo_no_entrega text, actualizado_en timestamptz DEFAULT now()
+        id serial PRIMARY KEY, marca_id bigint NOT NULL, comercio_id bigint NOT NULL, sucursal_id bigint NOT NULL DEFAULT 1,
+        numero text NOT NULL, importe_centavos bigint NOT NULL, estado text NOT NULL DEFAULT 'pendiente', visita_id bigint,
+        entregado_en timestamptz, motivo_no_entrega text, actualizado_en timestamptz DEFAULT now()
       );
       CREATE TABLE cobro (
         id serial PRIMARY KEY, visita_id bigint NOT NULL, medio_pago text NOT NULL, importe_centavos bigint NOT NULL,
@@ -122,6 +123,41 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
         estado text NOT NULL DEFAULT 'sin_imputar', creado_en timestamptz DEFAULT now(),
         UNIQUE (cuenta_id, referencia_externa)
       );
+      CREATE TABLE movimiento_bancario_comprobante (
+        movimiento_id bigint PRIMARY KEY, nombre_archivo text NOT NULL, tipo_mime text NOT NULL,
+        contenido bytea NOT NULL, tamano_bytes bigint NOT NULL, subido_en timestamptz DEFAULT now()
+      );
+      CREATE TABLE imputacion (
+        id serial PRIMARY KEY, cobro_id bigint, movimiento_bancario_id bigint, remito_id bigint NOT NULL,
+        importe_centavos bigint NOT NULL, imputado_por bigint NOT NULL, imputado_en timestamptz DEFAULT now()
+      );
+      CREATE TABLE discrepancia_conciliacion (
+        id serial PRIMARY KEY, movimiento_id bigint, movimiento_ids bigint[] DEFAULT '{}',
+        remito_ids bigint[] NOT NULL, importe_movimiento bigint NOT NULL, importe_seleccionado bigint NOT NULL,
+        diferencia_centavos bigint NOT NULL, nota text NOT NULL, estado text NOT NULL DEFAULT 'pendiente',
+        creada_por bigint NOT NULL, creada_en timestamptz DEFAULT now()
+      );
+      CREATE TABLE discrepancia_ajuste (
+        id serial PRIMARY KEY, discrepancia_id bigint NOT NULL, remito_id bigint, comercio_id bigint,
+        tipo text NOT NULL, importe_centavos bigint NOT NULL
+      );
+      CREATE VIEW remito_saldo AS
+      WITH pagos AS (
+        SELECT remito_id, SUM(importe_centavos)::bigint AS importe_centavos FROM imputacion GROUP BY remito_id
+      ), ajustes AS (
+        SELECT remito_id, SUM(importe_centavos)::bigint AS importe_centavos FROM discrepancia_ajuste WHERE tipo = 'reduccion_saldo' GROUP BY remito_id
+      )
+      SELECT r.id AS remito_id, r.comercio_id, r.marca_id, r.importe_centavos,
+        COALESCE(p.importe_centavos, 0) AS imputado_centavos,
+        (r.importe_centavos - COALESCE(p.importe_centavos, 0) - COALESCE(a.importe_centavos, 0))::bigint AS saldo_centavos,
+        CASE
+          WHEN r.importe_centavos = COALESCE(p.importe_centavos, 0) + COALESCE(a.importe_centavos, 0) THEN 'saldado'
+          WHEN COALESCE(p.importe_centavos, 0) + COALESCE(a.importe_centavos, 0) > 0 THEN 'parcial'
+          ELSE 'pendiente'
+        END AS estado_cobro
+      FROM remito r
+      LEFT JOIN pagos p ON p.remito_id = r.id
+      LEFT JOIN ajustes a ON a.remito_id = r.id;
       CREATE TABLE auditoria (
         id serial PRIMARY KEY, entidad text NOT NULL, entidad_id bigint NOT NULL, accion text NOT NULL,
         usuario_id bigint NOT NULL, ocurrido_en timestamptz DEFAULT now(), valores_antes jsonb, valores_despues jsonb,
@@ -158,7 +194,49 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
         (6, 1, 1, 'R-6', 1000000, 'en_ruta', 4);
     `);
     const { Pool } = mem.adapters.createPg();
-    db.setPool(new Pool() as any);
+    const rawPool = new Pool();
+    const adaptForPgMem = (sql: string, params?: any[]): [string, any[] | undefined] => {
+      let adapted = sql
+        .replace(/\bFOR UPDATE OF \w+/gi, 'FOR UPDATE')
+        .replace(/mb\.importe_centavos\s*-\s*COALESCE\(i\.imputado_centavos,\s*0\)/gi, 'mb.importe_centavos + (-COALESCE(i.imputado_centavos, 0))');
+      if (!params) return [adapted, params];
+      adapted = adapted.replace(/([\w.]+)\s*=\s*ANY\(\$(\d+)::bigint\[\]\)/gi, (_m, col, idx) => {
+        const arr = Array.isArray(params[Number(idx) - 1]) ? params[Number(idx) - 1] : [];
+        const nums = arr.map((v: any) => Number(v)).filter((n: number) => Number.isFinite(n));
+        return nums.length > 0 ? `${col} IN (${nums.join(', ')})` : '1 = 0';
+      });
+      adapted = adapted.replace(
+        /\(movimiento_ids\s*&&\s*\$(\d+)::bigint\[\]\s*OR\s*remito_ids\s*&&\s*\$(\d+)::bigint\[\]\)/gi,
+        (_m, i1, i2) => {
+          const mIds = (Array.isArray(params[Number(i1) - 1]) ? params[Number(i1) - 1] : []).map(Number).filter(Number.isFinite);
+          const rIds = (Array.isArray(params[Number(i2) - 1]) ? params[Number(i2) - 1] : []).map(Number).filter(Number.isFinite);
+          const checks: string[] = [];
+          for (const id of mIds) checks.push(`${id} = ANY(movimiento_ids)`);
+          for (const id of rIds) checks.push(`${id} = ANY(remito_ids)`);
+          return checks.length > 0 ? `(${checks.join(' OR ')})` : '1 = 0';
+        }
+      );
+      return [adapted, params];
+    };
+    const wrappedPool = {
+      async query(sql: string, params?: any[]) {
+        const [adaptedSql, adaptedParams] = adaptForPgMem(sql, params);
+        return rawPool.query(adaptedSql, adaptedParams);
+      },
+      async connect() {
+        const client = await rawPool.connect();
+        return {
+          async query(sql: string, params?: any[]) {
+            const [adaptedSql, adaptedParams] = adaptForPgMem(sql, params);
+            return client.query(adaptedSql, adaptedParams);
+          },
+          release() {
+            return client.release();
+          },
+        };
+      },
+    };
+    db.setPool(wrappedPool as any);
   });
 
   describe('HU #25 · Visualizar importe de cobro', () => {
@@ -211,6 +289,16 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
       // La entrega de los remitos la confirma la HU #22, no el cobro.
       assert.equal(await contar("SELECT count(*) AS n FROM remito WHERE visita_id = 1 AND estado = 'en_ruta'"), 2);
       assert.equal(await contar("SELECT count(*) AS n FROM auditoria WHERE entidad = 'cobro' AND accion = 'alta'"), 1);
+
+      // El cobro en efectivo se imputa automáticamente sobre los remitos de la visita para que no figuren impagos en Conciliación.
+      const saldos = (await db.query('SELECT remito_id::text, saldo_centavos::text, estado_cobro FROM remito_saldo WHERE remito_id IN (1, 2) ORDER BY remito_id')).rows;
+      assert.deepEqual(saldos, [
+        { remito_id: '1', saldo_centavos: '0', estado_cobro: 'saldado' },
+        { remito_id: '2', saldo_centavos: '0', estado_cobro: 'saldado' },
+      ]);
+      await db.query("UPDATE remito SET estado = 'entregado', entregado_en = now() WHERE id IN (1, 2)");
+      const pendientesConciliacion = await conciliacionService.getRemitosPendientes({ id: 'usr_1', role: 'Administrativo' });
+      assert.equal(pendientesConciliacion.some((r: any) => r.id === '1' || r.id === '2'), false);
     });
 
     it('ESCENARIO 2: el cobro hecho sin conexión se sincroniza una sola vez aunque se reenvíe', async () => {
@@ -333,6 +421,75 @@ describe('Épica 1.4 · Cobro integrado en punto de entrega (app móvil)', () =>
         /Falta la referencia/
       );
       assert.equal(await contar('SELECT count(*) AS n FROM cobro'), 0);
+    });
+
+    it('ESCENARIO 5: un cobro combinado (efectivo + QR) descuenta el efectivo del remito y concilia el QR sin discrepancia', async () => {
+      await db.query(
+        "UPDATE remito SET estado = 'entregado', entregado_en = '2026-10-19T08:25:00.000-03:00' WHERE id = 3"
+      );
+      await db.query(
+        "UPDATE visita SET estado = 'completada', registrada_en = '2026-10-19T08:25:00.000-03:00' WHERE id = 2"
+      );
+
+      // Visita 2 tiene R-3 de $30.000 (R-4 está devuelto). Se cobra $10.000 en efectivo + $20.000 por QR.
+      await cobroService.registrarCobro(CHOFER, '2', liquidacion([
+        pago('efectivo', 1000000),
+        pago('qr', 2000000),
+      ]));
+
+      const saldoRow = (await db.query('SELECT imputado_centavos::text, saldo_centavos::text, estado_cobro FROM remito_saldo WHERE remito_id = 3')).rows[0];
+      assert.deepEqual(saldoRow, {
+        imputado_centavos: '1000000',
+        saldo_centavos: '2000000',
+        estado_cobro: 'parcial',
+      });
+
+      const sessionAdmin = { id: 'usr_1', role: 'Administrativo' };
+      const pendientes = await conciliacionService.getRemitosPendientes(sessionAdmin);
+      const remito3 = pendientes.find((r: any) => r.id === '3');
+      assert.ok(remito3);
+      assert.equal(remito3.importe_centavos, '3000000');
+      assert.equal(remito3.saldo_centavos, '2000000');
+      assert.equal(remito3.cobrado_efectivo_centavos, '1000000');
+
+      const sugerencias = await conciliacionService.getSugerencias(sessionAdmin);
+      const sug = sugerencias.find((s: any) => s.remito_id === '3');
+      assert.ok(sug);
+      assert.equal(sug.tipo, 'exacta');
+      assert.equal(sug.diferencia_centavos, '0');
+      assert.equal(sug.importe_disponible_centavos, '2000000');
+      assert.equal(sug.saldo_centavos, '2000000');
+      assert.equal(sug.cobrado_efectivo_centavos, '1000000');
+
+      const movQrId = String(sug.movimiento_id);
+      const conciliado = await conciliacionService.conciliar([movQrId], ['3'], 1, true);
+      assert.equal(conciliado.estado, 'imputado');
+
+      const saldoFinal = (await db.query('SELECT saldo_centavos::text, estado_cobro FROM remito_saldo WHERE remito_id = 3')).rows[0];
+      assert.deepEqual(saldoFinal, { saldo_centavos: '0', estado_cobro: 'saldado' });
+
+      const pendientesTrasConciliar = await conciliacionService.getRemitosPendientes(sessionAdmin);
+      assert.equal(pendientesTrasConciliar.some((r: any) => r.id === '3'), false);
+
+      const historial = await conciliacionService.getHistorialConciliaciones({}, sessionAdmin);
+      const movHist = historial.find((m: any) => m.id === movQrId);
+      assert.ok(movHist);
+      assert.equal(movHist.imputaciones[0].cobradoEfectivoCentavos, '1000000');
+    });
+
+    it('ESCENARIO 6: retro-imputa cobros en efectivo preexistentes sin fila en imputacion', async () => {
+      await db.query(
+        "UPDATE remito SET estado = 'entregado', entregado_en = '2026-10-19T08:25:00.000-03:00' WHERE id = 3"
+      );
+      await db.query(
+        `INSERT INTO cobro (visita_id, medio_pago, importe_centavos, registrado_en, registrado_por, clave_idempotencia)
+         VALUES (2, 'efectivo', 1200000, now(), 2, '${crypto.randomUUID()}')`
+      );
+      const pendientes = await conciliacionService.getRemitosPendientes({ id: 'usr_1', role: 'Administrativo' });
+      const remito3 = pendientes.find((r: any) => r.id === '3');
+      assert.ok(remito3);
+      assert.equal(remito3.saldo_centavos, '1800000');
+      assert.equal(remito3.cobrado_efectivo_centavos, '1200000');
     });
   });
 

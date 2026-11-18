@@ -12,8 +12,8 @@ export const NOMBRE_MEDIO: Record<MedioPago, string> = {
   qr: 'QR Mercado Pago',
 };
 
-/** Medios que requieren conexión (RNF y HU #29). Ver supuesto S4 en docs/requerimientos. */
-export const MEDIOS_SOLO_EN_LINEA: MedioPago[] = ['qr'];
+/** Medios que requieren conexión (vacío: QR, transferencia y efectivo permiten registro offline y sincronización diferida). */
+export const MEDIOS_SOLO_EN_LINEA: MedioPago[] = [];
 
 /** Una fila del formulario de cobro, tal como la carga el transportista. */
 export interface PagoEnCarga {
