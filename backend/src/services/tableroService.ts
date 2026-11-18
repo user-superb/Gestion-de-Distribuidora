@@ -101,14 +101,14 @@ export class TableroService {
 
     const query = `
       SELECT
+        c.id,
+        c.visita_id,
         c.medio_pago,
-        COUNT(c.id) AS cantidad_pagos,
-        COALESCE(SUM(c.importe_centavos), 0) AS total_centavos
+        COALESCE(c.importe_centavos, 0) AS total_centavos
       FROM cobro c
       LEFT JOIN visita v ON v.id = c.visita_id
       LEFT JOIN hoja_de_ruta h ON h.id = v.hoja_de_ruta_id
       ${whereClause}
-      GROUP BY c.medio_pago
     `;
 
     const res = await db.query(query, params);
@@ -118,60 +118,106 @@ export class TableroService {
     let totalAcumuladoCentavos = 0;
     let totalCantidadPagos = 0;
 
+    // Guardar cobros electrónicos para evitar duplicación con imputaciones bancarias
+    const cobrosElectronicos = res.rows.filter(
+      (r: any) => String(r.medio_pago).toLowerCase() !== 'efectivo'
+    );
+
+    // Sumar directamente los cobros en efectivo
     for (const row of res.rows) {
       const medio = String(row.medio_pago).toLowerCase();
-      const centavos = Number(row.total_centavos || 0);
-      const cantidad = Number(row.cantidad_pagos || 0);
-      resultadosPorMedio.set(medio, { totalCentavos: centavos, cantidad });
-      totalAcumuladoCentavos += centavos;
-      totalCantidadPagos += cantidad;
+      if (medio === 'efectivo') {
+        const centavos = Number(row.total_centavos || 0);
+        const previo = resultadosPorMedio.get(medio) || { totalCentavos: 0, cantidad: 0 };
+        resultadosPorMedio.set(medio, {
+          totalCentavos: previo.totalCentavos + centavos,
+          cantidad: previo.cantidad + 1,
+        });
+        totalAcumuladoCentavos += centavos;
+        totalCantidadPagos += 1;
+      }
     }
 
-    // 2. Incluir imputaciones bancarias directas (extractos o cargas que saldaron remitos)
-    // que no provengan de un cobro ya contabilizado
+    // 2. Incluir imputaciones bancarias confirmadas (extractos o cargas que saldaron remitos)
+    const visitasImputadas = new Set<string>();
+
     try {
       const impCondiciones: string[] = [];
       const impParams: unknown[] = [];
 
       if (filtros.sucursalId) {
         impParams.push(filtros.sucursalId);
-        impCondiciones.push(`(r.sucursal_id::text = $${impParams.length} OR h.sucursal_id::text = $${impParams.length})`);
+        impCondiciones.push(
+          `(cr.sucursal_id::text = $${impParams.length} OR r.sucursal_id::text = $${impParams.length} OR h.sucursal_id::text = $${impParams.length})`
+        );
       }
 
       if (filtros.fechaDesde) {
-        impParams.push(`${filtros.fechaDesde}T00:00:00.000Z`);
+        impParams.push(`${filtros.fechaDesde}T00:00:00.000-03:00`);
         impCondiciones.push(`i.imputado_en >= $${impParams.length}`);
       }
 
       if (filtros.fechaHasta) {
-        impParams.push(`${filtros.fechaHasta}T23:59:59.999Z`);
+        impParams.push(`${filtros.fechaHasta}T23:59:59.999-03:00`);
         impCondiciones.push(`i.imputado_en <= $${impParams.length}`);
       }
 
-      const impWhereClause = impCondiciones.length > 0 ? `AND ${impCondiciones.join(' AND ')}` : '';
+      const impWhereClause = impCondiciones.length > 0 ? `WHERE ${impCondiciones.join(' AND ')}` : '';
 
       const queryImputaciones = `
         SELECT
           i.id,
+          r.visita_id,
           mb.origen,
           i.importe_centavos
         FROM imputacion i
         JOIN movimiento_bancario mb ON mb.id = i.movimiento_bancario_id
+        LEFT JOIN cuenta_recepcion cr ON cr.id = mb.cuenta_id
         JOIN remito r ON r.id = i.remito_id
         LEFT JOIN visita v ON v.id = r.visita_id
         LEFT JOIN hoja_de_ruta h ON h.id = v.hoja_de_ruta_id
-        LEFT JOIN cobro c ON (c.movimiento_bancario_id = mb.id OR (c.visita_id = r.visita_id AND c.estado = 'validado' AND c.medio_pago IN ('transferencia', 'qr')))
-        WHERE c.id IS NULL
         ${impWhereClause}
       `;
 
-      const impRes = await db.query(queryImputaciones, impParams);
+      let impRes: any;
+      try {
+        impRes = await db.query(queryImputaciones, impParams);
+      } catch (err: any) {
+        // Fallback si la tabla cuenta_recepcion no fue unida o hay incompatibilidad en esquemas de tests
+        if (err?.message?.includes('cuenta_recepcion') || err?.message?.includes('cr.sucursal_id')) {
+          const fallbackConds = impCondiciones.map((c) =>
+            c.replace('cr.sucursal_id::text =', 'r.sucursal_id::text =')
+          );
+          const fallbackWhere = fallbackConds.length > 0 ? `WHERE ${fallbackConds.join(' AND ')}` : '';
+          const fallbackQuery = `
+            SELECT
+              i.id,
+              r.visita_id,
+              mb.origen,
+              i.importe_centavos
+            FROM imputacion i
+            JOIN movimiento_bancario mb ON mb.id = i.movimiento_bancario_id
+            JOIN remito r ON r.id = i.remito_id
+            LEFT JOIN visita v ON v.id = r.visita_id
+            LEFT JOIN hoja_de_ruta h ON h.id = v.hoja_de_ruta_id
+            ${fallbackWhere}
+          `;
+          impRes = await db.query(fallbackQuery, impParams);
+        } else {
+          throw err;
+        }
+      }
+
       const imputacionesProcesadas = new Set<string>();
 
       for (const row of impRes.rows) {
         const impId = String(row.id);
         if (imputacionesProcesadas.has(impId)) continue;
         imputacionesProcesadas.add(impId);
+
+        if (row.visita_id) {
+          visitasImputadas.add(String(row.visita_id));
+        }
 
         const origen = String(row.origen || '').toLowerCase();
         const medio = origen.includes('qr') ? 'qr' : 'transferencia';
@@ -186,6 +232,26 @@ export class TableroService {
       }
     } catch {
       // Ignorar si en tests aislados la tabla imputacion no fue creada
+    }
+
+    // 3. Incluir cobros electrónicos directos de ruta que no hayan sido contabilizados vía imputación
+    for (const cobro of cobrosElectronicos) {
+      const vId = cobro.visita_id ? String(cobro.visita_id) : null;
+
+      // Si ya fue sumado como imputación en esa visita, omitir para evitar duplicidad
+      if (vId && visitasImputadas.has(vId)) {
+        continue;
+      }
+
+      const medio = String(cobro.medio_pago).toLowerCase();
+      const centavos = Number(cobro.total_centavos || 0);
+      const previo = resultadosPorMedio.get(medio) || { totalCentavos: 0, cantidad: 0 };
+      resultadosPorMedio.set(medio, {
+        totalCentavos: previo.totalCentavos + centavos,
+        cantidad: previo.cantidad + 1,
+      });
+      totalAcumuladoCentavos += centavos;
+      totalCantidadPagos += 1;
     }
 
     // Asegurar que Efectivo, Transferencia y QR siempre estén presentes en el desglose

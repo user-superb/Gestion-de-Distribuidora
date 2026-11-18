@@ -11,28 +11,45 @@ import {
   BarChart3,
   DollarSign,
   RefreshCw,
-  Filter,
   AlertCircle,
   Truck,
   Building2,
   ShieldAlert,
+  Calendar,
+  CalendarRange,
 } from 'lucide-react';
 
 interface TableroGerenciaProps {
   session: UserSession;
 }
 
+const STORAGE_KEYS = {
+  SUBVISTA: 'tutucas_reportes_subvista',
+  SUCURSAL: 'tutucas_reportes_sucursal',
+  MODO_RECAUDACION: 'tutucas_reportes_modo_recaudacion',
+  FECHA_DIA: 'tutucas_reportes_fecha_dia',
+  RANGO_PERIODO: 'tutucas_reportes_rango_periodo',
+  DESDE_PERIODO: 'tutucas_reportes_desde_periodo',
+  HASTA_PERIODO: 'tutucas_reportes_hasta_periodo',
+  FECHA_ENTREGAS: 'tutucas_reportes_fecha_entregas',
+};
+
 export const TableroGerencia: React.FC<TableroGerenciaProps> = ({ session }) => {
   const pad = (n: number) => String(n).padStart(2, '0');
+  const toYMD = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
   const hoyStr = (() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    return toYMD(new Date());
+  })();
+
+  const ayerStr = (() => {
+    return toYMD(new Date(Date.now() - 86400000));
   })();
 
   // Submódulo activo dentro de Reportes (persistido durante la sesión en el navegador)
   const [subVista, setSubVista] = useState<'recaudacion' | 'entregas'>(() => {
     try {
-      const guardada = sessionStorage.getItem('tutucas_reportes_subvista');
+      const guardada = sessionStorage.getItem(STORAGE_KEYS.SUBVISTA);
       if (guardada === 'recaudacion' || guardada === 'entregas') {
         return guardada;
       }
@@ -45,7 +62,7 @@ export const TableroGerencia: React.FC<TableroGerenciaProps> = ({ session }) => 
   const cambiarSubVista = (nueva: 'recaudacion' | 'entregas') => {
     setSubVista(nueva);
     try {
-      sessionStorage.setItem('tutucas_reportes_subvista', nueva);
+      sessionStorage.setItem(STORAGE_KEYS.SUBVISTA, nueva);
     } catch {
       // Fallback silencioso
     }
@@ -58,19 +75,98 @@ export const TableroGerencia: React.FC<TableroGerenciaProps> = ({ session }) => 
 
   // Estado para Módulo 2: Eficiencia de Entregas Diarias
   const [dataEntregas, setDataEntregas] = useState<MetricasEntregasDiarias | null>(null);
-  const [fechaEntregas, setFechaEntregas] = useState<string>(hoyStr);
+  const [fechaEntregas, setFechaEntregas] = useState<string>(() => {
+    try {
+      const guardada = sessionStorage.getItem(STORAGE_KEYS.FECHA_ENTREGAS);
+      if (guardada && /^\d{4}-\d{2}-\d{2}$/.test(guardada)) {
+        return guardada;
+      }
+    } catch {}
+    return hoyStr;
+  });
   const [cargandoEntregas, setCargandoEntregas] = useState<boolean>(false);
   const [errorEntregas, setErrorEntregas] = useState<string | null>(null);
+
+  const cambiarFechaEntregas = (fecha: string) => {
+    setFechaEntregas(fecha);
+    try {
+      sessionStorage.setItem(STORAGE_KEYS.FECHA_ENTREGAS, fecha);
+    } catch {}
+  };
 
   // Sucursales para el filtro y control de alcance (global vs sectorizado)
   const [sucursales, setSucursales] = useState<{ id: string; nombre: string }[]>([]);
   const [esGlobal, setEsGlobal] = useState<boolean>(true);
 
-  // Filtros de búsqueda
-  const [sucursalSeleccionada, setSucursalSeleccionada] = useState<string>('');
-  const [rangoRapido, setRangoRapido] = useState<'hoy' | '7dias' | '30dias' | 'todo'>('todo');
-  const [fechaDesde, setFechaDesde] = useState<string>('');
-  const [fechaHasta, setFechaHasta] = useState<string>('');
+  // Filtros de búsqueda persistidos en sessionStorage
+  const [sucursalSeleccionada, setSucursalSeleccionada] = useState<string>(() => {
+    try {
+      return sessionStorage.getItem(STORAGE_KEYS.SUCURSAL) || '';
+    } catch {
+      return '';
+    }
+  });
+
+  const cambiarSucursal = (nuevaSucursalId: string) => {
+    setSucursalSeleccionada(nuevaSucursalId);
+    try {
+      sessionStorage.setItem(STORAGE_KEYS.SUCURSAL, nuevaSucursalId);
+    } catch {}
+  };
+
+  // Modo de filtro de Recaudación: 'dia' (calendario puntual) o 'periodo' (rango de fechas)
+  const [modoRecaudacion, setModoRecaudacion] = useState<'dia' | 'periodo'>(() => {
+    try {
+      const guardado = sessionStorage.getItem(STORAGE_KEYS.MODO_RECAUDACION);
+      if (guardado === 'dia' || guardado === 'periodo') {
+        return guardado;
+      }
+      const r = sessionStorage.getItem(STORAGE_KEYS.RANGO_PERIODO) || sessionStorage.getItem('tutucas_reportes_rango');
+      if (r && r !== 'hoy' && r !== 'ayer') {
+        return 'periodo';
+      }
+    } catch {}
+    return 'dia';
+  });
+
+  // Calendario 1: Por día (estilo idéntico a entregas diarias)
+  const [fechaDia, setFechaDia] = useState<string>(() => {
+    try {
+      const guardada = sessionStorage.getItem(STORAGE_KEYS.FECHA_DIA);
+      if (guardada && /^\d{4}-\d{2}-\d{2}$/.test(guardada)) {
+        return guardada;
+      }
+    } catch {}
+    return hoyStr;
+  });
+
+  // Calendario 2: Por período (rango Desde y Hasta con atajos de período)
+  const [rangoPeriodo, setRangoPeriodo] = useState<'7dias' | '30dias' | 'todo' | 'personalizado'>(() => {
+    try {
+      const guardado = (sessionStorage.getItem(STORAGE_KEYS.RANGO_PERIODO) || sessionStorage.getItem('tutucas_reportes_rango')) as any;
+      if (['7dias', '30dias', 'todo', 'personalizado'].includes(guardado)) {
+        return guardado;
+      }
+    } catch {}
+    return 'todo';
+  });
+
+  const [fechaDesdePeriodo, setFechaDesdePeriodo] = useState<string>(() => {
+    try {
+      return sessionStorage.getItem(STORAGE_KEYS.DESDE_PERIODO) || sessionStorage.getItem('tutucas_reportes_desde') || '';
+    } catch {
+      return '';
+    }
+  });
+
+  const [fechaHastaPeriodo, setFechaHastaPeriodo] = useState<string>(() => {
+    try {
+      return sessionStorage.getItem(STORAGE_KEYS.HASTA_PERIODO) || sessionStorage.getItem('tutucas_reportes_hasta') || '';
+    } catch {
+      return '';
+    }
+  });
+
   const [soloConfirmados] = useState<boolean>(true);
 
   // Cargar lista de sucursales autorizadas para el usuario actual
@@ -83,7 +179,11 @@ export const TableroGerencia: React.FC<TableroGerenciaProps> = ({ session }) => 
         if (!res.esGlobal && res.sucursales.length > 0) {
           setSucursalSeleccionada((prev) => {
             const existe = res.sucursales.some((s) => s.id === prev);
-            return existe ? prev : res.sucursales[0].id;
+            const finalId = existe ? prev : res.sucursales[0].id;
+            try {
+              sessionStorage.setItem(STORAGE_KEYS.SUCURSAL, finalId);
+            } catch {}
+            return finalId;
           });
         }
       })
@@ -92,39 +192,100 @@ export const TableroGerencia: React.FC<TableroGerenciaProps> = ({ session }) => 
       });
   }, [session.token]);
 
-  // Ajustar fechas según rango rápido
-  const aplicarRangoRapido = (tipo: 'hoy' | '7dias' | '30dias' | 'todo') => {
-    setRangoRapido(tipo);
-    const hoy = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const toYMD = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  // Acciones para Calendario 1: Por día
+  const seleccionarDiaRapido = (tipo: 'hoy' | 'ayer') => {
+    const f = tipo === 'hoy' ? hoyStr : ayerStr;
+    setModoRecaudacion('dia');
+    setFechaDia(f);
+    try {
+      sessionStorage.setItem(STORAGE_KEYS.MODO_RECAUDACION, 'dia');
+      sessionStorage.setItem(STORAGE_KEYS.FECHA_DIA, f);
+    } catch {}
+  };
 
-    if (tipo === 'hoy') {
-      const hoyStr = toYMD(hoy);
-      setFechaDesde(hoyStr);
-      setFechaHasta(hoyStr);
-    } else if (tipo === '7dias') {
+  const seleccionarDiaInput = (fecha: string) => {
+    setModoRecaudacion('dia');
+    setFechaDia(fecha);
+    try {
+      sessionStorage.setItem(STORAGE_KEYS.MODO_RECAUDACION, 'dia');
+      sessionStorage.setItem(STORAGE_KEYS.FECHA_DIA, fecha);
+    } catch {}
+  };
+
+  // Acciones para Calendario 2: Por período
+  const aplicarRangoPeriodo = (tipo: '7dias' | '30dias' | 'todo') => {
+    setModoRecaudacion('periodo');
+    setRangoPeriodo(tipo);
+    const hoy = new Date();
+
+    let dDesde = '';
+    let dHasta = '';
+
+    if (tipo === '7dias') {
       const sieteDiasAtras = new Date(hoy.getTime() - 7 * 86400000);
-      setFechaDesde(toYMD(sieteDiasAtras));
-      setFechaHasta(toYMD(hoy));
+      dDesde = toYMD(sieteDiasAtras);
+      dHasta = toYMD(hoy);
     } else if (tipo === '30dias') {
       const treintaDiasAtras = new Date(hoy.getTime() - 30 * 86400000);
-      setFechaDesde(toYMD(treintaDiasAtras));
-      setFechaHasta(toYMD(hoy));
+      dDesde = toYMD(treintaDiasAtras);
+      dHasta = toYMD(hoy);
     } else {
-      setFechaDesde('');
-      setFechaHasta('');
+      dDesde = '';
+      dHasta = '';
     }
+
+    setFechaDesdePeriodo(dDesde);
+    setFechaHastaPeriodo(dHasta);
+
+    try {
+      sessionStorage.setItem(STORAGE_KEYS.MODO_RECAUDACION, 'periodo');
+      sessionStorage.setItem(STORAGE_KEYS.RANGO_PERIODO, tipo);
+      sessionStorage.setItem(STORAGE_KEYS.DESDE_PERIODO, dDesde);
+      sessionStorage.setItem(STORAGE_KEYS.HASTA_PERIODO, dHasta);
+    } catch {}
+  };
+
+  const manejarCambioDesdePeriodo = (val: string) => {
+    setModoRecaudacion('periodo');
+    setRangoPeriodo('personalizado');
+    setFechaDesdePeriodo(val);
+    try {
+      sessionStorage.setItem(STORAGE_KEYS.MODO_RECAUDACION, 'periodo');
+      sessionStorage.setItem(STORAGE_KEYS.RANGO_PERIODO, 'personalizado');
+      sessionStorage.setItem(STORAGE_KEYS.DESDE_PERIODO, val);
+    } catch {}
+  };
+
+  const manejarCambioHastaPeriodo = (val: string) => {
+    setModoRecaudacion('periodo');
+    setRangoPeriodo('personalizado');
+    setFechaHastaPeriodo(val);
+    try {
+      sessionStorage.setItem(STORAGE_KEYS.MODO_RECAUDACION, 'periodo');
+      sessionStorage.setItem(STORAGE_KEYS.RANGO_PERIODO, 'personalizado');
+      sessionStorage.setItem(STORAGE_KEYS.HASTA_PERIODO, val);
+    } catch {}
   };
 
   const cargarDatos = useCallback(async () => {
     setCargando(true);
     setError(null);
     try {
+      let fDesde: string | undefined;
+      let fHasta: string | undefined;
+
+      if (modoRecaudacion === 'dia') {
+        fDesde = fechaDia || undefined;
+        fHasta = fechaDia || undefined;
+      } else {
+        fDesde = fechaDesdePeriodo || undefined;
+        fHasta = fechaHastaPeriodo || undefined;
+      }
+
       const filtros: TableroFiltros = {
         sucursalId: sucursalSeleccionada || undefined,
-        fechaDesde: fechaDesde || undefined,
-        fechaHasta: fechaHasta || undefined,
+        fechaDesde: fDesde,
+        fechaHasta: fHasta,
         soloConfirmados,
       };
 
@@ -135,11 +296,15 @@ export const TableroGerencia: React.FC<TableroGerenciaProps> = ({ session }) => 
     } finally {
       setCargando(false);
     }
-  }, [session.token, sucursalSeleccionada, fechaDesde, fechaHasta, soloConfirmados]);
-
-  useEffect(() => {
-    cargarDatos();
-  }, [cargarDatos]);
+  }, [
+    session.token,
+    sucursalSeleccionada,
+    modoRecaudacion,
+    fechaDia,
+    fechaDesdePeriodo,
+    fechaHastaPeriodo,
+    soloConfirmados,
+  ]);
 
   const cargarDatosEntregas = useCallback(async () => {
     setCargandoEntregas(true);
@@ -213,8 +378,8 @@ export const TableroGerencia: React.FC<TableroGerenciaProps> = ({ session }) => 
           <div className="relative">
             <select
               value={sucursalSeleccionada}
-              onChange={(e) => setSucursalSeleccionada(e.target.value)}
-              className="text-xs font-semibold bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 hover:border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-marca-azul/20 shadow-2xs"
+              onChange={(e) => cambiarSucursal(e.target.value)}
+              className="text-xs font-semibold bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 hover:border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-marca-azul/20 shadow-2xs cursor-pointer"
               aria-label="Filtrar por sucursal"
             >
               {esGlobal && <option value="">Todas las Sucursales</option>}
@@ -259,80 +424,228 @@ export const TableroGerencia: React.FC<TableroGerenciaProps> = ({ session }) => 
           <GraficoEntregasDiarias
             data={dataEntregas}
             fechaSeleccionada={fechaEntregas}
-            onCambioFecha={setFechaEntregas}
+            onCambioFecha={cambiarFechaEntregas}
             cargando={cargandoEntregas}
             onRecargar={cargarDatosEntregas}
           />
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Barra de Filtros Operativos */}
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 uppercase tracking-wider mr-1">
-                <Filter className="w-3.5 h-3.5 text-marca-azul" />
-                <span>Período:</span>
+          {/* Barra de Filtros Operativos de Recaudación (Dos Calendarios: Por Día y Por Período) */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
+            {/* Cabecera de filtros: Indicador de modo activo y botón de actualización */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-bold text-slate-700 uppercase tracking-wider">Filtro aplicado:</span>
+                <span
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                    modoRecaudacion === 'dia'
+                      ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                      : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                  }`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse"></span>
+                  {modoRecaudacion === 'dia'
+                    ? `Día puntual: ${fechaDia === hoyStr ? `Hoy (${fechaDia})` : fechaDia === ayerStr ? `Ayer (${fechaDia})` : fechaDia}`
+                    : `Período: ${
+                        fechaDesdePeriodo || fechaHastaPeriodo
+                          ? `${fechaDesdePeriodo || 'Inicio'} al ${fechaHastaPeriodo || 'Hoy'}`
+                          : 'Todo el histórico'
+                      }`}
+                </span>
               </div>
 
-              {/* Botones de Rango Rápido */}
-              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs">
-                <button
-                  type="button"
-                  onClick={() => aplicarRangoRapido('todo')}
-                  className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
-                    rangoRapido === 'todo'
-                      ? 'bg-white text-slate-900 shadow-xs font-bold'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Histórico
-                </button>
-                <button
-                  type="button"
-                  onClick={() => aplicarRangoRapido('30dias')}
-                  className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
-                    rangoRapido === '30dias'
-                      ? 'bg-white text-slate-900 shadow-xs font-bold'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Últimos 30d
-                </button>
-                <button
-                  type="button"
-                  onClick={() => aplicarRangoRapido('7dias')}
-                  className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
-                    rangoRapido === '7dias'
-                      ? 'bg-white text-slate-900 shadow-xs font-bold'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Últimos 7d
-                </button>
-                <button
-                  type="button"
-                  onClick={() => aplicarRangoRapido('hoy')}
-                  className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
-                    rangoRapido === 'hoy'
-                      ? 'bg-white text-slate-900 shadow-xs font-bold'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Hoy
-                </button>
-              </div>
+              {/* Botón Refrescar */}
+              <button
+                type="button"
+                onClick={cargarDatos}
+                disabled={cargando}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
+                title="Actualizar datos"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${cargando ? 'animate-spin text-marca-azul' : ''}`} />
+                <span>Actualizar</span>
+              </button>
             </div>
 
-            {/* Botón Refrescar */}
-            <button
-              type="button"
-              onClick={cargarDatos}
-              disabled={cargando}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${cargando ? 'animate-spin text-marca-azul' : ''}`} />
-              <span>Actualizar</span>
-            </button>
+            {/* Los Dos Calendarios Visibles Simultáneamente (Opción B) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-stretch">
+              {/* Calendario 1: Por Día (Estilo idéntico a entregas diarias) */}
+              <div
+                onClick={() => {
+                  if (modoRecaudacion !== 'dia') {
+                    setModoRecaudacion('dia');
+                    try {
+                      sessionStorage.setItem(STORAGE_KEYS.MODO_RECAUDACION, 'dia');
+                    } catch {}
+                  }
+                }}
+                className={`lg:col-span-5 p-3 rounded-xl border transition-all cursor-pointer ${
+                  modoRecaudacion === 'dia'
+                    ? 'border-blue-400 bg-blue-50/40 shadow-xs ring-1 ring-blue-300'
+                    : 'border-slate-200 bg-slate-50/40 hover:bg-slate-50 hover:border-slate-300 opacity-90'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                    <Calendar className="w-4 h-4 text-marca-azul" />
+                    <span>Filtrar por día</span>
+                  </div>
+                  {modoRecaudacion === 'dia' ? (
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-100/90 px-2 py-0.5 rounded-md">
+                      Activo
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400 font-medium">Clic para activar</span>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      seleccionarDiaRapido('hoy');
+                    }}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
+                      modoRecaudacion === 'dia' && fechaDia === hoyStr
+                        ? 'bg-marca-azul text-white border-marca-azul shadow-2xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    Hoy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      seleccionarDiaRapido('ayer');
+                    }}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
+                      modoRecaudacion === 'dia' && fechaDia === ayerStr
+                        ? 'bg-marca-azul text-white border-marca-azul shadow-2xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    Ayer
+                  </button>
+                  <input
+                    type="date"
+                    value={fechaDia}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => seleccionarDiaInput(e.target.value)}
+                    className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-700 font-mono bg-white focus:outline-none focus:ring-2 focus:ring-marca-azul/20 focus:border-marca-azul shadow-2xs"
+                    aria-label="Seleccionar fecha por día"
+                  />
+                </div>
+              </div>
+
+              {/* Calendario 2: Por Período (Rango Desde y Hasta) */}
+              <div
+                onClick={() => {
+                  if (modoRecaudacion !== 'periodo') {
+                    setModoRecaudacion('periodo');
+                    try {
+                      sessionStorage.setItem(STORAGE_KEYS.MODO_RECAUDACION, 'periodo');
+                    } catch {}
+                  }
+                }}
+                className={`lg:col-span-7 p-3 rounded-xl border transition-all cursor-pointer ${
+                  modoRecaudacion === 'periodo'
+                    ? 'border-indigo-400 bg-indigo-50/40 shadow-xs ring-1 ring-indigo-300'
+                    : 'border-slate-200 bg-slate-50/40 hover:bg-slate-50 hover:border-slate-300 opacity-90'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                    <CalendarRange className="w-4 h-4 text-indigo-600" />
+                    <span>Filtrar por período</span>
+                  </div>
+                  {modoRecaudacion === 'periodo' ? (
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 bg-indigo-100/90 px-2 py-0.5 rounded-md">
+                      Activo
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400 font-medium">Clic para activar</span>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Botones de atajo de período */}
+                  <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-xs">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        aplicarRangoPeriodo('todo');
+                      }}
+                      className={`px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer ${
+                        modoRecaudacion === 'periodo' && rangoPeriodo === 'todo'
+                          ? 'bg-indigo-600 text-white font-bold shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Histórico
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        aplicarRangoPeriodo('30dias');
+                      }}
+                      className={`px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer ${
+                        modoRecaudacion === 'periodo' && rangoPeriodo === '30dias'
+                          ? 'bg-indigo-600 text-white font-bold shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Últimos 30d
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        aplicarRangoPeriodo('7dias');
+                      }}
+                      className={`px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer ${
+                        modoRecaudacion === 'periodo' && rangoPeriodo === '7dias'
+                          ? 'bg-indigo-600 text-white font-bold shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Últimos 7d
+                    </button>
+                  </div>
+
+                  {/* Entradas de fecha Desde y Hasta */}
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-500 font-semibold text-[11px]">Desde:</span>
+                      <input
+                        type="date"
+                        value={fechaDesdePeriodo}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => manejarCambioDesdePeriodo(e.target.value)}
+                        className="px-2 py-1 text-xs border border-slate-200 rounded-lg text-slate-700 font-mono bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-2xs"
+                        aria-label="Fecha desde período"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-500 font-semibold text-[11px]">Hasta:</span>
+                      <input
+                        type="date"
+                        value={fechaHastaPeriodo}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => manejarCambioHastaPeriodo(e.target.value)}
+                        className="px-2 py-1 text-xs border border-slate-200 rounded-lg text-slate-700 font-mono bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-2xs"
+                        aria-label="Fecha hasta período"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Manejo de Error */}

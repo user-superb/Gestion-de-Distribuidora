@@ -131,6 +131,16 @@ class AuthService {
     try {
       sessionStorage.removeItem(STORAGE_KEY_SESSION);
       sessionStorage.removeItem('tutucas_reportes_subvista');
+      sessionStorage.removeItem('tutucas_reportes_sucursal');
+      sessionStorage.removeItem('tutucas_reportes_modo_recaudacion');
+      sessionStorage.removeItem('tutucas_reportes_fecha_dia');
+      sessionStorage.removeItem('tutucas_reportes_rango_periodo');
+      sessionStorage.removeItem('tutucas_reportes_desde_periodo');
+      sessionStorage.removeItem('tutucas_reportes_hasta_periodo');
+      sessionStorage.removeItem('tutucas_reportes_rango');
+      sessionStorage.removeItem('tutucas_reportes_desde');
+      sessionStorage.removeItem('tutucas_reportes_hasta');
+      sessionStorage.removeItem('tutucas_reportes_fecha_entregas');
     } catch {
       // Ignorar fallback
     }

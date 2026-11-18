@@ -277,6 +277,39 @@ describe('HU Gerencia: Composición de Recaudación por Medio de Pago', () => {
     assert.equal(transf?.cantidadPagos, 1);
   });
 
+  it('no descarta imputaciones de remitos asociados a visita ni duplica con cobro de ruta', async () => {
+    // Caso real: remito de visita con cobro previo validado + imputación bancaria posterior
+    await db.query(`
+      INSERT INTO marca (id, nombre) VALUES (2, 'Marca B');
+      INSERT INTO remito (id, marca_id, comercio_id, numero, importe_centavos, estado, visita_id, sucursal_id)
+      VALUES (2, 2, 1, 'M261020-03', 2999900, 'entregado', 1, 1);
+      INSERT INTO cuenta_recepcion (id, sucursal_id, alias) VALUES (2, 1, 'aliass');
+      INSERT INTO movimiento_bancario (id, cuenta_id, ordenante, referencia_externa, importe_centavos, origen, estado)
+      VALUES (2, 2, 'Autoservicio Luna', 'REF-29999', 2999900, 'Carga Manual', 'imputado');
+      INSERT INTO imputacion (movimiento_bancario_id, remito_id, importe_centavos, imputado_por, imputado_en)
+      VALUES (2, 2, 2999900, 1, '2026-11-17T10:31:23.000-03:00');
+      INSERT INTO cobro (visita_id, medio_pago, importe_centavos, registrado_en, registrado_por, estado, clave_idempotencia)
+      VALUES (1, 'transferencia', 2999900, '2026-10-20T10:00:00.000-03:00', 2, 'validado', '${crypto.randomUUID()}');
+    `);
+
+    // Al filtrar por la fecha de hoy donde se realizó la imputación:
+    const resHoy = await tableroService.obtenerComposicionRecaudacion({
+      fechaDesde: '2026-11-17',
+      fechaHasta: '2026-11-17',
+      sucursalId: '1',
+    });
+
+    assert.equal(resHoy.totalRecaudadoCentavos, 2999900);
+    assert.equal(resHoy.cantidadTotalPagos, 1);
+    const transfHoy = resHoy.desglose.find((d) => d.medioPago === 'transferencia');
+    assert.equal(transfHoy?.totalCentavos, 2999900);
+
+    // Al consultar histórico completo: no debe duplicar (debe contabilizar exactamente 1 vez los $29.999)
+    const resHistorico = await tableroService.obtenerComposicionRecaudacion({ sucursalId: '1' });
+    assert.equal(resHistorico.totalRecaudadoCentavos, 2999900);
+    assert.equal(resHistorico.cantidadTotalPagos, 1);
+  });
+
   describe('Control de Accesos y API REST (/api/tablero/recaudacion)', () => {
     it('permite acceso al rol Gerente', async () => {
       const token = await obtenerToken('gerencia');
