@@ -122,11 +122,18 @@ export function hayFilaSinImporte(pagos: PagoEnCarga[]): boolean {
   });
 }
 
+/** El medio ya tiene su fila. Cada medio va en una sola: todo el total en uno, o una parte en cada uno. */
+export function medioYaCargado(pagos: PagoEnCarga[], medioPago: MedioPago): boolean {
+  return pagos.some((pago) => pago.medioPago === medioPago);
+}
+
 /**
- * Se puede sumar otro medio solo si falta plata y todas las filas ya tienen importe. Con una fila
- * sin importe (pasaba al borrar el total precargado) cada toque sumaba otra fila con el total.
+ * Se puede sumar un medio solo si todavía no tiene fila, falta plata y todas las filas ya tienen
+ * importe. Con una fila sin importe (pasaba al borrar el total precargado) cada toque sumaba otra
+ * fila con el total; sin el tope por medio, bajando importes se repetía el mismo medio sin límite.
  */
-export function puedeAgregarMedio(pagos: PagoEnCarga[], totalExigibleCentavos: number): boolean {
+export function puedeAgregarMedio(pagos: PagoEnCarga[], totalExigibleCentavos: number, medioPago?: MedioPago): boolean {
+  if (medioPago && medioYaCargado(pagos, medioPago)) return false;
   return !hayFilaSinImporte(pagos) && !totalCubierto(pagos, totalExigibleCentavos);
 }
 

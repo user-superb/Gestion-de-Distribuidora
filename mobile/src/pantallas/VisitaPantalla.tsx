@@ -10,6 +10,7 @@ import {
   calcularImporteVisitaLocal,
   hayFilaSinImporte,
   importeRestante,
+  medioYaCargado,
   MEDIOS_SOLO_EN_LINEA,
   MedioPago,
   NOMBRE_MEDIO,
@@ -70,6 +71,7 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
   const validacion = validarCobro(pagos, importe.totalCentavos, enLinea);
   const cubierto = totalCubierto(pagos, importe.totalCentavos);
   const sinImporte = hayFilaSinImporte(pagos);
+  const mediosAgotados = MEDIOS.every((medio) => medioYaCargado(pagos, medio));
 
   const remitos = ordenarRemitosParaEntrega(visita.remitos, cola); // corrección 4
   const porEntregar = remitos.filter((remito) => !esRemitoResuelto(remito, cola));
@@ -279,9 +281,9 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
       setIntentoCobro(true);
       return;
     }
-    // Con el total cubierto o una fila sin importe no se suma otra: quedarían filas vacías o repetidas.
+    // Una sola fila por medio, y ninguna nueva con el total cubierto o con una fila sin importe.
     setPagos((actuales) => {
-      if (!puedeAgregarMedio(actuales, importe.totalCentavos)) return actuales;
+      if (!puedeAgregarMedio(actuales, importe.totalCentavos, medioPago)) return actuales;
       const restante = importeRestante(actuales, importe.totalCentavos);
       return [...actuales, { medioPago, importeTexto: restante ? centavosATexto(restante) : '', referencia: '' }];
     });
@@ -473,13 +475,15 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
                 ? 'Completá el importe que falta, o tocá Quitar, antes de agregar otro medio.'
                 : cubierto
                 ? 'El total ya está cubierto. Para combinar medios, bajá un importe; para cambiar de medio, tocá Quitar.'
+                : mediosAgotados
+                ? 'Ya cargaste los tres medios. Ajustá los importes para llegar al total.'
                 : pagos.length
                   ? 'Agregar otro medio de pago:'
                   : 'Elegí el medio de pago:'}
             </Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {MEDIOS.map((medio) => {
-                const habilitado = !cubierto && !sinImporte && (enLinea || !MEDIOS_SOLO_EN_LINEA.includes(medio));
+                const habilitado = puedeAgregarMedio(pagos, importe.totalCentavos, medio) && (enLinea || !MEDIOS_SOLO_EN_LINEA.includes(medio));
                 return (
                   <Pressable
                     key={medio}
