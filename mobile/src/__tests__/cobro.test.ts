@@ -2,7 +2,7 @@
 // Reglas de cobro de la app (HU #25 a #29) y entregas (HU #22, #23). Se corren con: npm test
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { calcularImporteVisitaLocal, hayFilaSinImporte, importeRestante, PagoEnCarga, puedeAgregarMedio, totalCubierto, validarCobro } from '../dominio/cobro';
+import { calcularImporteVisitaLocal, hayFilaSinImporte, importeRestante, medioYaCargado, PagoEnCarga, puedeAgregarMedio, totalCubierto, validarCobro } from '../dominio/cobro';
 import { centavosATexto, formatearPesos, parsearPesos } from '../dominio/dinero';
 import { armarEntrega, armarEntregaLote, armarRechazo, MOTIVOS_RECHAZO_PREESTABLECIDOS, MOTIVO_COMERCIO_CERRADO, motivosRechazoPreestablecidos, puedeConfirmarse, UBICACION_POR_DEFECTO } from '../dominio/entrega';
 import {
@@ -152,6 +152,29 @@ describe('HU #29 · Cobro combinado', () => {
     assert.equal(puedeAgregarMedio([fila('efectivo', '57500,50')], TOTAL), false);
     assert.equal(hayFilaSinImporte([fila('efectivo', '57500,50')]), false);
     assert.equal(hayFilaSinImporte([]), false);
+  });
+
+  it('cada medio va en una sola fila: no se repite aunque falte plata', () => {
+    // El caso del bug: QR con un importe parcial y se vuelve a tocar QR.
+    const conQr = [fila('qr', '52')];
+    assert.equal(medioYaCargado(conQr, 'qr'), true);
+    assert.equal(puedeAgregarMedio(conQr, TOTAL, 'qr'), false);
+    // Los otros dos medios siguen disponibles para completar el total.
+    assert.equal(puedeAgregarMedio(conQr, TOTAL, 'efectivo'), true);
+    assert.equal(puedeAgregarMedio(conQr, TOTAL, 'transferencia'), true);
+    // Vale igual para efectivo y transferencia.
+    assert.equal(puedeAgregarMedio([fila('efectivo', '40000')], TOTAL, 'efectivo'), false);
+    assert.equal(puedeAgregarMedio([fila('transferencia', '40000', 'OP-1')], TOTAL, 'transferencia'), false);
+    // Con los tres medios cargados no entra ninguno más, aunque falte plata: máximo tres filas.
+    const tres = [fila('efectivo', '100'), fila('transferencia', '100', 'OP-1'), fila('qr', '100')];
+    for (const medio of ['efectivo', 'transferencia', 'qr'] as const) {
+      assert.equal(puedeAgregarMedio(tres, TOTAL, medio), false);
+    }
+    // Sin filas, cualquiera de los tres se puede elegir.
+    for (const medio of ['efectivo', 'transferencia', 'qr'] as const) {
+      assert.equal(medioYaCargado([], medio), false);
+      assert.equal(puedeAgregarMedio([], TOTAL, medio), true);
+    }
   });
 
   it('separa errores específicos por medio de pago y errores generales', () => {
