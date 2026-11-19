@@ -2,7 +2,7 @@
 // Reglas de cobro de la app (HU #25 a #29) y entregas (HU #22, #23). Se corren con: npm test
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { calcularImporteVisitaLocal, importeRestante, PagoEnCarga, totalCubierto, validarCobro } from '../dominio/cobro';
+import { calcularImporteVisitaLocal, hayFilaSinImporte, importeRestante, PagoEnCarga, puedeAgregarMedio, totalCubierto, validarCobro } from '../dominio/cobro';
 import { centavosATexto, formatearPesos, parsearPesos } from '../dominio/dinero';
 import { armarEntrega, armarEntregaLote, armarRechazo, MOTIVOS_RECHAZO_PREESTABLECIDOS, MOTIVO_COMERCIO_CERRADO, motivosRechazoPreestablecidos, puedeConfirmarse, UBICACION_POR_DEFECTO } from '../dominio/entrega';
 import {
@@ -130,6 +130,28 @@ describe('HU #29 · Cobro combinado', () => {
     // Una fila sin importe no cubre nada; una que se pasa del total, sí.
     assert.equal(totalCubierto([fila('efectivo', '')], TOTAL), false);
     assert.equal(totalCubierto([fila('efectivo', '90000')], TOTAL), true);
+  });
+
+  it('con una fila sin importe no se agrega otro medio: evita filas repetidas al borrar el total', () => {
+    // Sin filas, o con plata por cubrir y todas las filas completas, se puede agregar.
+    assert.equal(puedeAgregarMedio([], TOTAL), true);
+    assert.equal(puedeAgregarMedio([fila('efectivo', '40000')], TOTAL), true);
+    // El caso del bug: se elige un medio y se borra el total precargado.
+    for (const medio of ['efectivo', 'qr', 'transferencia'] as const) {
+      assert.equal(hayFilaSinImporte([fila(medio, '')]), true);
+      assert.equal(puedeAgregarMedio([fila(medio, '')], TOTAL), false);
+    }
+    // Cero, espacios o texto que no es un importe cuentan como fila sin importe.
+    assert.equal(puedeAgregarMedio([fila('efectivo', '0')], TOTAL), false);
+    assert.equal(puedeAgregarMedio([fila('efectivo', '   ')], TOTAL), false);
+    assert.equal(puedeAgregarMedio([fila('efectivo', 'abc')], TOTAL), false);
+    // Alcanza con una fila vacía entre varias, esté donde esté.
+    assert.equal(puedeAgregarMedio([fila('qr', ''), fila('efectivo', '40000')], TOTAL), false);
+    assert.equal(puedeAgregarMedio([fila('efectivo', '40000'), fila('transferencia', '', 'TRF-1')], TOTAL), false);
+    // Con el total cubierto tampoco, como antes.
+    assert.equal(puedeAgregarMedio([fila('efectivo', '57500,50')], TOTAL), false);
+    assert.equal(hayFilaSinImporte([fila('efectivo', '57500,50')]), false);
+    assert.equal(hayFilaSinImporte([]), false);
   });
 
   it('separa errores específicos por medio de pago y errores generales', () => {
