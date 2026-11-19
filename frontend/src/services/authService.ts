@@ -128,6 +128,8 @@ class AuthService {
     const token = session?.token;
 
     // 1. Limpieza inmediata de datos sensibles locales
+    this.failedAttempts = 0;
+    this.isLocked = false;
     try {
       sessionStorage.removeItem(STORAGE_KEY_SESSION);
       sessionStorage.removeItem('tutucas_reportes_subvista');
@@ -141,6 +143,15 @@ class AuthService {
       sessionStorage.removeItem('tutucas_reportes_desde');
       sessionStorage.removeItem('tutucas_reportes_hasta');
       sessionStorage.removeItem('tutucas_reportes_fecha_entregas');
+      sessionStorage.clear?.();
+    } catch {
+      // Ignorar fallback
+    }
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('tutucas.configuracion.abm');
+        localStorage.removeItem('tutucas_hoja_activa_cache');
+      }
     } catch {
       // Ignorar fallback
     }

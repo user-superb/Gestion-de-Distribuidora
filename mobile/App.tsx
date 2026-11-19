@@ -21,6 +21,7 @@ export default function App() {
   const [visitaAbierta, setVisitaAbierta] = useState<string | null>(null);
   const [paradaDetalle, setParadaDetalle] = useState<ParadaConsolidada | null>(null);
   const [mensaje, setMensaje] = useState<string | null>(null);
+  const [loginKey, setLoginKey] = useState(0);
 
   const red = useNetInfo();
   const enLinea = red.isConnected === true && red.isInternetReachable !== false;
@@ -52,11 +53,14 @@ export default function App() {
   // Supuesto S5: la sesión venció. Los cobros sin enviar quedan guardados y salen después del nuevo login.
   const onSesionVencida = useCallback(() => {
     void colaOperaciones.limpiarSincronizados();
+    void borrarHoja();
     fijarSesionActual(null);
-    guardarSesion(null);
+    void guardarSesion(null);
     setSesion(null);
     setParadaDetalle(null);
     setVisitaAbierta(null);
+    setMensaje(null);
+    setLoginKey((k) => k + 1);
     setAvisoLogin('Tu sesión venció. Volvé a ingresar: lo guardado en el celular se envía después.');
   }, []);
 
@@ -70,6 +74,8 @@ export default function App() {
     fijarSesionActual(nueva);
     await guardarSesion(nueva);
     setAvisoLogin(null);
+    setMensaje(null);
+    setLoginKey((k) => k + 1);
     setSesion(nueva);
   }
 
@@ -84,6 +90,9 @@ export default function App() {
       setSesion(null);
       setParadaDetalle(null);
       setVisitaAbierta(null);
+      setMensaje(null);
+      setAvisoLogin(null);
+      setLoginKey((k) => k + 1);
     };
     if (pendientes > 0) {
       Alert.alert('Operaciones sin sincronizar', `Tenés ${pendientes} entrega(s) o cobro(s) sin enviar. Quedan guardados y se envían al volver a ingresar.`, [
@@ -168,7 +177,7 @@ export default function App() {
             <ActivityIndicator size="large" />
           </View>
         ) : !sesion ? (
-          <LoginPantalla aviso={avisoLogin} onIngreso={ingresar} />
+          <LoginPantalla key={loginKey} aviso={avisoLogin} onIngreso={ingresar} />
         ) : visita ? (
           <VisitaPantalla
             visita={visita}

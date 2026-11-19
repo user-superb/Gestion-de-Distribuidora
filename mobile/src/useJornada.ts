@@ -53,6 +53,9 @@ export function useJornada(
   const recargar = useCallback(async (silencioso = false) => {
     if (!sesion) {
       setGuardada(null);
+      setCola(new Map());
+      setError(null);
+      setCargando(false);
       hojaIdActualRef.current = null;
       visitasConocidasRef.current = new Set();
       return;

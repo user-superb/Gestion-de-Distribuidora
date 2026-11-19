@@ -36,11 +36,16 @@ export const LoginForm: React.FC<LoginFormProps> = ({
     }
   }, []);
 
-  // Permitir autocompletado desde herramientas de prueba / QA
+  // Permitir autocompletado desde herramientas de prueba / QA o limpiar cuando no hay credenciales precargadas
   useEffect(() => {
     if (prefillCredentials) {
       setIdentifier(prefillCredentials.identifier);
       setPassword(prefillCredentials.password);
+      setErrorMessage(null);
+    } else {
+      setIdentifier('');
+      setPassword('');
+      setShowPassword(false);
       setErrorMessage(null);
     }
   }, [prefillCredentials]);
@@ -67,7 +72,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({
       });
 
       if (result.success) {
-        // Escenario 1: Éxito
+        // Escenario 1: Éxito — limpiar campos antes de cambiar de vista
+        setIdentifier('');
+        setPassword('');
+        setShowPassword(false);
+        setErrorMessage(null);
         onSuccess(result);
       } else {
         // Manejo de errores
@@ -137,7 +146,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
       )}
 
       {/* Formulario de Login */}
-      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate autoComplete="off">
         {/* Campo Identificador / Email */}
         <div className="space-y-1.5">
           <label
@@ -154,7 +163,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
               id="identifier"
               ref={identifierInputRef}
               type="text"
-              autoComplete="username"
+              autoComplete="off"
               required
               disabled={isLoading || isLocked}
               value={identifier}
@@ -193,7 +202,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
               id="password"
               ref={passwordInputRef}
               type={showPassword ? 'text' : 'password'}
-              autoComplete="current-password"
+              autoComplete="new-password"
               required
               disabled={isLoading || isLocked}
               value={password}

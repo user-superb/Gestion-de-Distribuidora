@@ -297,7 +297,6 @@ const BandejaMovimientosHuerfanos: React.FC<{ session: UserSession }> = ({ sessi
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [horasUmbral, setHorasUmbral] = useState(48);
-  const [sucursal, setSucursal] = useState('');
   const [cuenta, setCuenta] = useState('');
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
@@ -325,11 +324,10 @@ const BandejaMovimientosHuerfanos: React.FC<{ session: UserSession }> = ({ sessi
     return () => { active = false; };
   }, [session.token]);
 
-  const sucursales = [...new Map(items.map((item) => [item.sucursal_id, item.sucursal])).entries()];
   const cuentas = [...new Map(items.map((item) => [item.cuenta_id, item.cuenta])).entries()];
   const visibles = items.filter((item) => {
     const dia = new Date(item.fecha_hora).toISOString().slice(0, 10);
-    return (!sucursal || item.sucursal_id === sucursal) && (!cuenta || item.cuenta_id === cuenta) && (!desde || dia >= desde) && (!hasta || dia <= hasta);
+    return (!cuenta || item.cuenta_id === cuenta) && (!desde || dia >= desde) && (!hasta || dia <= hasta);
   });
 
   return (
@@ -341,8 +339,7 @@ const BandejaMovimientosHuerfanos: React.FC<{ session: UserSession }> = ({ sessi
           <p className="text-xs text-slate-500">Ingresos pendientes de imputación, sin sugerencias vigentes y con más de {horasUmbral} horas desde su acreditación.</p>
         </div>
       </header>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 bg-slate-50 p-2.5 rounded-md border border-slate-200/80">
-        <label className="text-xs text-slate-600">Sucursal<select value={sucursal} onChange={(event) => setSucursal(event.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-1.5"><option value="">Todas</option>{sucursales.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
+      <div className="grid gap-2 sm:grid-cols-3 bg-slate-50 p-2.5 rounded-md border border-slate-200/80">
         <label className="text-xs text-slate-600">Cuenta<select value={cuenta} onChange={(event) => setCuenta(event.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-1.5"><option value="">Todas</option>{cuentas.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
         <label className="text-xs text-slate-600">Desde<input type="date" value={desde} onChange={(event) => setDesde(event.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-1.5" /></label>
         <label className="text-xs text-slate-600">Hasta<input type="date" value={hasta} onChange={(event) => setHasta(event.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-1.5" /></label>
@@ -353,8 +350,8 @@ const BandejaMovimientosHuerfanos: React.FC<{ session: UserSession }> = ({ sessi
       ) : (
         <div className="overflow-x-auto rounded border border-slate-200">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Fecha</th><th className="px-3 py-2">Ordenante</th><th className="px-3 py-2">Sucursal / cuenta</th><th className="px-3 py-2 text-right">Importe disponible</th><th className="px-3 py-2 text-right">Antigüedad</th></tr></thead>
-            <tbody className="divide-y divide-slate-100">{visibles.map((item) => <tr key={item.id}><td className="px-3 py-2 text-slate-600">{new Date(item.fecha_hora).toLocaleString('es-AR')}</td><td className="px-3 py-2 font-medium text-slate-800">{item.ordenante || 'Ordenante no informado'}</td><td className="px-3 py-2 text-slate-600">{item.sucursal} · {item.cuenta}</td><td className="px-3 py-2 text-right font-semibold text-slate-900">{formatoARS(item.importe_centavos)}</td><td className="px-3 py-2 text-right text-amber-800">{item.antiguedad_horas} h</td></tr>)}</tbody>
+            <thead className="bg-slate-50 uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Fecha</th><th className="px-3 py-2">Ordenante</th><th className="px-3 py-2">Cuenta</th><th className="px-3 py-2 text-right">Importe disponible</th><th className="px-3 py-2 text-right">Antigüedad</th></tr></thead>
+            <tbody className="divide-y divide-slate-100">{visibles.map((item) => <tr key={item.id}><td className="px-3 py-2 text-slate-600">{new Date(item.fecha_hora).toLocaleString('es-AR')}</td><td className="px-3 py-2 font-medium text-slate-800">{item.ordenante || 'Ordenante no informado'}</td><td className="px-3 py-2 text-slate-600">{item.cuenta}</td><td className="px-3 py-2 text-right font-semibold text-slate-900">{formatoARS(item.importe_centavos)}</td><td className="px-3 py-2 text-right text-amber-800">{item.antiguedad_horas} h</td></tr>)}</tbody>
           </table>
         </div>
       )}

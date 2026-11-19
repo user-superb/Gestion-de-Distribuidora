@@ -19,6 +19,9 @@ export function LoginPantalla({ aviso, onIngreso }: { aviso?: string | null; onI
   const [mensajeUrl, setMensajeUrl] = useState<string | null>(null);
 
   useEffect(() => {
+    setUsuario('');
+    setPassword('');
+    setError(null);
     leerApiUrlGuardada().then((url) => {
       setUrlServidor(url);
       setInputUrl(url);
@@ -31,11 +34,16 @@ export function LoginPantalla({ aviso, onIngreso }: { aviso?: string | null; onI
     try {
       const sesion = await iniciarSesion(usuario.trim(), password);
       if (sesion.rol !== 'Transportista') {
+        setPassword('');
         setError('Esta aplicación es solo para transportistas.');
         return;
       }
+      setUsuario('');
+      setPassword('');
+      setError(null);
       onIngreso(sesion);
     } catch (e) {
+      setPassword('');
       if (e instanceof ErrorRed) {
         setError(e.message || 'Sin conexión con el servidor. Revisá la dirección configurada o tu conexión a internet.');
       } else if (e instanceof ErrorApi) {
@@ -85,6 +93,8 @@ export function LoginPantalla({ aviso, onIngreso }: { aviso?: string | null; onI
           placeholder="Usuario o email"
           autoCapitalize="none"
           autoCorrect={false}
+          autoComplete="off"
+          importantForAutofill="no"
           value={usuario}
           onChangeText={setUsuario}
           accessibilityLabel="Usuario o email"
@@ -93,6 +103,8 @@ export function LoginPantalla({ aviso, onIngreso }: { aviso?: string | null; onI
           style={estilos.input}
           placeholder="Contraseña"
           secureTextEntry
+          autoComplete="off"
+          importantForAutofill="no"
           value={password}
           onChangeText={setPassword}
           onSubmitEditing={ingresar}

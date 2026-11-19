@@ -15,6 +15,7 @@ export const App: React.FC = () => {
   const [redirectUrl, setRedirectUrl] = useState<string>('/dashboard');
   const [prefillCredentials, setPrefillCredentials] = useState<LoginCredentials | undefined>(undefined);
   const [, setLockoutKey] = useState(0);
+  const [loginResetKey, setLoginResetKey] = useState(0);
   const [inactivityNotice, setInactivityNotice] = useState<string | null>(null);
   const [resetToken, setResetToken] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -22,16 +23,23 @@ export const App: React.FC = () => {
   });
   const [showDirectRecoveryModal, setShowDirectRecoveryModal] = useState(false);
 
+  const limpiarEstadoSesion = useCallback(() => {
+    setCurrentSession(null);
+    setPrefillCredentials(undefined);
+    setShowDirectRecoveryModal(false);
+    setLoginResetKey((k) => k + 1);
+  }, []);
+
   // Cierre de sesión automático por inactividad (30 min)
   const handleInactivityTimeout = useCallback(async () => {
     if (!currentSession) return;
     await authService.logout('inactividad');
-    setCurrentSession(null);
+    limpiarEstadoSesion();
     setInactivityNotice(
       'Sesión expirada automáticamente por inactividad (30 minutos sin interacción). Por políticas corporativas de seguridad, se solicita reingresar sus credenciales.'
     );
     window.history.replaceState(null, '', '/');
-  }, [currentSession]);
+  }, [currentSession, limpiarEstadoSesion]);
 
   // Hook de inactividad activo únicamente cuando hay una sesión activa
   const { triggerTimeoutNow } = useInactivityTimer({
@@ -57,7 +65,7 @@ export const App: React.FC = () => {
       // Verificar en segundo plano contra PostgreSQL si el token no fue revocado
       authService.verifySession().then((res) => {
         if (!res.valid) {
-          setCurrentSession(null);
+          limpiarEstadoSesion();
           if (res.expired) {
             setInactivityNotice(
               'La sesión previa en este equipo ha expirado por inactividad. Por favor, vuelva a identificarse.'
@@ -72,7 +80,7 @@ export const App: React.FC = () => {
     const handleSessionRefresh = () => {
       authService.verifySession().then((res) => {
         if (!res.valid) {
-          setCurrentSession(null);
+          limpiarEstadoSesion();
         } else if (res.session) {
           setCurrentSession(res.session);
         }
@@ -83,7 +91,7 @@ export const App: React.FC = () => {
     const handlePopState = () => {
       const active = authService.getCurrentSession();
       if (!active) {
-        setCurrentSession(null);
+        limpiarEstadoSesion();
       }
       const params = new URLSearchParams(window.location.search);
       setResetToken(params.get('token'));
@@ -95,10 +103,12 @@ export const App: React.FC = () => {
       window.removeEventListener('tutucas-session-refresh', handleSessionRefresh);
       window.removeEventListener('popstate', handlePopState);
     };
-  }, []);
+  }, [limpiarEstadoSesion]);
 
   const handleLoginSuccess = (result: AuthResult) => {
     if (result.session) {
+      setPrefillCredentials(undefined);
+      setLoginResetKey((k) => k + 1);
       setCurrentSession(result.session);
       setRedirectUrl(result.redirectUrl || '/dashboard');
       setInactivityNotice(null);
@@ -110,7 +120,7 @@ export const App: React.FC = () => {
   // ESCENARIO 1: Cierre de sesión voluntario
   const handleLogout = async () => {
     await authService.logout('manual');
-    setCurrentSession(null);
+    limpiarEstadoSesion();
     setInactivityNotice(null);
     // Impide que el botón Atrás vuelva a desplegar información operativa
     window.history.replaceState(null, '', '/');
@@ -171,10 +181,12 @@ export const App: React.FC = () => {
           </div>
         )}
         <LoginForm
+          key={loginResetKey}
           onSuccess={handleLoginSuccess}
           prefillCredentials={prefillCredentials}
         />
         <ForgotPasswordModal
+          key={`recovery-${loginResetKey}`}
           isOpen={showDirectRecoveryModal}
           onClose={() => setShowDirectRecoveryModal(false)}
         />
