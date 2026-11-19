@@ -107,6 +107,14 @@ export function importeRestante(pagos: PagoEnCarga[], totalExigibleCentavos: num
 }
 
 /**
+ * Las filas cargadas ya cubren el total. En ese caso no se agrega otro medio: la fila nueva
+ * saldría vacía y bloquearía la confirmación (pasaba al tocar dos veces el mismo botón).
+ */
+export function totalCubierto(pagos: PagoEnCarga[], totalExigibleCentavos: number): boolean {
+  return pagos.length > 0 && importeRestante(pagos, totalExigibleCentavos) === 0;
+}
+
+/**
  * HU #25: Calcula el importe exigible de la visita en el celular,
  * descontando remitos rechazados (tanto en servidor como encolados sin conexión).
  */

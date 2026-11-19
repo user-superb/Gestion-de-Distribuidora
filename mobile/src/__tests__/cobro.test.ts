@@ -2,7 +2,7 @@
 // Reglas de cobro de la app (HU #25 a #29) y entregas (HU #22, #23). Se corren con: npm test
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { calcularImporteVisitaLocal, importeRestante, PagoEnCarga, validarCobro } from '../dominio/cobro';
+import { calcularImporteVisitaLocal, importeRestante, PagoEnCarga, totalCubierto, validarCobro } from '../dominio/cobro';
 import { centavosATexto, formatearPesos, parsearPesos } from '../dominio/dinero';
 import { armarEntrega, armarEntregaLote, armarRechazo, MOTIVOS_RECHAZO_PREESTABLECIDOS, MOTIVO_COMERCIO_CERRADO, motivosRechazoPreestablecidos, puedeConfirmarse, UBICACION_POR_DEFECTO } from '../dominio/entrega';
 import {
@@ -117,6 +117,19 @@ describe('HU #29 · Cobro combinado', () => {
     assert.equal(importeRestante([], TOTAL), TOTAL);
     assert.equal(importeRestante([fila('efectivo', '40000')], TOTAL), 1750050);
     assert.equal(importeRestante([fila('efectivo', '90000')], TOTAL), 0);
+  });
+
+  it('con el total cubierto no se agrega otro medio: evita filas vacías al tocar dos veces', () => {
+    assert.equal(totalCubierto([], TOTAL), false);
+    assert.equal(totalCubierto([fila('efectivo', '57500,50')], TOTAL), true);
+    assert.equal(totalCubierto([fila('qr', '57500,50')], TOTAL), true);
+    assert.equal(totalCubierto([fila('transferencia', '57500,50', '')], TOTAL), true);
+    // Pago combinado: mientras falte plata se puede sumar otro medio.
+    assert.equal(totalCubierto([fila('efectivo', '40000')], TOTAL), false);
+    assert.equal(totalCubierto([fila('efectivo', '40000'), fila('qr', '17500,50')], TOTAL), true);
+    // Una fila sin importe no cubre nada; una que se pasa del total, sí.
+    assert.equal(totalCubierto([fila('efectivo', '')], TOTAL), false);
+    assert.equal(totalCubierto([fila('efectivo', '90000')], TOTAL), true);
   });
 
   it('separa errores específicos por medio de pago y errores generales', () => {
