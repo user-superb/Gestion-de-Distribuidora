@@ -13,6 +13,7 @@ import {
   MedioPago,
   NOMBRE_MEDIO,
   PagoEnCarga,
+  totalCubierto,
   validarCobro,
 } from '../dominio/cobro';
 import { centavosATexto, formatearPesos, parsearPesos } from '../dominio/dinero';
@@ -65,6 +66,7 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
   const estado = estadoCobro(visita, cola);
   const yaCobrada = estado === 'hecho' || estado === 'sin_sincronizar';
   const validacion = validarCobro(pagos, importe.totalCentavos, enLinea);
+  const cubierto = totalCubierto(pagos, importe.totalCentavos);
 
   const remitos = ordenarRemitosParaEntrega(visita.remitos, cola); // corrección 4
   const porEntregar = remitos.filter((remito) => !esRemitoResuelto(remito, cola));
@@ -274,8 +276,12 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
       setIntentoCobro(true);
       return;
     }
-    const restante = importeRestante(pagos, importe.totalCentavos);
-    setPagos([...pagos, { medioPago, importeTexto: restante ? centavosATexto(restante) : '', referencia: '' }]);
+    // Con el total ya cubierto no se suma otra fila: saldría vacía y trabaría "Confirmar cobro".
+    setPagos((actuales) => {
+      if (totalCubierto(actuales, importe.totalCentavos)) return actuales;
+      const restante = importeRestante(actuales, importe.totalCentavos);
+      return [...actuales, { medioPago, importeTexto: restante ? centavosATexto(restante) : '', referencia: '' }];
+    });
   }
 
   function actualizarPago(i: number, cambios: Partial<PagoEnCarga>) {
@@ -459,10 +465,16 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
               );
             })}
 
-            <Text style={estilos.textoSuave}>{pagos.length ? 'Agregar otro medio de pago:' : 'Elegí el medio de pago:'}</Text>
+            <Text style={estilos.textoSuave}>
+              {cubierto
+                ? 'El total ya está cubierto. Para combinar medios, bajá un importe; para cambiar de medio, tocá Quitar.'
+                : pagos.length
+                  ? 'Agregar otro medio de pago:'
+                  : 'Elegí el medio de pago:'}
+            </Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {MEDIOS.map((medio) => {
-                const habilitado = enLinea || !MEDIOS_SOLO_EN_LINEA.includes(medio);
+                const habilitado = !cubierto && (enLinea || !MEDIOS_SOLO_EN_LINEA.includes(medio));
                 return (
                   <Pressable
                     key={medio}
