@@ -8,11 +8,13 @@ import { colaOperaciones } from '../almacenamiento';
 import { Aviso } from '../componentes/Aviso';
 import {
   calcularImporteVisitaLocal,
+  hayFilaSinImporte,
   importeRestante,
   MEDIOS_SOLO_EN_LINEA,
   MedioPago,
   NOMBRE_MEDIO,
   PagoEnCarga,
+  puedeAgregarMedio,
   totalCubierto,
   validarCobro,
 } from '../dominio/cobro';
@@ -67,6 +69,7 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
   const yaCobrada = estado === 'hecho' || estado === 'sin_sincronizar';
   const validacion = validarCobro(pagos, importe.totalCentavos, enLinea);
   const cubierto = totalCubierto(pagos, importe.totalCentavos);
+  const sinImporte = hayFilaSinImporte(pagos);
 
   const remitos = ordenarRemitosParaEntrega(visita.remitos, cola); // corrección 4
   const porEntregar = remitos.filter((remito) => !esRemitoResuelto(remito, cola));
@@ -276,9 +279,9 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
       setIntentoCobro(true);
       return;
     }
-    // Con el total ya cubierto no se suma otra fila: saldría vacía y trabaría "Confirmar cobro".
+    // Con el total cubierto o una fila sin importe no se suma otra: quedarían filas vacías o repetidas.
     setPagos((actuales) => {
-      if (totalCubierto(actuales, importe.totalCentavos)) return actuales;
+      if (!puedeAgregarMedio(actuales, importe.totalCentavos)) return actuales;
       const restante = importeRestante(actuales, importe.totalCentavos);
       return [...actuales, { medioPago, importeTexto: restante ? centavosATexto(restante) : '', referencia: '' }];
     });
@@ -466,7 +469,9 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
             })}
 
             <Text style={estilos.textoSuave}>
-              {cubierto
+              {sinImporte
+                ? 'Completá el importe que falta, o tocá Quitar, antes de agregar otro medio.'
+                : cubierto
                 ? 'El total ya está cubierto. Para combinar medios, bajá un importe; para cambiar de medio, tocá Quitar.'
                 : pagos.length
                   ? 'Agregar otro medio de pago:'
@@ -474,7 +479,7 @@ export function VisitaPantalla({ visita, cola, enLinea, onCambio, onVolver, onLi
             </Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {MEDIOS.map((medio) => {
-                const habilitado = !cubierto && (enLinea || !MEDIOS_SOLO_EN_LINEA.includes(medio));
+                const habilitado = !cubierto && !sinImporte && (enLinea || !MEDIOS_SOLO_EN_LINEA.includes(medio));
                 return (
                   <Pressable
                     key={medio}

@@ -114,6 +114,22 @@ export function totalCubierto(pagos: PagoEnCarga[], totalExigibleCentavos: numbe
   return pagos.length > 0 && importeRestante(pagos, totalExigibleCentavos) === 0;
 }
 
+/** Alguna fila cargada no tiene un importe válido: está vacía, en cero o mal escrita. */
+export function hayFilaSinImporte(pagos: PagoEnCarga[]): boolean {
+  return pagos.some((pago) => {
+    const importe = parsearPesos(pago.importeTexto);
+    return importe === null || importe <= 0;
+  });
+}
+
+/**
+ * Se puede sumar otro medio solo si falta plata y todas las filas ya tienen importe. Con una fila
+ * sin importe (pasaba al borrar el total precargado) cada toque sumaba otra fila con el total.
+ */
+export function puedeAgregarMedio(pagos: PagoEnCarga[], totalExigibleCentavos: number): boolean {
+  return !hayFilaSinImporte(pagos) && !totalCubierto(pagos, totalExigibleCentavos);
+}
+
 /**
  * HU #25: Calcula el importe exigible de la visita en el celular,
  * descontando remitos rechazados (tanto en servidor como encolados sin conexión).
