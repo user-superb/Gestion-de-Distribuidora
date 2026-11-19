@@ -598,7 +598,7 @@ describe('Historia de Usuario #19 - Anexar una Entrega a una Ruta', () => {
     expect(res.parada?.remitos[0].id).toBe('rem-2');
   });
 
-  it('ESCENARIO 2: Chofer desconectado: Se anexa el remito pero el dispositivo del transportista no reporta conexión. El sistema genera una alerta visual de "Sincronización pendiente".', () => {
+  it('ESCENARIO 2: Chofer desconectado: Si el dispositivo del transportista no reporta conexión, el sistema rechaza la anexión.', () => {
     // 1. Armamos y programamos una Hoja de Ruta inicial con rem-3 (com-102)
     remitoService.agruparEnVisita(['rem-3']);
     const prog = remitoService.asignarFechaHojaDeRuta('2026-10-25', '2026-10-20');
@@ -608,18 +608,18 @@ describe('Historia de Usuario #19 - Anexar una Entrega a una Ruta', () => {
     remitoService.setConexionTransportista('2', false);
     remitoService.asignarTransportistaHojaDeRuta(hojaId, '2');
 
-    // 2. Anexamos el remito rem-4 (mismo comercio com-102)
+    // 2. Intentamos anexar el remito rem-4 (mismo comercio com-102)
     const res = remitoService.anexarEntregaARuta('rem-4', hojaId);
 
-    // Se anexa la entrega al final de la secuencia
-    expect(res.success).toBe(true);
-    expect(res.ordenParada).toBe(2);
-    expect(res.parada?.orden).toBe(2);
+    // Se bloquea la anexión
+    expect(res.success).toBe(false);
+    expect(res.status).toBe(422);
+    expect(res.error).toMatch(/no reporta conexión|desconectado/i);
 
-    // Genera alerta visual de sincronización pendiente
-    expect(res.sincronizacionPendiente).toBe(true);
-    expect(res.alerta).toBe('Sincronización pendiente');
-    expect(res.hojaDeRuta?.tieneSincronizacionPendiente).toBe(true);
+    // El remito continúa pendiente y la hoja conserva 1 sola visita
+    expect(remitoService.getRemitosPendientes().some((r) => r.id === 'rem-4')).toBe(true);
+    const hojaActual = remitoService.getHojasDeRuta().find((h) => h.id === hojaId);
+    expect(hojaActual?.visitas?.length).toBe(1);
   });
 
 

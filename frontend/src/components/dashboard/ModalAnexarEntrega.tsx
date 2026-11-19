@@ -130,6 +130,9 @@ export const ModalAnexarEntrega: React.FC<ModalAnexarEntregaProps> = ({
   const handleAlternarConexionManual = async () => {
     const nuevoEstado = !dispositivoConectado;
     setDispositivoConectado(nuevoEstado);
+    if (nuevoEstado) {
+      setErrorMsg(null);
+    }
     if (hojaSeleccionada?.transportistaId) {
       await remitoService.actualizarConexionTransportistaAsync(hojaSeleccionada.transportistaId, nuevoEstado);
     }
@@ -162,9 +165,7 @@ export const ModalAnexarEntrega: React.FC<ModalAnexarEntregaProps> = ({
       const nombreHoja =
         resultado.hojaDeRuta?.numero ||
         `HR-${String(resultado.hojaDeRuta?.id || hojaSeleccionada.id).padStart(4, '0')}`;
-      const mensajeTexto = resultado.sincronizacionPendiente
-        ? `Remito ${remito.numeroRemito} anexado a la hoja ${nombreHoja}. ⚠️ Dispositivo desconectado: "Sincronización pendiente".`
-        : `Remito ${remito.numeroRemito} anexado exitosamente a la hoja ${nombreHoja} y sincronizado con el transportista.`;
+      const mensajeTexto = `Remito ${remito.numeroRemito} anexado exitosamente a la hoja ${nombreHoja} y sincronizado con el transportista.`;
 
       onSuccess(resultado, mensajeTexto);
       onClose();
@@ -246,16 +247,16 @@ export const ModalAnexarEntrega: React.FC<ModalAnexarEntregaProps> = ({
           </div>
 
           {/* Conexión del Dispositivo Móvil: Resumido con icono interactivo */}
-          <div className="flex items-center justify-between pt-1 pb-1 px-1">
-            <span className="text-xs text-slate-600 font-medium">Conexión del chofer:</span>
-            <div className="flex items-center gap-1.5">
+          <div className="space-y-2 pt-1 pb-1 px-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-600 font-medium">Conexión del chofer:</span>
               <button
                 type="button"
                 onClick={() => void handleAlternarConexionManual()}
                 className={`p-1.5 rounded border transition-colors cursor-pointer flex items-center gap-1 text-xs font-medium ${
                   dispositivoConectado
                     ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
-                    : 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100'
+                    : 'bg-red-50 text-red-700 border-red-300 hover:bg-red-100'
                 }`}
                 title="Tocar para alternar conexión del chofer (Escenario 1 vs Escenario 2)"
               >
@@ -266,18 +267,21 @@ export const ModalAnexarEntrega: React.FC<ModalAnexarEntregaProps> = ({
                   </>
                 ) : (
                   <>
-                    <WifiOff className="w-4 h-4 text-amber-600" />
+                    <WifiOff className="w-4 h-4 text-red-600" />
                     <span>Desconectado</span>
                   </>
                 )}
               </button>
-
-              {!dispositivoConectado && (
-                <div title="Alerta: Sincronización pendiente" className="flex items-center text-amber-600">
-                  <AlertTriangle className="w-4 h-4" />
-                </div>
-              )}
             </div>
+
+            {!dispositivoConectado && (
+              <div className="p-2 bg-red-50 border border-red-200 rounded text-[11px] text-red-700 flex items-start gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
+                <span>
+                  El transportista no reporta conexión activa. No se permite anexar la entrega hasta que recupere conexión para evitar errores de sincronización.
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Mensaje de error si falla */}

@@ -177,32 +177,23 @@ describe('Backend PostgreSQL - HU #19: Anexar una Entrega a una Ruta', () => {
     assert.equal(dbVisitas.rows[2].sincronizacion_pendiente, false);
   });
 
-  it('ESCENARIO 2: Chofer desconectado: Se anexa el remito pero el dispositivo del transportista no reporta conexión. El sistema genera una alerta visual de "Sincronización pendiente".', async () => {
+  it('ESCENARIO 2: Chofer desconectado: Si el dispositivo del transportista no reporta conexión, el sistema rechaza la anexión.', async () => {
     // Hoja 200 tiene 1 parada previa (orden 1) de Comercio 2. El chofer 20 reporta dispositivo_conectado = false. Remito 5002 es de Comercio 2.
     const resultado = await remitoService.anexarEntregaARuta('5002', '200');
 
-    // Se anexa el remito exitosamente
-    assert.equal(resultado.success, true);
-    assert.ok(resultado.parada);
-    // Aparece al final de la secuencia (Parada #2)
-    assert.equal(resultado.ordenParada, 2);
-    assert.equal(resultado.parada.orden, 2);
+    // Se bloquea la anexión para evitar errores de sincronización
+    assert.equal(resultado.success, false);
+    assert.equal(resultado.status, 422);
+    assert.match(resultado.error || '', /no reporta conexión|desconectado/i);
 
-    // Genera alerta visual de sincronización pendiente
-    assert.equal(resultado.sincronizacionPendiente, true);
-    assert.equal(resultado.alerta, 'Sincronización pendiente');
-    assert.ok(resultado.mensaje?.includes('Sincronización pendiente'));
+    // La hoja 200 conserva solo su parada original
+    const dbVisitas = await db.query('SELECT id FROM visita WHERE hoja_de_ruta_id = 200');
+    assert.equal(dbVisitas.rows.length, 1);
 
-    // Verificar en base de datos que la nueva parada guarda el flag de sincronización pendiente
-    const dbVisita = await db.query('SELECT orden, sincronizacion_pendiente FROM visita WHERE id = $1', [
-      resultado.parada.id,
-    ]);
-    assert.equal(dbVisita.rows[0].orden, 2);
-    assert.equal(dbVisita.rows[0].sincronizacion_pendiente, true);
-
-    // El remito quedó efectivamente asignado
-    const dbRemito = await db.query('SELECT visita_id FROM remito WHERE id = 5002');
-    assert.equal(String(dbRemito.rows[0].visita_id), resultado.parada.id);
+    // El remito sigue pendiente sin asignar
+    const dbRemito = await db.query('SELECT visita_id, estado FROM remito WHERE id = 5002');
+    assert.equal(dbRemito.rows[0].visita_id, null);
+    assert.equal(dbRemito.rows[0].estado, 'pendiente');
   });
 
   it('REGLA A CONSIDERAR: La ruta de destino debe encontrarse abierta (Rechaza si la ruta está "cerrada")', async () => {
@@ -279,19 +270,28 @@ describe('Backend PostgreSQL - HU #19: Anexar una Entrega a una Ruta', () => {
     assert.equal(hojaInexistente.status, 404);
   });
 
-  it('OVERRIDE Y DINAMISMO: Permite sobreescribir o actualizar la conectividad del dispositivo', async () => {
+  it('OVERRIDE Y DINAMISMO: Bloquea la anexión cuando se indica dispositivo desconectado y la habilita al reconectarse', async () => {
     // Chofer 10 está online por defecto, pero se indica explícitamente dispositivoConectado = false
     const resConOverride = await remitoService.anexarEntregaARuta('5003', '100', {
       dispositivoConectado: false,
     });
 
-    assert.equal(resConOverride.success, true);
-    assert.equal(resConOverride.sincronizacionPendiente, true);
-    assert.equal(resConOverride.alerta, 'Sincronización pendiente');
+    assert.equal(resConOverride.success, false);
+    assert.equal(resConOverride.status, 422);
+    assert.match(resConOverride.error || '', /no reporta conexión|desconectado/i);
+
+    const dbRemitoPendiente = await db.query('SELECT visita_id, estado FROM remito WHERE id = 5003');
+    assert.equal(dbRemitoPendiente.rows[0].visita_id, null);
+    assert.equal(dbRemitoPendiente.rows[0].estado, 'pendiente');
 
     // Cambiar conexión de chofer 20 a true y anexar
     await remitoService.actualizarConexionTransportista('20', true);
     const chofer20 = await db.query('SELECT dispositivo_conectado FROM usuario WHERE id = 20');
     assert.equal(chofer20.rows[0].dispositivo_conectado, true);
+
+    const resAhoraConectado = await remitoService.anexarEntregaARuta('5002', '200');
+    assert.equal(resAhoraConectado.success, true);
+    assert.equal(resAhoraConectado.ordenParada, 2);
+    assert.equal(resAhoraConectado.sincronizacionPendiente, false);
   });
 });

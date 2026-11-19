@@ -1,0 +1,20 @@
+      `SELECT r.id::text AS id, r.numero, r.estado,
+              COALESCE(r.entregado_en, v.registrada_en) AS fecha_entrega,
+              c.id::text AS comercio_id, c.razon_social,
+              m.nombre AS marca, rs.importe_centavos::text AS importe_centavos,
+              rs.saldo_centavos::text AS saldo_centavos,
+              s.id::text AS sucursal_id, s.nombre AS sucursal
+       FROM remito r
+       JOIN comercio c ON c.id = r.comercio_id
+       JOIN marca m ON m.id = r.marca_id
+       JOIN sucursal s ON s.id = r.sucursal_id
+       LEFT JOIN visita v ON v.id = r.visita_id
+       JOIN remito_saldo rs ON rs.remito_id = r.id
+       WHERE rs.saldo_centavos > 0
+         AND r.estado = 'entregado'
+         ${sucursalFiltro}
+       ORDER BY r.entregado_en DESC NULLS LAST, c.razon_social, r.numero`,
+      params
+    );
+    return result.rows;
+  },

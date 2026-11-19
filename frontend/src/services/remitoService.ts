@@ -808,7 +808,16 @@ export const remitoService = {
       reportaConexion = false;
     }
 
-    const sincronizacionPendiente = !reportaConexion;
+    if (!reportaConexion) {
+      return {
+        success: false,
+        error:
+          'No se puede anexar la entrega: el dispositivo del transportista no reporta conexión activa. La anexión fue bloqueada para evitar errores de sincronización.',
+        status: 422,
+      };
+    }
+
+    const sincronizacionPendiente = false;
 
     // Calcular orden al final de la secuencia de esta hoja
     // Reutilizamos visitasDeHoja
@@ -845,11 +854,10 @@ export const remitoService = {
       parada: nuevaParada,
       ordenParada: nuevoOrden,
       hojaDeRuta: { ...hoja },
-      sincronizacionPendiente,
-      alerta: sincronizacionPendiente ? 'Sincronización pendiente' : undefined,
-      mensaje: sincronizacionPendiente
-        ? 'Entrega anexada a la ruta. El dispositivo del transportista no reporta conexión; se generó una alerta de "Sincronización pendiente".'
-        : 'Entrega anexada exitosamente al final de la secuencia de la hoja de ruta y sincronizada con el transportista.',
+      sincronizacionPendiente: false,
+      alerta: undefined,
+      mensaje:
+        'Entrega anexada exitosamente al final de la secuencia de la hoja de ruta y sincronizada con el transportista.',
     };
   },
 

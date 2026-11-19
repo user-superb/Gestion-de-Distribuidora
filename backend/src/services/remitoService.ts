@@ -1574,11 +1574,20 @@ export const remitoService = {
     } else if (hojaRow.transportistaId) {
       reportaConexion = await this.evaluarConexionTransportista(String(hojaRow.transportistaId));
     } else {
-      // Si no tiene transportista asignado, se marca sincronización pendiente para cuando se asigne
+      // Si no tiene transportista asignado, no hay dispositivo conectado para sincronizar
       reportaConexion = false;
     }
 
-    const sincronizacionPendiente = !reportaConexion;
+    if (!reportaConexion) {
+      return {
+        success: false,
+        error:
+          'No se puede anexar la entrega: el dispositivo del transportista no reporta conexión activa. La anexión fue bloqueada para evitar errores de sincronización.',
+        status: 422,
+      };
+    }
+
+    const sincronizacionPendiente = false;
 
     // CRITERIO DE ACEPTACIÓN: "La parada aparece al final de la secuencia del transportista."
     // Calcular el máximo orden actual de las paradas de esta hoja de ruta
@@ -1660,11 +1669,10 @@ export const remitoService = {
       parada: nuevaParada,
       ordenParada: nuevoOrden,
       hojaDeRuta: hojaActualizada,
-      sincronizacionPendiente,
-      alerta: sincronizacionPendiente ? 'Sincronización pendiente' : undefined,
-      mensaje: sincronizacionPendiente
-        ? 'Entrega anexada a la ruta. El dispositivo del transportista no reporta conexión; se generó una alerta de "Sincronización pendiente".'
-        : 'Entrega anexada exitosamente al final de la secuencia de la hoja de ruta y sincronizada con el transportista.',
+      sincronizacionPendiente: false,
+      alerta: undefined,
+      mensaje:
+        'Entrega anexada exitosamente al final de la secuencia de la hoja de ruta y sincronizada con el transportista.',
     };
   },
 };
