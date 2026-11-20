@@ -1,7 +1,7 @@
 // Épica 2.3 · Rendición y control de efectivo, escritorio del supervisor.
 // HU #47 visualizar la declaración · HU #48 aprobar coincidente · HU #49 registrar diferencia · HU #50 aprobar con diferencia.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Banknote, CheckCircle2, Plus, RefreshCw, Scale, X } from 'lucide-react';
+import { Banknote, CheckCircle2, Plus, RefreshCw, Scale, X } from 'lucide-react';
 import { UserSession } from '../../types/auth';
 import {
   analizarConteo,
@@ -68,7 +68,9 @@ export const RendicionEfectivo: React.FC<{ session: UserSession }> = ({ session 
     setError('');
     try {
       const estado = FILTROS.find((f) => f.id === filtro)?.estado;
-      setItems(await rendicionEfectivoService.listar(session.token, { estado, fecha: fecha || undefined }));
+      const rendiciones = await rendicionEfectivoService.listar(session.token, { estado, fecha: fecha || undefined });
+      // Las retractadas no se listan: el transportista ya no declara ni retracta desde la app.
+      setItems(rendiciones.filter((item) => item.estado !== 'anulada'));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'No se pudieron cargar las declaraciones.');
     } finally {
@@ -182,7 +184,7 @@ export const RendicionEfectivo: React.FC<{ session: UserSession }> = ({ session 
                     </p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <div className={`text-sm font-bold ${item.estado === 'anulada' ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{formatoPesos(item.declaradoCentavos)}</div>
+                    <div className="text-sm font-bold text-slate-900">{formatoPesos(item.declaradoCentavos)}</div>
                     <div className="text-[11px] text-slate-500">{horaLocal(item.declaradoEn)}</div>
                   </div>
                 </button>
@@ -315,6 +317,8 @@ export const RendicionEfectivo: React.FC<{ session: UserSession }> = ({ session 
   );
 };
 
+const NO_DISPONIBLE = 'Esta rendición ya no está disponible.';
+
 const DetalleDeclaracion: React.FC<{
   session: UserSession;
   id: string;
@@ -322,7 +326,6 @@ const DetalleDeclaracion: React.FC<{
   onRetractada: () => void;
 }> = ({ session, id, onProcesada, onRetractada }) => {
   const [detalle, setDetalle] = useState<DetalleRendicion | null>(null);
-  const [retractada, setRetractada] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
   const [form, setForm] = useState<FormConteo>(formConteoVacio());
@@ -336,16 +339,15 @@ const DetalleDeclaracion: React.FC<{
     try {
       const data = await rendicionEfectivoService.detalle(session.token, id);
       setDetalle(data);
-      setRetractada(null);
       if (data.estado === 'con_diferencia') {
         setForm(formDesdeConteo(data.rendidoCentavos, data.conteo));
         setJustificacion(data.motivoDiferencia ?? '');
       }
     } catch (cause) {
       if (cause instanceof RendicionRetractadaError) {
-        // HU #47 E2: el sistema advierte que fue retractada.
+        // La rendición fue retractada: se saca de la lista y no se puede procesar.
         setDetalle(null);
-        setRetractada(cause.message);
+        setError(NO_DISPONIBLE);
         onRetractada();
       } else {
         setError(cause instanceof Error ? cause.message : 'No se pudo abrir la declaración.');
@@ -386,7 +388,7 @@ const DetalleDeclaracion: React.FC<{
     } catch (cause) {
       if (cause instanceof RendicionRetractadaError) {
         setDetalle(null);
-        setRetractada(cause.message);
+        setError(NO_DISPONIBLE);
         onRetractada();
       } else {
         setErrorAccion(cause instanceof Error ? cause.message : 'No se pudo completar la operación.');
@@ -397,18 +399,6 @@ const DetalleDeclaracion: React.FC<{
   }
 
   if (cargando && !detalle) return <p className="py-10 text-center text-xs text-slate-500">Abriendo declaración…</p>;
-
-  if (retractada) {
-    return (
-      <div role="alert" className="flex gap-3 rounded-md border border-red-300 bg-red-50 p-4 text-red-900">
-        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
-        <div className="space-y-1">
-          <p className="text-sm font-bold">Declaración retractada</p>
-          <p className="text-sm">{retractada}</p>
-        </div>
-      </div>
-    );
-  }
 
   if (error || !detalle) return <p role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">{error || 'No se encontró la declaración.'}</p>;
 
