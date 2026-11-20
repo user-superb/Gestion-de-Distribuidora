@@ -71,6 +71,23 @@ export const ETIQUETA_ESTADO: Record<EstadoRendicion, string> = {
   anulada: 'Retractada',
 };
 
+/** Cómo cerró una rendición aprobada: sin diferencias, con faltante o con sobrante. */
+export type ResultadoAprobacion = 'sin_diferencia' | 'faltante' | 'sobrante';
+
+/** null si la rendición todavía no está aprobada. */
+export function resultadoAprobacion(rendicion: Pick<Rendicion, 'estado' | 'tipoDiferencia'>): ResultadoAprobacion | null {
+  if (rendicion.estado !== 'validada') return null;
+  return rendicion.tipoDiferencia === 'faltante' || rendicion.tipoDiferencia === 'sobrante' ? rendicion.tipoDiferencia : 'sin_diferencia';
+}
+
+/** Etiqueta del estado. Una aprobada con descuadre lo dice, para no confundirla con una que cuadró. */
+export function etiquetaRendicion(rendicion: Pick<Rendicion, 'estado' | 'tipoDiferencia'>): string {
+  const resultado = resultadoAprobacion(rendicion);
+  if (resultado === 'faltante') return 'Aprobada con faltante';
+  if (resultado === 'sobrante') return 'Aprobada con sobrante';
+  return ETIQUETA_ESTADO[rendicion.estado];
+}
+
 export const LARGO_MINIMO_JUSTIFICACION = 10;
 
 export function formatoPesos(centavos: number): string {

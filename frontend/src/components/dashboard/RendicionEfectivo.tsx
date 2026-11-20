@@ -9,7 +9,7 @@ import {
   DENOMINACIONES_PESOS,
   DetalleRendicion,
   EstadoRendicion,
-  ETIQUETA_ESTADO,
+  etiquetaRendicion,
   FormConteo,
   formConteoVacio,
   formDesdeConteo,
@@ -21,13 +21,19 @@ import {
   Rendicion,
   rendicionEfectivoService,
   RendicionRetractadaError,
+  ResultadoAprobacion,
+  resultadoAprobacion,
 } from '../../services/rendicionEfectivoService';
 
-type Filtro = 'por_procesar' | 'aprobadas' | 'todas';
+type Filtro = 'pendientes' | 'con_diferencia' | 'aprobadas' | 'con_faltante' | 'con_sobrante' | 'todas';
 
-const FILTROS: Array<{ id: Filtro; label: string; estado?: string }> = [
-  { id: 'por_procesar', label: 'Por procesar', estado: 'pendiente,con_diferencia' },
-  { id: 'aprobadas', label: 'Aprobadas', estado: 'validada' },
+// Las aprobadas se separan según cómo cerró el conteo, para que un descuadre no quede mezclado con las que cuadraron.
+const FILTROS: Array<{ id: Filtro; label: string; estado?: string; resultado?: ResultadoAprobacion }> = [
+  { id: 'pendientes', label: 'Pendiente de conteo', estado: 'pendiente' },
+  { id: 'con_diferencia', label: 'Con diferencia registrada', estado: 'con_diferencia' },
+  { id: 'aprobadas', label: 'Aprobadas', estado: 'validada', resultado: 'sin_diferencia' },
+  { id: 'con_faltante', label: 'Aprobadas con faltante', estado: 'validada', resultado: 'faltante' },
+  { id: 'con_sobrante', label: 'Aprobadas con sobrante', estado: 'validada', resultado: 'sobrante' },
   { id: 'todas', label: 'Todas' },
 ];
 
@@ -39,16 +45,23 @@ const COLOR_ESTADO: Record<EstadoRendicion, string> = {
   anulada: 'bg-slate-200 text-slate-700 border-slate-300',
 };
 
+const COLOR_APROBADA_CON_DIFERENCIA = {
+  faltante: 'bg-rose-100 text-rose-800 border-rose-300',
+  sobrante: 'bg-sky-100 text-sky-800 border-sky-300',
+};
+
 function horaLocal(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }) : '—';
 }
 
-function EstadoBadge({ estado }: { estado: EstadoRendicion }) {
-  return <span className={`inline-flex shrink-0 rounded border px-2 py-0.5 text-[11px] font-semibold ${COLOR_ESTADO[estado]}`}>{ETIQUETA_ESTADO[estado]}</span>;
+function EstadoBadge({ rendicion }: { rendicion: Pick<Rendicion, 'estado' | 'tipoDiferencia'> }) {
+  const resultado = resultadoAprobacion(rendicion);
+  const color = resultado === 'faltante' || resultado === 'sobrante' ? COLOR_APROBADA_CON_DIFERENCIA[resultado] : COLOR_ESTADO[rendicion.estado];
+  return <span className={`inline-flex shrink-0 rounded border px-2 py-0.5 text-[11px] font-semibold ${color}`}>{etiquetaRendicion(rendicion)}</span>;
 }
 
 export const RendicionEfectivo: React.FC<{ session: UserSession }> = ({ session }) => {
-  const [filtro, setFiltro] = useState<Filtro>('por_procesar');
+  const [filtro, setFiltro] = useState<Filtro>('pendientes');
   const [fecha, setFecha] = useState('');
   const [items, setItems] = useState<Rendicion[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -67,10 +80,10 @@ export const RendicionEfectivo: React.FC<{ session: UserSession }> = ({ session 
     setCargando(true);
     setError('');
     try {
-      const estado = FILTROS.find((f) => f.id === filtro)?.estado;
+      const { estado, resultado } = FILTROS.find((f) => f.id === filtro) ?? {};
       const rendiciones = await rendicionEfectivoService.listar(session.token, { estado, fecha: fecha || undefined });
       // Las retractadas no se listan: el transportista ya no declara ni retracta desde la app.
-      setItems(rendiciones.filter((item) => item.estado !== 'anulada'));
+      setItems(rendiciones.filter((item) => item.estado !== 'anulada' && (!resultado || resultadoAprobacion(item) === resultado)));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'No se pudieron cargar las declaraciones.');
     } finally {
@@ -177,7 +190,7 @@ export const RendicionEfectivo: React.FC<{ session: UserSession }> = ({ session 
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <strong className="truncate text-sm text-slate-900">{item.transportista.nombre}</strong>
-                      <EstadoBadge estado={item.estado} />
+                      <EstadoBadge rendicion={item} />
                     </div>
                     <p className="mt-0.5 text-xs text-slate-500">
                       Hoja {item.codigoHoja} · {formatoFecha(item.fechaReparto)} · {item.sucursal}
@@ -416,7 +429,7 @@ const DetalleDeclaracion: React.FC<{
             {detalle.patente ? ` · ${detalle.patente}` : ''}
           </p>
         </div>
-        <EstadoBadge estado={detalle.estado} />
+        <EstadoBadge rendicion={detalle} />
       </header>
 
       {/* Un solo recuadro: el arqueo lo genera el sistema con los cobros en efectivo, así que el monto a rendir es lo cobrado. */}
