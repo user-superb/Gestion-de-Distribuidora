@@ -403,13 +403,13 @@ CREATE TABLE rendicion_efectivo (
     validado_en             timestamptz,
     creado_en               timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT rendicion_estado_valido
-        CHECK (estado IN ('pendiente','con_diferencia','validada','rechazada','anulada')),
+        CHECK (estado IN ('pendiente','con_diferencia','escalada','validada','rechazada','anulada')),
     CONSTRAINT rendicion_importes_no_negativos
         CHECK (declarado_centavos >= 0 AND (rendido_centavos IS NULL OR rendido_centavos >= 0)),
     -- No se puede registrar ni cerrar una rendición con diferencia sin explicar por qué.
     CONSTRAINT rendicion_motivo_si_hay_diferencia
         CHECK (
-            estado NOT IN ('validada','con_diferencia')
+            estado NOT IN ('validada','con_diferencia','escalada')
             OR rendido_centavos = declarado_centavos
             OR motivo_diferencia IS NOT NULL
         ),

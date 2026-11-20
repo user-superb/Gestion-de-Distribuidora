@@ -173,7 +173,7 @@ remitoRouter.patch('/hoja-de-ruta/:id/estado', async (req, res) => {
 });
 
 const requireOperadorRuta = [requireAuth, (req: Request, res: Response, next: NextFunction) => {
-  if (!['Administrativo', 'Administrador del sistema'].includes((req as any).userSession?.role)) return res.status(403).json({ error: 'No tenés permiso para reasignar hojas de ruta.' });
+  if (!['Administrativo', 'Administrador del sistema', 'Gerente', 'CEO'].includes((req as any).userSession?.role)) return res.status(403).json({ error: 'No tenés permiso para reasignar hojas de ruta.' });
   const id = Number(String((req as any).userSession?.id || '').replace(/^usr_/, ''));
   if (!Number.isSafeInteger(id) || id <= 0) return res.status(401).json({ error: 'No se pudo identificar al usuario de la sesión.' });
   next();

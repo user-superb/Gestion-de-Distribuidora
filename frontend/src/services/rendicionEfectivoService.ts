@@ -3,7 +3,7 @@
 // API: backend/src/routes/efectivoRoutes.ts. Importes en centavos.
 import { API_BASE } from '../config/api';
 
-export type EstadoRendicion = 'pendiente' | 'con_diferencia' | 'validada' | 'rechazada' | 'anulada';
+export type EstadoRendicion = 'pendiente' | 'con_diferencia' | 'escalada' | 'validada' | 'rechazada' | 'anulada';
 
 export interface ConteoBilletes {
   billetes: Record<string, number>;
@@ -66,6 +66,7 @@ export const DENOMINACIONES_PESOS = [20000, 10000, 2000, 1000, 500, 200, 100, 50
 export const ETIQUETA_ESTADO: Record<EstadoRendicion, string> = {
   pendiente: 'Pendiente de conteo',
   con_diferencia: 'Con diferencia registrada',
+  escalada: 'Escalada a Gerencia',
   validada: 'Aprobada',
   rechazada: 'Rechazada',
   anulada: 'Retractada',

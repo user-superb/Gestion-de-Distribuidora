@@ -6,8 +6,9 @@ import { RendicionError, rendicionService } from '../services/rendicionService.j
 
 export const efectivoRouter = Router();
 
-// Supuesto: el "supervisor de efectivo" es el rol Supervisor. El administrador del sistema también accede.
-export const ROLES_EFECTIVO = ['Supervisor', 'Administrador del sistema'];
+// Supuesto: el "supervisor de efectivo" es el rol Supervisor. El administrador del sistema también accede,
+// y Gerencia entra para aprobar las rendiciones que superan el límite de autorización del supervisor.
+export const ROLES_EFECTIVO = ['Supervisor', 'Administrador del sistema', 'Gerente', 'CEO'];
 
 efectivoRouter.use(requireAuth, (req: Request, res: Response, next: NextFunction) => {
   if (!ROLES_EFECTIVO.includes((req as any).userSession?.role)) {
@@ -97,7 +98,7 @@ efectivoRouter.post('/rendiciones/:id/diferencia', async (req, res) => {
 /** POST /api/efectivo/rendiciones/:id/aprobar-con-diferencia · HU #50 */
 efectivoRouter.post('/rendiciones/:id/aprobar-con-diferencia', async (req, res) => {
   try {
-    return res.json(await rendicionService.aprobarConDiferencia(getUsuarioId(req), String(req.params.id), req.body));
+    return res.json(await rendicionService.aprobarConDiferencia(getUsuarioId(req), String(req.params.id), req.body, (req as any).userSession?.role));
   } catch (error) {
     return responderError(error, res);
   }

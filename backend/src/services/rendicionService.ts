@@ -17,7 +17,10 @@ export class RendicionError extends Error {
   }
 }
 
-export type EstadoRendicion = 'pendiente' | 'con_diferencia' | 'validada' | 'rechazada' | 'anulada';
+export type EstadoRendicion = 'pendiente' | 'con_diferencia' | 'escalada' | 'validada' | 'rechazada' | 'anulada';
+
+/** Roles que aprueban diferencias de efectivo sin tope; el resto está sujeto a su límite de autorización. */
+export const ROLES_SIN_LIMITE_EFECTIVO = ['Gerente', 'CEO', 'Administrador del sistema'];
 
 /** Billetes de curso legal que cuenta el supervisor, en centavos (de $20.000 a $10). */
 export const DENOMINACIONES_CENTAVOS = [2000000, 1000000, 200000, 100000, 50000, 20000, 10000, 5000, 2000, 1000];
@@ -535,15 +538,41 @@ export const rendicionService = {
    * HU #50: aprueba la rendición con diferencia. Calcula el descuadre, lo deja asentado con su motivo
    * y cierra la hoja de ruta.
    */
-  async aprobarConDiferencia(supervisorId: number, id: string, body: any) {
+  async aprobarConDiferencia(supervisorId: number, id: string, body: any, rol = 'Supervisor') {
     const { rendidoCentavos, conteo } = validarConteo(body?.rendidoCentavos, body?.conteo);
+    const sinLimite = ROLES_SIN_LIMITE_EFECTIVO.includes(rol);
     return enTransaccion(async (client) => {
-      const rendicion = await rendicionParaProcesar(client, id, ['pendiente', 'con_diferencia']);
+      const rendicion = await rendicionParaProcesar(client, id, ['pendiente', 'con_diferencia', 'escalada']);
+      if (rendicion.estado === 'escalada' && !sinLimite) {
+        throw new RendicionError('La rendición está escalada: la tiene que aprobar Gerencia.', 403, { codigo: 'ESCALADA' });
+      }
       const diferencia = calcularDiferencia(rendicion.declaradoCentavos, rendidoCentavos);
       if (diferencia.tipo === 'coincide') {
         throw new RendicionError('El monto contado coincide con lo declarado: aprobá la rendición sin diferencia.', 422, { codigo: 'SIN_DIFERENCIA' });
       }
       const motivo = validarJustificacion(body?.motivo, 'motivo');
+
+      // Igual que en conciliación: si la diferencia supera el límite de quien aprueba, se escala a Gerencia.
+      if (!sinLimite) {
+        const usuario = await client.query('SELECT limite_autorizacion_centavos FROM usuario WHERE id = $1', [supervisorId]);
+        const limiteCentavos = Number(usuario.rows[0]?.limite_autorizacion_centavos ?? 0);
+        if (Math.abs(diferencia.diferenciaCentavos) > limiteCentavos) {
+          await client.query(
+            `UPDATE rendicion_efectivo
+             SET estado = 'escalada', rendido_centavos = $2, conteo_billetes = $3, motivo_diferencia = $4,
+                 diferencia_registrada_por = $5, diferencia_registrada_en = now()
+             WHERE id::text = $1`,
+            [rendicion.id, rendidoCentavos, conteo ? JSON.stringify(conteo) : (rendicion.conteo ? JSON.stringify(rendicion.conteo) : null), motivo, supervisorId]
+          );
+          await auditar(
+            client, rendicion.id, 'escalacion', supervisorId,
+            { estado: rendicion.estado },
+            { estado: 'escalada', limiteCentavos, rendidoCentavos, ...diferencia },
+            motivo
+          );
+          return buscarRendicion(client, rendicion.id);
+        }
+      }
       await client.query(
         `UPDATE rendicion_efectivo
          SET estado = 'validada', rendido_centavos = $2, conteo_billetes = $3, motivo_diferencia = $4,

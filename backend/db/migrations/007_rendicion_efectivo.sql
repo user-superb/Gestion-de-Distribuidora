@@ -30,7 +30,7 @@ CREATE INDEX IF NOT EXISTS rendicion_estado_idx ON rendicion_efectivo (estado, d
 
 ALTER TABLE rendicion_efectivo DROP CONSTRAINT IF EXISTS rendicion_estado_valido;
 ALTER TABLE rendicion_efectivo ADD CONSTRAINT rendicion_estado_valido
-  CHECK (estado IN ('pendiente','con_diferencia','validada','rechazada','anulada'));
+  CHECK (estado IN ('pendiente','con_diferencia','escalada','validada','rechazada','anulada'));
 
 ALTER TABLE rendicion_efectivo DROP CONSTRAINT IF EXISTS rendicion_importes_no_negativos;
 ALTER TABLE rendicion_efectivo ADD CONSTRAINT rendicion_importes_no_negativos
@@ -40,7 +40,7 @@ ALTER TABLE rendicion_efectivo ADD CONSTRAINT rendicion_importes_no_negativos
 ALTER TABLE rendicion_efectivo DROP CONSTRAINT IF EXISTS rendicion_motivo_si_hay_diferencia;
 ALTER TABLE rendicion_efectivo ADD CONSTRAINT rendicion_motivo_si_hay_diferencia
   CHECK (
-    estado NOT IN ('validada','con_diferencia')
+    estado NOT IN ('validada','con_diferencia','escalada')
     OR rendido_centavos = declarado_centavos
     OR motivo_diferencia IS NOT NULL
   );

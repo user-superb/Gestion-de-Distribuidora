@@ -88,7 +88,7 @@ describe('Épica 2.3 · Rendición y control de efectivo', () => {
       CREATE TABLE usuario (
         id serial PRIMARY KEY, usuario text NOT NULL UNIQUE, nombre text NOT NULL, email text,
         password_hash text NOT NULL, rol text NOT NULL, es_transportista boolean NOT NULL DEFAULT false,
-        activo boolean NOT NULL DEFAULT true
+        activo boolean NOT NULL DEFAULT true, limite_autorizacion_centavos bigint NOT NULL DEFAULT 0
       );
       CREATE TABLE usuario_sucursal (usuario_id bigint NOT NULL, sucursal_id bigint NOT NULL, PRIMARY KEY (usuario_id, sucursal_id));
       CREATE TABLE sesion_usuario (
@@ -136,12 +136,13 @@ describe('Épica 2.3 · Rendición y control de efectivo', () => {
       );
 
       INSERT INTO sucursal (id, nombre) VALUES (1, 'Sucursal Central - La Plata');
-      INSERT INTO usuario (id, usuario, nombre, password_hash, rol, es_transportista) VALUES
-        (1, 'admin', 'Administrativo', '${hash}', 'Administrativo', false),
-        (2, 'chofer', 'Carlos Repartidor', '${hash}', 'Transportista', true),
-        (3, 'chofer2', 'Mario Flete', '${hash}', 'Transportista', true),
-        (4, 'supervisor', 'Valeria Logística', '${hash}', 'Supervisor', false);
-      INSERT INTO usuario_sucursal VALUES (1, 1), (2, 1), (3, 1), (4, 1);
+      INSERT INTO usuario (id, usuario, nombre, password_hash, rol, es_transportista, limite_autorizacion_centavos) VALUES
+        (1, 'admin', 'Administrativo', '${hash}', 'Administrativo', false, 0),
+        (2, 'chofer', 'Carlos Repartidor', '${hash}', 'Transportista', true, 0),
+        (3, 'chofer2', 'Mario Flete', '${hash}', 'Transportista', true, 0),
+        (4, 'supervisor', 'Valeria Logística', '${hash}', 'Supervisor', false, 1000000),
+        (5, 'gerencia', 'Roberto Gerente', '${hash}', 'Gerente', false, 0);
+      INSERT INTO usuario_sucursal VALUES (1, 1), (2, 1), (3, 1), (4, 1), (5, 1);
       INSERT INTO marca (id, nombre) VALUES (1, 'Lácteos del Sur'), (2, 'Bebidas Nacionales');
       INSERT INTO comercio (id, razon_social, domicilio) VALUES
         (1, 'Mayorista El Sol S.R.L.', 'Av. Hipólito Yrigoyen 4500'),
@@ -588,6 +589,30 @@ describe('Épica 2.3 · Rendición y control de efectivo', () => {
       });
       assert.equal(resultado!.estado, 'validada');
       assert.equal(resultado!.tipoDiferencia, 'sobrante');
+    });
+
+    it('si la diferencia supera el límite del supervisor se escala a Gerencia, que la aprueba', async () => {
+      await terminarRuta();
+      const { rendicion } = await rendicionService.declarar(CHOFER, declaracion(4500000));
+      const motivo = 'Faltan $15.000: el chofer no sabe explicar el faltante';
+
+      // Faltante de $15.000 contra un límite de $10.000: no se cierra, queda escalada.
+      const escalada = await rendicionService.aprobarConDiferencia(SUPERVISOR, rendicion!.id, { rendidoCentavos: 3000000, motivo });
+      assert.equal(escalada!.estado, 'escalada');
+      assert.equal(escalada!.diferenciaCentavos, -1500000);
+      assert.equal(escalada!.motivoDiferencia, motivo);
+      assert.notEqual((await uno(`SELECT estado FROM hoja_de_ruta WHERE id = 1`)).estado, 'cerrada');
+      assert.ok(await uno(`SELECT 1 FROM auditoria WHERE entidad = 'rendicion_efectivo' AND accion = 'escalacion'`));
+
+      // El supervisor ya no la puede aprobar; Gerencia sí, sin tope.
+      await rechaza(rendicionService.aprobarConDiferencia(SUPERVISOR, rendicion!.id, { rendidoCentavos: 3000000, motivo }), 403, /Gerencia/);
+      const res = await dispatch(efectivoRouter, 'POST', '/rendiciones/:id/aprobar-con-diferencia', { id: rendicion!.id }, await token('gerencia'), {
+        rendidoCentavos: 3000000,
+        motivo,
+      });
+      assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+      assert.equal(res.body.estado, 'validada');
+      assert.equal((await uno(`SELECT estado FROM hoja_de_ruta WHERE id = 1`)).estado, 'cerrada');
     });
   });
 

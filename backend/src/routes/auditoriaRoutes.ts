@@ -4,7 +4,7 @@ import { requireAuth } from './authRoutes.js';
 
 export const auditoriaRouter = Router();
 auditoriaRouter.use(requireAuth, (req, res, next) => {
-  if (!['Administrativo', 'Administrador del sistema'].includes((req as any).userSession?.role)) {
+  if (!['Administrativo', 'Administrador del sistema', 'Gerente', 'CEO'].includes((req as any).userSession?.role)) {
     return res.status(403).json({ message: 'No tenés permiso para consultar la auditoría.' });
   }
   next();

@@ -25,12 +25,13 @@ import {
   resultadoAprobacion,
 } from '../../services/rendicionEfectivoService';
 
-type Filtro = 'pendientes' | 'con_diferencia' | 'aprobadas' | 'con_faltante' | 'con_sobrante' | 'todas';
+type Filtro = 'pendientes' | 'con_diferencia' | 'escaladas' | 'aprobadas' | 'con_faltante' | 'con_sobrante' | 'todas';
 
 // Las aprobadas se separan según cómo cerró el conteo, para que un descuadre no quede mezclado con las que cuadraron.
 const FILTROS: Array<{ id: Filtro; label: string; estado?: string; resultado?: ResultadoAprobacion }> = [
   { id: 'pendientes', label: 'Pendiente de conteo', estado: 'pendiente' },
   { id: 'con_diferencia', label: 'Con diferencia registrada', estado: 'con_diferencia' },
+  { id: 'escaladas', label: 'Escaladas a Gerencia', estado: 'escalada' },
   { id: 'aprobadas', label: 'Aprobadas', estado: 'validada', resultado: 'sin_diferencia' },
   { id: 'con_faltante', label: 'Aprobadas con faltante', estado: 'validada', resultado: 'faltante' },
   { id: 'con_sobrante', label: 'Aprobadas con sobrante', estado: 'validada', resultado: 'sobrante' },
@@ -40,6 +41,7 @@ const FILTROS: Array<{ id: Filtro; label: string; estado?: string; resultado?: R
 const COLOR_ESTADO: Record<EstadoRendicion, string> = {
   pendiente: 'bg-amber-100 text-amber-900 border-amber-300',
   con_diferencia: 'bg-orange-100 text-orange-900 border-orange-300',
+  escalada: 'bg-purple-100 text-purple-900 border-purple-300',
   validada: 'bg-emerald-100 text-emerald-800 border-emerald-300',
   rechazada: 'bg-red-100 text-red-800 border-red-300',
   anulada: 'bg-slate-200 text-slate-700 border-slate-300',
@@ -352,7 +354,7 @@ const DetalleDeclaracion: React.FC<{
     try {
       const data = await rendicionEfectivoService.detalle(session.token, id);
       setDetalle(data);
-      if (data.estado === 'con_diferencia') {
+      if (data.estado === 'con_diferencia' || data.estado === 'escalada') {
         setForm(formDesdeConteo(data.rendidoCentavos, data.conteo));
         setJustificacion(data.motivoDiferencia ?? '');
       }
@@ -378,7 +380,10 @@ const DetalleDeclaracion: React.FC<{
 
   const analisis = useMemo(() => analizarConteo(form), [form]);
   const comparacion = detalle && analisis.ok ? compararConDeclarado(detalle.declaradoCentavos, analisis.rendidoCentavos) : null;
-  const procesable = detalle && (detalle.estado === 'pendiente' || detalle.estado === 'con_diferencia');
+  // Las escaladas (diferencia mayor al límite del supervisor) solo las resuelve Gerencia o el administrador del sistema.
+  const puedeResolverEscalada = ['Gerente', 'CEO', 'Administrador del sistema'].includes(session.role);
+  const escalada = detalle?.estado === 'escalada';
+  const procesable = detalle && (detalle.estado === 'pendiente' || detalle.estado === 'con_diferencia' || (escalada && puedeResolverEscalada));
 
   async function ejecutar(accion: 'aprobar' | 'diferencia' | 'aprobar_diferencia') {
     if (!detalle || !analisis.ok) return;
@@ -394,8 +399,10 @@ const DetalleDeclaracion: React.FC<{
         await rendicionEfectivoService.registrarDiferencia(session.token, detalle.id, rendidoCentavos, conteo, justificacion);
         onProcesada(`Diferencia registrada en la rendición de ${nombre}. Queda pendiente de aprobación.`);
       } else {
-        await rendicionEfectivoService.aprobarConDiferencia(session.token, detalle.id, rendidoCentavos, conteo, justificacion);
-        onProcesada(`Rendición de ${nombre} aprobada con diferencia. El descuadre quedó asentado y la hoja ${detalle.codigoHoja} cerrada.`);
+        const resultado = await rendicionEfectivoService.aprobarConDiferencia(session.token, detalle.id, rendidoCentavos, conteo, justificacion);
+        onProcesada(resultado.estado === 'escalada'
+          ? `La diferencia supera tu límite de autorización: la rendición de ${nombre} quedó escalada a Gerencia.`
+          : `Rendición de ${nombre} aprobada con diferencia. El descuadre quedó asentado y la hoja ${detalle.codigoHoja} cerrada.`);
       }
       await abrir();
     } catch (cause) {
@@ -462,6 +469,17 @@ const DetalleDeclaracion: React.FC<{
           </p>
           <p className="mt-1">Justificación: {detalle.motivoDiferencia}</p>
           <p className="mt-1 text-orange-800">Registrada por {detalle.diferenciaRegistradaPor ?? '—'} · {horaLocal(detalle.diferenciaRegistradaEn)}</p>
+        </div>
+      )}
+
+      {escalada && detalle.diferenciaCentavos !== null && (
+        <div role="status" className="rounded-md border border-purple-300 bg-purple-50 p-3 text-xs text-purple-950">
+          <p className="font-bold">
+            Escalada a Gerencia: {detalle.tipoDiferencia} de {formatoPesos(Math.abs(detalle.diferenciaCentavos))} (contado {formatoPesos(detalle.rendidoCentavos ?? 0)}), mayor al límite de autorización del supervisor.
+          </p>
+          <p className="mt-1">Justificación: {detalle.motivoDiferencia}</p>
+          <p className="mt-1 text-purple-800">Escaló {detalle.diferenciaRegistradaPor ?? '—'} · {horaLocal(detalle.diferenciaRegistradaEn)}</p>
+          {!puedeResolverEscalada && <p className="mt-1 font-semibold">La tiene que aprobar Gerencia.</p>}
         </div>
       )}
 
@@ -588,15 +606,15 @@ const DetalleDeclaracion: React.FC<{
                 <p className="text-[11px] text-slate-500">Escribí al menos {LARGO_MINIMO_JUSTIFICACION} caracteres para registrar o aprobar con diferencia.</p>
               )}
               <div className="flex flex-wrap gap-2">
-                {/* HU #49 */}
-                <button
+                {/* HU #49 (una escalada ya tiene la diferencia registrada: solo queda aprobarla) */}
+                {!escalada && <button
                   type="button"
                   onClick={() => void ejecutar('diferencia')}
                   disabled={!!enviando || !justificacionOk}
                   className="flex-1 rounded-md border-2 border-marca-azul px-4 py-2 text-sm font-bold text-marca-azul hover:bg-blue-50 disabled:opacity-50"
                 >
                   {enviando === 'diferencia' ? 'Registrando…' : 'Registrar diferencia'}
-                </button>
+                </button>}
                 {/* HU #50 */}
                 <button
                   type="button"
