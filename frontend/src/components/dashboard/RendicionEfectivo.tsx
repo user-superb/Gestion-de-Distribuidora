@@ -430,27 +430,27 @@ const DetalleDeclaracion: React.FC<{
         <EstadoBadge estado={detalle.estado} />
       </header>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="rounded-md border border-marca-naranja/40 bg-orange-50 p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">Efectivo declarado</p>
-          <p className="text-2xl font-extrabold text-slate-900">{formatoPesos(detalle.declaradoCentavos)}</p>
-          <p className="text-[11px] text-slate-500">Arqueo generado por el sistema: {horaLocal(detalle.declaradoEn)}</p>
-        </div>
-        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">Cobrado en efectivo según sistema</p>
-          <p className="text-2xl font-extrabold text-slate-700">{formatoPesos(detalle.efectivoCobradoCentavos)}</p>
-          <details className="text-[11px] text-slate-500">
-            <summary className="cursor-pointer">{detalle.cobrosEfectivo.length} cobro(s) en efectivo</summary>
-            <ul className="mt-1 space-y-0.5">
-              {detalle.cobrosEfectivo.map((cobro) => (
-                <li key={cobro.id} className="flex justify-between gap-2">
-                  <span>#{cobro.orden ?? '—'} {cobro.comercio}</span>
-                  <span className="font-semibold">{formatoPesos(cobro.importeCentavos)}</span>
-                </li>
-              ))}
-            </ul>
-          </details>
-        </div>
+      {/* Un solo recuadro: el arqueo lo genera el sistema con los cobros en efectivo, así que el monto a rendir es lo cobrado. */}
+      <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">Cobrado en efectivo</p>
+        <p className="text-2xl font-extrabold text-slate-700">{formatoPesos(detalle.efectivoCobradoCentavos)}</p>
+        <details className="text-[11px] text-slate-500">
+          <summary className="cursor-pointer">{detalle.cobrosEfectivo.length} cobro(s) en efectivo</summary>
+          <ul className="mt-1 space-y-0.5">
+            {detalle.cobrosEfectivo.map((cobro) => (
+              <li key={cobro.id} className="flex justify-between gap-2">
+                <span>#{cobro.orden ?? '—'} {cobro.comercio}</span>
+                <span className="font-semibold">{formatoPesos(cobro.importeCentavos)}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+        {/* Solo si el arqueo se inició antes de terminar la ruta y después entraron más cobros en efectivo. */}
+        {detalle.declaradoCentavos !== detalle.efectivoCobradoCentavos && (
+          <p role="alert" className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-[11px] font-semibold text-amber-900">
+            El arqueo se inició con {formatoPesos(detalle.declaradoCentavos)} a rendir ({horaLocal(detalle.declaradoEn)}) y los cobros en efectivo cambiaron después. El conteo se compara contra ese monto.
+          </p>
+        )}
       </div>
 
       {detalle.estado === 'con_diferencia' && detalle.diferenciaCentavos !== null && (
@@ -552,7 +552,7 @@ const DetalleDeclaracion: React.FC<{
               <span>Total contado: {formatoPesos(analisis.rendidoCentavos)}</span>
               <span>
                 {comparacion.tipo === 'coincide'
-                  ? 'Coincide con lo declarado'
+                  ? 'Coincide con lo cobrado'
                   : `${comparacion.tipo === 'faltante' ? 'Faltante' : 'Sobrante'} de ${formatoPesos(Math.abs(comparacion.diferenciaCentavos))}`}
               </span>
             </div>
