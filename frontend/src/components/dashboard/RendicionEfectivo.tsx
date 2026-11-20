@@ -23,12 +23,11 @@ import {
   RendicionRetractadaError,
 } from '../../services/rendicionEfectivoService';
 
-type Filtro = 'por_procesar' | 'aprobadas' | 'retractadas' | 'todas';
+type Filtro = 'por_procesar' | 'aprobadas' | 'todas';
 
 const FILTROS: Array<{ id: Filtro; label: string; estado?: string }> = [
   { id: 'por_procesar', label: 'Por procesar', estado: 'pendiente,con_diferencia' },
   { id: 'aprobadas', label: 'Aprobadas', estado: 'validada' },
-  { id: 'retractadas', label: 'Retractadas', estado: 'anulada' },
   { id: 'todas', label: 'Todas' },
 ];
 
