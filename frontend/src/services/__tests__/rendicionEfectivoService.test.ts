@@ -4,12 +4,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   analizarConteo,
   compararConDeclarado,
+  etiquetaRendicion,
   formConteoVacio,
   formDesdeConteo,
   justificacionValida,
   leerPesos,
   rendicionEfectivoService,
   RendicionRetractadaError,
+  resultadoAprobacion,
 } from '../rendicionEfectivoService';
 
 describe('HU #47 · Visualizar declaración de efectivo', () => {
@@ -94,6 +96,26 @@ describe('HU #50 · Aprobar rendición con diferencia', () => {
     expect(url).toMatch(/\/efectivo\/rendiciones\/3\/aprobar-con-diferencia$/);
     expect(JSON.parse(String(init.body))).toEqual({ rendidoCentavos: 4300000, conteo: null, motivo: 'El chofer reconoce el faltante' });
     vi.unstubAllGlobals();
+  });
+});
+
+describe('Aprobadas con faltante o con sobrante', () => {
+  it('separa las aprobadas según cómo cerró el conteo', () => {
+    expect(resultadoAprobacion({ estado: 'validada', tipoDiferencia: 'coincide' })).toBe('sin_diferencia');
+    expect(resultadoAprobacion({ estado: 'validada', tipoDiferencia: 'faltante' })).toBe('faltante');
+    expect(resultadoAprobacion({ estado: 'validada', tipoDiferencia: 'sobrante' })).toBe('sobrante');
+  });
+
+  it('una diferencia registrada pero todavía sin aprobar no cuenta como aprobada', () => {
+    expect(resultadoAprobacion({ estado: 'con_diferencia', tipoDiferencia: 'faltante' })).toBeNull();
+    expect(resultadoAprobacion({ estado: 'pendiente', tipoDiferencia: null })).toBeNull();
+  });
+
+  it('la etiqueta dice el descuadre solo en las aprobadas', () => {
+    expect(etiquetaRendicion({ estado: 'validada', tipoDiferencia: 'faltante' })).toBe('Aprobada con faltante');
+    expect(etiquetaRendicion({ estado: 'validada', tipoDiferencia: 'sobrante' })).toBe('Aprobada con sobrante');
+    expect(etiquetaRendicion({ estado: 'validada', tipoDiferencia: 'coincide' })).toBe('Aprobada');
+    expect(etiquetaRendicion({ estado: 'con_diferencia', tipoDiferencia: 'faltante' })).toBe('Con diferencia registrada');
   });
 });
 
