@@ -2131,11 +2131,6 @@ export const conciliacionService = {
           importeCentavos: asignacion.importeCentavos.toString(),
         };
         imputaciones.push(imputacion);
-        await client.query(
-          `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
-           VALUES ('imputacion', $1, 'alta', $2, $3::jsonb, 'Imputación bancaria E5-04')`,
-          [imputacion.id, usuarioId, JSON.stringify(imputacion)]
-        );
       }
 
       await client.query(
@@ -2251,17 +2246,18 @@ export const conciliacionService = {
           `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion) VALUES ('discrepancia_conciliacion', $1, 'aprobada', $2, $3::jsonb, $4)`,
           [discrepanciaId, usuarioId, JSON.stringify({ estado, movimientoIds, remitoIds, importeMovimiento: result.importeMovimiento.toString(), importeSeleccionado: result.importeSeleccionado.toString(), diferenciaCentavos: result.diferencia.toString() }), nota.trim()]
         );
+      } else {
+        await client.query(
+          `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
+           VALUES ('discrepancia_conciliacion', $1, $2, $3, $4::jsonb, $5)`,
+          [discrepanciaId, 'alta', usuarioId,
+            JSON.stringify({
+              movimientoIds,
+              remitoIds,
+              diferenciaCentavos: result.diferencia.toString(),
+            }), nota.trim()]
+        );
       }
-      await client.query(
-        `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
-         VALUES ('discrepancia_conciliacion', $1, $2, $3, $4::jsonb, $5)`,
-        [discrepanciaId, 'alta', usuarioId,
-          JSON.stringify({
-            movimientoIds,
-            remitoIds,
-            diferenciaCentavos: result.diferencia.toString(),
-          }), nota.trim()]
-      );
       return { id: discrepanciaId, movimientoIds, diferenciaCentavos: result.diferencia.toString(), estado };
     });
   },

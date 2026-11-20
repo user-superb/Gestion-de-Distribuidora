@@ -283,7 +283,7 @@ describe('Cola de operaciones sin conexión', () => {
 
     it('ESCENARIO 4: Registro de rechazo exitoso con motivo escrito manualmente sin conexión', async () => {
       respuesta = async () => { throw new ErrorRed(); };
-      const motivoManual = 'Cliente rechazó el bulto por tener fecha de vencimiento próxima';
+      const motivoManual = 'Cliente rechazó el pedido por tener fecha de vencimiento próxima';
       const ts = '2026-10-20T10:30:00.000Z';
       await cola.encolar(rechazo('104', motivoManual, ts));
 

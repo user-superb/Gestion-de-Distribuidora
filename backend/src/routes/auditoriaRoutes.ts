@@ -34,14 +34,30 @@ auditoriaRouter.get('/', async (req, res) => {
   const hasta = typeof req.query.hasta === 'string' ? req.query.hasta : '';
   const pagina = typeof req.query.pagina === 'string' ? Number(req.query.pagina) : 1;
   const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const accionesValidas = [
+    '',
+    'importacion_extracto',
+    'validacion',
+    'anulacion',
+    'reasignacion',
+    'conciliacion',
+    'carga_manual',
+    'discrepancia',
+    'arqueo_efectivo',
+    'cobro_movil',
+  ];
   if (email.length > 254 || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return res.status(400).json({ message: 'Ingresá un correo electrónico válido.' });
-  if (!['', 'importacion_extracto', 'validacion', 'anulacion', 'reasignacion'].includes(accion) || (cuenta && !/^[1-9]\d*$/.test(cuenta)) || !Number.isSafeInteger(pagina) || pagina < 1 || pagina > 100000) return res.status(400).json({ message: 'Los filtros son inválidos.' });
+  if (!accionesValidas.includes(accion) || (cuenta && !/^[1-9]\d*$/.test(cuenta)) || !Number.isSafeInteger(pagina) || pagina < 1 || pagina > 100000) return res.status(400).json({ message: 'Los filtros son inválidos.' });
   if ((desde && (!fechaValida(desde) || desde > hoy)) || (hasta && (!fechaValida(hasta) || hasta > hoy)) || (desde && hasta && desde > hasta)) return res.status(400).json({ message: 'El rango de fechas es inválido: revisá el orden y evitá fechas futuras.' });
   const condiciones: string[] = [];
   const params: unknown[] = [];
   const agregar = (sql: string, value: unknown) => { params.push(value); condiciones.push(sql.replace('?', `$${params.length}`)); };
   if (email) agregar('lower(u.email) = lower(?)', email);
   if (accion === 'validacion') condiciones.push("((a.entidad = 'rendicion_efectivo' AND a.accion = 'validacion') OR (a.entidad = 'discrepancia_conciliacion' AND a.accion = 'aprobada'))");
+  else if (accion === 'carga_manual') condiciones.push("a.accion IN ('alta_manual_transferencia', 'alta_manual_qr')");
+  else if (accion === 'discrepancia') condiciones.push("(a.entidad = 'discrepancia_conciliacion' AND a.accion IN ('alta', 'rechazada'))");
+  else if (accion === 'arqueo_efectivo') condiciones.push("(a.entidad = 'rendicion_efectivo' AND a.accion IN ('alta', 'modificacion'))");
+  else if (accion === 'cobro_movil') condiciones.push("(a.entidad = 'cobro' AND a.accion = 'alta')");
   else if (accion) agregar('a.accion = ?', accion);
   if (cuenta) { condiciones.push("a.entidad = 'cuenta_recepcion' AND a.accion = 'importacion_extracto'"); agregar('a.entidad_id = ?', cuenta); }
   if (desde) agregar('a.ocurrido_en >= ?', `${desde}T00:00:00-03:00`);

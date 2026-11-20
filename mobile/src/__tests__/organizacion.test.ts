@@ -10,7 +10,7 @@ import type { ItemCola } from '../sincronizacion/cola';
 import type { Remito, Visita } from '../tipos';
 
 const remito = (id: string, estado = 'en_ruta', importeCentavos = 1000): Remito => ({
-  id, numero: `R-${id}`, marca: 'Lácteos', importeCentavos, estado, bultos: 1,
+  id, numero: `R-${id}`, marca: 'Lácteos', importeCentavos, estado,
 });
 
 function visita(id: string, orden: number, remitos: Remito[], cobrada = false): Visita {

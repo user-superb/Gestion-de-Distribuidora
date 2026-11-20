@@ -124,7 +124,6 @@ export function calcularEstadoOperativoParada(visitas: Visita | Visita[], cola: 
 export interface GrupoRemitosMarca {
   marca: string;
   documentos: DocumentoAsociado[];
-  totalBultos: number;
   totalRemitos: number;
   totalImporteCentavos: number;
 }
@@ -148,7 +147,6 @@ export function agruparRemitosPorMarca(documentos: DocumentoAsociado[]): GrupoRe
     .map(([marca, docs]) => ({
       marca,
       documentos: docs,
-      totalBultos: docs.reduce((sum, d) => sum + d.bultos, 0),
       totalRemitos: docs.length,
       totalImporteCentavos: docs.reduce((sum, d) => sum + d.importeCentavos, 0),
     }))
@@ -213,24 +211,21 @@ export function consolidarParadas(visitas: Visita[], cola: ColaPorClave): Parada
         id: r.id,
         numero: r.numero,
         marca: r.marca,
-        bultos: r.bultos && r.bultos > 0 ? r.bultos : 1,
         importeCentavos: r.importeCentavos,
         estadoOperativo: estadoDocumento(r, cola),
         motivoNoEntrega: r.motivoNoEntrega || motivoEnCola,
       };
     });
 
-    const totalBultos = documentos.reduce((sum, d) => sum + d.bultos, 0);
     const totalImporteCentavos = visitasComercio.reduce((sum, v) => sum + (v.importe?.totalCentavos || 0), 0);
     const sinCobroEnDestino = totalImporteCentavos === 0;
 
     // Totalizadores por marca
-    const mapaMarca = new Map<string, { totalRemitos: number; totalBultos: number; totalImporteCentavos: number }>();
+    const mapaMarca = new Map<string, { totalRemitos: number; totalImporteCentavos: number }>();
     for (const doc of documentos) {
       const m = (doc.marca || 'Sin marca').trim();
-      const actual = mapaMarca.get(m) || { totalRemitos: 0, totalBultos: 0, totalImporteCentavos: 0 };
+      const actual = mapaMarca.get(m) || { totalRemitos: 0, totalImporteCentavos: 0 };
       actual.totalRemitos += 1;
-      actual.totalBultos += doc.bultos;
       actual.totalImporteCentavos += doc.importeCentavos;
       mapaMarca.set(m, actual);
     }
@@ -239,7 +234,6 @@ export function consolidarParadas(visitas: Visita[], cola: ColaPorClave): Parada
       .map(([marca, datos]) => ({
         marca,
         totalRemitos: datos.totalRemitos,
-        totalBultos: datos.totalBultos,
         totalImporteCentavos: datos.totalImporteCentavos,
       }))
       .sort((a, b) => a.marca.localeCompare(b.marca));
@@ -255,7 +249,6 @@ export function consolidarParadas(visitas: Visita[], cola: ColaPorClave): Parada
       estadoOperativo,
       marcas,
       totalRemitos: documentos.length,
-      totalBultos,
       totalImporteCentavos,
       sinCobroEnDestino,
       documentos,

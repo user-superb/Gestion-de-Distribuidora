@@ -9,8 +9,8 @@ import {
 } from '../dominio/parada';
 import type { HojaDeRuta, Remito, Visita } from '../tipos';
 
-function remito(id: string, numero: string, marca: string, importeCentavos: number, estado = 'pendiente', bultos = 1): Remito {
-  return { id, numero, marca, importeCentavos, estado, bultos };
+function remito(id: string, numero: string, marca: string, importeCentavos: number, estado = 'pendiente'): Remito {
+  return { id, numero, marca, importeCentavos, estado };
 }
 
 function visita(
@@ -72,10 +72,10 @@ describe('HU: Visualización de Hoja de Ruta por Parada (Comercio)', () => {
   });
 
   describe('Regla: Consolidación por comercio, carga y desglose de documentos', () => {
-    it('consolida múltiples remitos, bultos y marcas para un mismo comercio bajo una única parada', () => {
-      const r1 = remito('101', '0001-0001', 'Arcor', 120000, 'pendiente', 2);
-      const r2 = remito('102', '0001-0002', 'Bagley', 80000, 'pendiente', 3);
-      const r3 = remito('103', '0001-0003', 'Coca-Cola', 150000, 'pendiente', 1);
+    it('consolida múltiples remitos y marcas para un mismo comercio bajo una única parada', () => {
+      const r1 = remito('101', '0001-0001', 'Arcor', 120000, 'pendiente');
+      const r2 = remito('102', '0001-0002', 'Bagley', 80000, 'pendiente');
+      const r3 = remito('103', '0001-0003', 'Coca-Cola', 150000, 'pendiente');
 
       const v = visita('1', 1, 'Autoservicio Centro', [r1, r2, r3]);
 
@@ -85,7 +85,6 @@ describe('HU: Visualización de Hoja de Ruta por Parada (Comercio)', () => {
       const parada = paradas[0];
       assert.equal(parada.comercio.razonSocial, 'Autoservicio Centro');
       assert.equal(parada.totalRemitos, 3);
-      assert.equal(parada.totalBultos, 6); // 2 + 3 + 1
       assert.deepEqual(parada.marcas.sort(), ['Arcor', 'Bagley', 'Coca-Cola'].sort());
       assert.equal(parada.totalImporteCentavos, 350000);
       assert.equal(parada.sinCobroEnDestino, false);
@@ -93,14 +92,13 @@ describe('HU: Visualización de Hoja de Ruta por Parada (Comercio)', () => {
       // Desglose de documentos asociados
       assert.equal(parada.documentos.length, 3);
       assert.equal(parada.documentos[0].numero, '0001-0001');
-      assert.equal(parada.documentos[0].bultos, 2);
       assert.equal(parada.documentos[0].marca, 'Arcor');
       assert.equal(parada.documentos[0].estadoOperativo, 'Pendiente');
     });
 
     it('consolida múltiples visitas asignadas al mismo comercio en una sola parada en la vista principal', () => {
-      const r1 = remito('101', '0001-0001', 'Arcor', 100000, 'pendiente', 1);
-      const r2 = remito('102', '0001-0002', 'Bagley', 150000, 'pendiente', 2);
+      const r1 = remito('101', '0001-0001', 'Arcor', 100000, 'pendiente');
+      const r2 = remito('102', '0001-0002', 'Bagley', 150000, 'pendiente');
 
       const vA = visita('vA', 2, 'Distribuidora Norte', [r1], 'pendiente', 'comercio-42');
       const vB = visita('vB', 2, 'Distribuidora Norte', [r2], 'pendiente', 'comercio-42');
@@ -108,7 +106,6 @@ describe('HU: Visualización de Hoja de Ruta por Parada (Comercio)', () => {
       const paradas = consolidarParadas([vA, vB], colaVacia);
       assert.equal(paradas.length, 1);
       assert.equal(paradas[0].totalRemitos, 2);
-      assert.equal(paradas[0].totalBultos, 3);
       assert.equal(paradas[0].totalImporteCentavos, 250000);
     });
   });

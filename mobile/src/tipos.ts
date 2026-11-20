@@ -14,7 +14,6 @@ export interface Remito {
   importeCentavos: number;
   estado: string;
   motivoNoEntrega?: string | null;
-  bultos?: number;
 }
 
 export interface ImporteVisita {
@@ -62,7 +61,6 @@ export interface DocumentoAsociado {
   id: string;
   numero: string;
   marca: string;
-  bultos: number;
   importeCentavos: number;
   estadoOperativo: 'Pendiente' | 'Entregado' | 'Rechazado';
   motivoNoEntrega?: string | null;
@@ -71,7 +69,6 @@ export interface DocumentoAsociado {
 export interface ResumenCargaMarca {
   marca: string;
   totalRemitos: number;
-  totalBultos: number;
   totalImporteCentavos: number;
 }
 
@@ -84,7 +81,6 @@ export interface ParadaConsolidada {
   estadoOperativo: EstadoOperativoParada;
   marcas: string[];
   totalRemitos: number;
-  totalBultos: number;
   totalImporteCentavos: number;
   sinCobroEnDestino: boolean;
   documentos: DocumentoAsociado[];

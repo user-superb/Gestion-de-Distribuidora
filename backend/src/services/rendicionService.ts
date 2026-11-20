@@ -508,6 +508,10 @@ export const rendicionService = {
         throw new RendicionError('El monto contado coincide con lo declarado: no hay diferencia para registrar. Aprobá la rendición.', 422, { codigo: 'SIN_DIFERENCIA' });
       }
       const justificacion = validarJustificacion(body?.justificacion, 'justificacion');
+      const sinCambios =
+        rendicion.estado === 'con_diferencia' &&
+        rendicion.rendidoCentavos === rendidoCentavos &&
+        (rendicion.motivoDiferencia || '') === justificacion;
       await client.query(
         `UPDATE rendicion_efectivo
          SET estado = 'con_diferencia', rendido_centavos = $2, conteo_billetes = $3, motivo_diferencia = $4,
@@ -515,12 +519,14 @@ export const rendicionService = {
          WHERE id::text = $1`,
         [rendicion.id, rendidoCentavos, conteo ? JSON.stringify(conteo) : null, justificacion, supervisorId]
       );
-      await auditar(
-        client, rendicion.id, 'modificacion', supervisorId,
-        { estado: rendicion.estado, rendidoCentavos: rendicion.rendidoCentavos },
-        { estado: 'con_diferencia', rendidoCentavos, ...diferencia },
-        justificacion
-      );
+      if (!sinCambios) {
+        await auditar(
+          client, rendicion.id, 'modificacion', supervisorId,
+          { estado: rendicion.estado, rendidoCentavos: rendicion.rendidoCentavos },
+          { estado: 'con_diferencia', rendidoCentavos, ...diferencia },
+          justificacion
+        );
+      }
       return buscarRendicion(client, rendicion.id);
     });
   },

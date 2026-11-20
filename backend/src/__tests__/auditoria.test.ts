@@ -20,7 +20,12 @@ test('auditoría: permisos, filtros combinados, fechas y estados vacíos', async
     INSERT INTO auditoria VALUES
       (1, '2025-01-02T15:00:00Z', 'importacion_extracto', 'cuenta_recepcion', 1, 1, NULL, '{"archivo":"extracto.csv","insertados":2,"omitidosDuplicados":1}', NULL),
       (2, '2025-01-03T15:00:00Z', 'validacion', 'rendicion_efectivo', 5, 1, NULL, '{"declaradoCentavos":10000,"rendidoCentavos":9000}', 'Faltante'),
-      (3, '2025-01-04T15:00:00Z', 'reasignacion', 'hoja_de_ruta', 10, 2, NULL, '{}', NULL);
+      (3, '2025-01-04T15:00:00Z', 'reasignacion', 'hoja_de_ruta', 10, 2, NULL, '{}', NULL),
+      (4, '2025-01-05T15:00:00Z', 'alta_manual_transferencia', 'movimiento_bancario', 11, 1, NULL, '{"importeCentavos":"5000"}', 'Manual'),
+      (5, '2025-01-06T15:00:00Z', 'conciliacion', 'movimiento_bancario', 11, 1, NULL, '{"estado":"imputado"}', 'Conciliado'),
+      (6, '2025-01-07T15:00:00Z', 'alta', 'discrepancia_conciliacion', 8, 1, NULL, '{"diferenciaCentavos":"-500"}', 'Retención'),
+      (7, '2025-01-08T15:00:00Z', 'modificacion', 'rendicion_efectivo', 5, 2, NULL, '{"rendidoCentavos":9000}', 'Diferencia'),
+      (8, '2025-01-09T15:00:00Z', 'alta', 'cobro', 12, 2, NULL, '{"medioPago":"efectivo"}', NULL);
   `);
   const { Pool } = mem.adapters.createPg();
   const pool = new Pool() as any;
@@ -39,11 +44,16 @@ test('auditoría: permisos, filtros combinados, fechas y estados vacíos', async
     (authService as any).verifySession = async () => ({ valid: true, session: { role: 'Transportista' } });
     assert.equal((await request()).status, 403);
     (authService as any).verifySession = async () => ({ valid: true, session: { role: 'Administrativo' } });
-    const all = await request(); assert.equal(all.status, 200); assert.equal(((await all.json()) as any).registros.length, 3);
+    const all = await request(); assert.equal(all.status, 200); assert.equal(((await all.json()) as any).registros.length, 8);
     const combined = await request('?email=ANA%40EJEMPLO.COM&accion=importacion_extracto&cuenta=1&desde=2025-01-02&hasta=2025-01-02');
     assert.equal(combined.status, 200); const imported = ((await combined.json()) as any).registros;
     assert.equal(imported.length, 1); assert.equal(imported[0].cuenta_alias, 'Cuenta principal'); assert.equal(imported[0].valores_despues.omitidosDuplicados, 1);
     const validaciones = await request('?accion=validacion'); assert.equal(((await validaciones.json()) as any).registros.length, 1);
+    assert.equal(((await (await request('?accion=carga_manual')).json()) as any).registros.length, 1);
+    assert.equal(((await (await request('?accion=conciliacion')).json()) as any).registros.length, 1);
+    assert.equal(((await (await request('?accion=discrepancia')).json()) as any).registros.length, 1);
+    assert.equal(((await (await request('?accion=arqueo_efectivo')).json()) as any).registros.length, 1);
+    assert.equal(((await (await request('?accion=cobro_movil')).json()) as any).registros.length, 1);
     const empty = await request('?email=nadie%40ejemplo.com'); assert.deepEqual(((await empty.json()) as any).registros, []);
     const wrongAccount = await request('?accion=importacion_extracto&cuenta=2'); assert.deepEqual(((await wrongAccount.json()) as any).registros, []);
     assert.equal((await request('?desde=2025-02-01&hasta=2025-01-01')).status, 400);

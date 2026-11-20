@@ -237,4 +237,169 @@ WHERE s.nombre = 'Sucursal Central - La Plata'
       WHERE mb.cuenta_id = cr.id AND mb.referencia_externa = demo.referencia
   );
 
+-- 9. Limpieza de registros de auditoría repetidos/redundantes y set inicial variado
+DELETE FROM auditoria
+WHERE observacion IN ('232323232323', 'asdasdasdasd', 'mogolico', 'kjgkkhjjkhhkkhj')
+   OR (entidad = 'imputacion' AND accion = 'alta')
+   OR (entidad = 'movimiento_bancario' AND accion = 'alta');
+
+DELETE FROM auditoria a
+USING auditoria b
+WHERE a.id < b.id
+  AND a.entidad = b.entidad
+  AND a.entidad_id = b.entidad_id
+  AND a.accion = b.accion
+  AND a.usuario_id = b.usuario_id
+  AND COALESCE(a.observacion, '') = COALESCE(b.observacion, '');
+
+INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, ocurrido_en, valores_antes, valores_despues, observacion)
+SELECT
+  d.entidad,
+  d.entidad_id,
+  d.accion,
+  u.id,
+  now() - d.hace,
+  d.valores_antes::jsonb,
+  d.valores_despues::jsonb,
+  d.observacion
+FROM (VALUES
+  (
+    'seed-imp-extracto',
+    'cuenta_recepcion',
+    COALESCE((SELECT id FROM cuenta_recepcion ORDER BY id LIMIT 1), 1),
+    'importacion_extracto',
+    'admin',
+    interval '6 hours',
+    NULL,
+    '{"seedKey":"seed-imp-extracto","archivo":"extracto_octubre_central.csv","insertados":12,"omitidosDuplicados":2}',
+    'Importación de extracto bancario (12 insertados, 2 duplicados omitidos)'
+  ),
+  (
+    'seed-carga-transf',
+    'movimiento_bancario',
+    COALESCE((SELECT id FROM movimiento_bancario ORDER BY id LIMIT 1), 1),
+    'alta_manual_transferencia',
+    'admin',
+    interval '5 hours',
+    NULL,
+    '{"seedKey":"seed-carga-transf","ordenante":"Mayorista El Sol S.R.L.","referenciaExterna":"TR-MANUAL-8841","importeCentavos":"15700000","origen":"Carga Manual"}',
+    'Carga manual de transferencia bancaria con comprobante PDF'
+  ),
+  (
+    'seed-carga-qr',
+    'movimiento_bancario',
+    COALESCE((SELECT id FROM movimiento_bancario ORDER BY id DESC LIMIT 1), 2),
+    'alta_manual_qr',
+    'admin',
+    interval '4 hours',
+    NULL,
+    '{"seedKey":"seed-carga-qr","ordenante":"Autoservicio Luna","referenciaExterna":"MP-QR-2026-9912","importeCentavos":"6200000","origen":"QR - Carga Manual"}',
+    'Carga manual de cobro por QR acreditado en cuenta receptora'
+  ),
+  (
+    'seed-conciliacion',
+    'movimiento_bancario',
+    COALESCE((SELECT id FROM movimiento_bancario ORDER BY id LIMIT 1), 1),
+    'conciliacion',
+    'admin',
+    interval '3 hours',
+    NULL,
+    '{"seedKey":"seed-conciliacion","estado":"imputado","imputaciones":[{"remitoId":"1","importeCentavos":"15000000"},{"remitoId":"2","importeCentavos":"700000"}]}',
+    'Conciliación bancaria confirmada contra remitos entregados'
+  ),
+  (
+    'seed-disc-alta',
+    'discrepancia_conciliacion',
+    101::bigint,
+    'alta',
+    'admin',
+    interval '2 hours 30 minutes',
+    NULL,
+    '{"seedKey":"seed-disc-alta","movimientoIds":["2"],"remitoIds":["3"],"diferenciaCentavos":"-100000"}',
+    'Diferencia por retención impositiva derivada a bandeja de aprobación'
+  ),
+  (
+    'seed-disc-aprobada',
+    'discrepancia_conciliacion',
+    101::bigint,
+    'aprobada',
+    'gerencia',
+    interval '2 hours',
+    NULL,
+    '{"seedKey":"seed-disc-aprobada","estado":"aprobada","movimientoIds":["2"],"remitoIds":["3"],"importeMovimiento":"15600000","importeSeleccionado":"15700000","diferenciaCentavos":"-100000"}',
+    'Discrepancia aprobada con reducción de saldo por descuento comercial'
+  ),
+  (
+    'seed-disc-rechazada',
+    'discrepancia_conciliacion',
+    102::bigint,
+    'rechazada',
+    'gerencia',
+    interval '1 hour 45 minutes',
+    NULL,
+    '{"seedKey":"seed-disc-rechazada","estado":"rechazada","movimientoIds":["3"],"remitoIds":["4"],"diferenciaCentavos":"100000"}',
+    'Rechazo de discrepancia por comprobante ilegible; vuelve a pendientes'
+  ),
+  (
+    'seed-cobro-movil',
+    'cobro',
+    COALESCE((SELECT id FROM cobro ORDER BY id LIMIT 1), 1),
+    'alta',
+    'chofer',
+    interval '1 hour 30 minutes',
+    NULL,
+    '{"seedKey":"seed-cobro-movil","visitaId":"1","medioPago":"efectivo","importeCentavos":4500000}',
+    'Cobro en efectivo registrado en punto de entrega desde app móvil'
+  ),
+  (
+    'seed-arqueo-dif',
+    'rendicion_efectivo',
+    COALESCE((SELECT id FROM rendicion_efectivo ORDER BY id LIMIT 1), 1),
+    'modificacion',
+    'supervisor',
+    interval '1 hour',
+    '{"estado":"pendiente"}',
+    '{"seedKey":"seed-arqueo-dif","estado":"con_diferencia","declaradoCentavos":7270000,"rendidoCentavos":7000000,"diferenciaCentavos":-270000,"tipo":"faltante"}',
+    'Faltante físico de $2.700 constatado en arqueo de billetes'
+  ),
+  (
+    'seed-arqueo-val',
+    'rendicion_efectivo',
+    COALESCE((SELECT id FROM rendicion_efectivo ORDER BY id DESC LIMIT 1), 2),
+    'validacion',
+    'supervisor',
+    interval '45 minutes',
+    '{"estado":"pendiente"}',
+    '{"seedKey":"seed-arqueo-val","estado":"validada","hojaDeRutaId":"1","declaradoCentavos":5465000,"rendidoCentavos":5465000}',
+    'Rendición física de efectivo validada y hoja de ruta cerrada'
+  ),
+  (
+    'seed-reasig-ruta',
+    'hoja_de_ruta',
+    COALESCE((SELECT id FROM hoja_de_ruta ORDER BY id LIMIT 1), 1),
+    'reasignacion',
+    'admin_sistema',
+    interval '30 minutes',
+    '{"transportista_id":"4"}',
+    '{"seedKey":"seed-reasig-ruta","hoja_de_ruta_id":"1","transportista_id":"3"}',
+    'Reasignación operativa de transportista antes del despacho'
+  ),
+  (
+    'seed-anul-rend',
+    'rendicion_efectivo',
+    COALESCE((SELECT id FROM rendicion_efectivo ORDER BY id DESC LIMIT 1), 3),
+    'anulacion',
+    'chofer2',
+    interval '15 minutes',
+    '{"estado":"pendiente"}',
+    '{"seedKey":"seed-anul-rend","estado":"anulada"}',
+    'Declaración de efectivo retractada antes del arqueo de caja'
+  )
+) AS d(seed_key, entidad, entidad_id, accion, usuario_login, hace, valores_antes, valores_despues, observacion)
+JOIN usuario u ON u.usuario = d.usuario_login
+WHERE NOT EXISTS (
+  SELECT 1 FROM auditoria a
+  WHERE a.valores_despues->>'seedKey' = d.seed_key
+);
+
 COMMIT;

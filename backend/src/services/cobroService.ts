@@ -400,31 +400,11 @@ async function imputarCobroEfectivoARemitos(
       );
       if (existenteRes.rows.length > 0) continue;
 
-      const ins = await client.query(
+      await client.query(
         `INSERT INTO imputacion (cobro_id, remito_id, importe_centavos, imputado_por)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id::text AS id`,
+         VALUES ($1, $2, $3, $4)`,
         [cobroId, row.id, aImputar.toString(), usuarioId]
       );
-      const impId = ins.rows[0]?.id;
-      if (impId) {
-        await client.query(
-          `INSERT INTO auditoria (entidad, entidad_id, accion, usuario_id, valores_despues, observacion)
-           VALUES ('imputacion', $1, 'alta', $2, $3::jsonb, $4)`,
-          [
-            impId,
-            usuarioId,
-            JSON.stringify({
-              cobroId,
-              visitaId,
-              remitoId: row.id,
-              medioPago: 'efectivo',
-              importeCentavos: aImputar.toString(),
-            }),
-            'Imputación automática por cobro en efectivo en punto de entrega',
-          ]
-        );
-      }
       restante -= aImputar;
     }
   } catch (err: any) {

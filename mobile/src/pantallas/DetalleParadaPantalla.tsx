@@ -99,7 +99,7 @@ export function DetalleParadaPantalla({
 
       {/* ARRIBA: Listado Detallado de Remitos */}
       <Text style={estilos.seccionTitulo}>Remitos</Text>
-      <View style={{ gap: 14 }} testID="remitos-clasificados">
+      <View style={{ gap: 8 }} testID="remitos-clasificados">
         {gruposMarca.map((grupo) => (
           <View key={grupo.marca} style={estilos.tarjetaMarca}>
             {/* Cabecera del Grupo de Marca */}
@@ -107,13 +107,13 @@ export function DetalleParadaPantalla({
               <View style={[estilos.marcaBadge, { flexShrink: 1 }]}>
                 <Text style={estilos.marcaBadgeTexto}>🏷️ {grupo.marca}</Text>
               </View>
-              <Text style={[estilos.textoSuave, { fontWeight: '600', fontSize: 13, flexShrink: 0 }]}>
-                {grupo.totalBultos} {grupo.totalBultos === 1 ? 'bulto' : 'bultos'} · {grupo.totalRemitos} {grupo.totalRemitos === 1 ? 'remito' : 'remitos'}
+              <Text style={[estilos.textoSuave, { fontWeight: '600', fontSize: 12, flexShrink: 0 }]}>
+                {grupo.totalRemitos} {grupo.totalRemitos === 1 ? 'remito' : 'remitos'}
               </Text>
             </View>
 
             {/* Lista de Remitos */}
-            <View style={{ gap: 8 }}>
+            <View style={{ gap: 5 }}>
               {grupo.documentos.map((doc) => {
                 const colorEstado =
                   doc.estadoOperativo === 'Entregado'
@@ -126,42 +126,40 @@ export function DetalleParadaPantalla({
                   <View
                     key={doc.id}
                     style={estilos.remitoItemDetalle}
-                    accessibilityLabel={`${doc.numero}, ${doc.marca}, ${doc.bultos} bultos, estado ${doc.estadoOperativo}`}
+                    accessibilityLabel={`${doc.numero}, ${doc.marca}, estado ${doc.estadoOperativo}`}
                   >
                     <View style={estilos.remitoItemDetalleFila}>
-                      <Text style={[estilos.texto, { fontWeight: '700', fontSize: 15 }]}>
-                        {doc.numero}
-                      </Text>
-                      <View
-                        style={[
-                          estilos.badge,
-                          {
-                            backgroundColor:
-                              doc.estadoOperativo === 'Entregado'
-                                ? colores.okFondo
-                                : doc.estadoOperativo === 'Rechazado'
-                                ? colores.errorFondo
-                                : colores.neutroSuave,
-                          },
-                        ]}
-                      >
-                        <Text style={{ fontWeight: '700', fontSize: 12, color: colorEstado }}>
-                          {doc.estadoOperativo}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, flexShrink: 1 }}>
+                        <Text style={[estilos.texto, { fontWeight: '700', fontSize: 14 }]} numberOfLines={1}>
+                          {doc.numero}
                         </Text>
+                        <View
+                          style={[
+                            estilos.badge,
+                            {
+                              paddingHorizontal: 6,
+                              paddingVertical: 2,
+                              backgroundColor:
+                                doc.estadoOperativo === 'Entregado'
+                                  ? colores.okFondo
+                                  : doc.estadoOperativo === 'Rechazado'
+                                  ? colores.errorFondo
+                                  : colores.neutroSuave,
+                            },
+                          ]}
+                        >
+                          <Text style={{ fontWeight: '700', fontSize: 11, color: colorEstado }}>
+                            {doc.estadoOperativo}
+                          </Text>
+                        </View>
                       </View>
-                    </View>
-
-                    <View style={estilos.remitoItemDetalleFila}>
-                      <Text style={[estilos.textoSuave, estilos.textoFlexible]}>
-                        📦 {doc.bultos} {doc.bultos === 1 ? 'bulto' : 'bultos'}
-                      </Text>
-                      <Text style={[estilos.texto, estilos.importeFijo, { fontWeight: '600' }]}>
+                      <Text style={[estilos.texto, estilos.importeFijo, { fontSize: 15 }]}>
                         {formatearPesos(doc.importeCentavos)}
                       </Text>
                     </View>
 
                     {doc.motivoNoEntrega ? (
-                      <Text style={[estilos.textoSuave, { color: colores.error, fontSize: 13, marginTop: 4, fontWeight: '600' }]}>
+                      <Text style={[estilos.textoSuave, { color: colores.error, fontSize: 12, fontWeight: '600' }]}>
                         Motivo no entrega: {doc.motivoNoEntrega}
                       </Text>
                     ) : null}
@@ -176,13 +174,6 @@ export function DetalleParadaPantalla({
       {/* ABAJO: Totalizador General de la Parada */}
       <Text style={estilos.seccionTitulo}>Total General de la Parada</Text>
       <View style={estilos.tarjetaTotalizador} testID="totalizador-general">
-        <View style={estilos.tarjetaTotalizadorFila}>
-          <Text style={estilos.resumenCargaTexto}>📦 Total Bultos:</Text>
-          <Text style={estilos.totalizadorValor}>
-            {parada.totalBultos} {parada.totalBultos === 1 ? 'bulto' : 'bultos'}
-          </Text>
-        </View>
-
         <View style={estilos.tarjetaTotalizadorFila}>
           <Text style={estilos.resumenCargaTexto}>📄 Total Remitos:</Text>
           <Text style={estilos.totalizadorValor}>
